@@ -5,7 +5,7 @@ description: Populate the approved Arabic Monday Meeting PowerPoint deck from th
 
 # Monday Meeting Report
 
-Populate the approved bundled PowerPoint design master with the current weekly data. The legacy filename `MM_W38.pptx` is only the internal asset name; **W38 is not a report version, data source, or week selector**. Excel from the current request is the sole source of weekly content, and the PowerPoint master is the sole source of design.
+Populate the approved bundled PowerPoint design master with the current weekly data. The bundled master is `assets/monday-meeting-master.pptx`. Excel from the current request is the sole source of weekly content, and the PowerPoint master is the sole source of design.
 
 This skill is intentionally independent from `weekly-consolidated-report`. Do not import transaction rules, summary-table rules, slide order, or redesign behavior from the weekly consolidated report. If another reporting skill conflicts with this page, this skill controls the Monday Meeting deck.
 
@@ -14,7 +14,7 @@ This skill is intentionally independent from `weekly-consolidated-report`. Do no
 - `مواضيع الأسبوع.xlsx` or the equivalent weekly topics workbook: use `Sheet1` as the agenda source. The sample structure is the same as `32 مواضيع الأسبوع.xlsx`; the weekly values may change.
 - `ملخص وتفاصيل المهام الاستراتيجية.xlsx`: sheets `ملخص المهام` and `تفاصيل المهام`.
 - `ملخص_مشاريع_سهيل.xlsx`: sheets `ملخص مشاريع سهيل` and `تفاصيل مشاريع سهيل`.
-- Approved PowerPoint design master: bundled inside this skill as complete bundled master under the legacy internal name `MM_W38.pptx`. Treat that name as an implementation detail only. The latest approved visual QA reference is `MM_2026-09-20.pptx`, and no weekly values may ever be taken from either PowerPoint file. The user does **not** upload the master during normal use.
+- Approved PowerPoint design master: bundled inside this skill as `assets/monday-meeting-master.pptx`. The latest approved visual QA reference is `MM_2026-09-20.pptx`, and no weekly values may ever be taken from either PowerPoint file. The user does **not** upload the master during normal use.
 - At runtime, always use the new Excel files attached to the request. The files used to define this skill are structural examples only; never reuse their weekly values as production data.
 - Save the result as a new `.pptx`. Never overwrite the restored template or any Excel input.
 - Create a PDF only when the user asks for one.
@@ -22,9 +22,9 @@ This skill is intentionally independent from `weekly-consolidated-report`. Do no
 - Validate the three workbooks structurally, not only by filename: the topics workbook must contain `Sheet1` with `الترتيب`, `الموضوع`, `المتحدث`, and `الوقت المطلوب من المالك`; the tasks workbook must contain `ملخص المهام` and `تفاصيل المهام`; the Suhail workbook must contain `ملخص مشاريع سهيل` and `تفاصيل مشاريع سهيل`.
 - If any required Excel workbook is missing or does not match the expected structure, stop before generation and ask only for the missing/incorrect workbook, naming it explicitly. Do not ask for the PowerPoint template during normal use: the approved template is bundled inside this skill and must be restored from the bundled assets.
 
-Approved template SHA-256 for the bundled master `MM_W38.pptx`: `0a91475077b86cb2c0d8e2089eb8016ea665cf8c0eb86dc655bf45f40b7eb69e`.
+Approved template SHA-256 for the bundled master `monday-meeting-master.pptx`: `6f66a2e16d370e24e26b208b6b75f8b036f573430cc735d40e2f102fddf59db3`.
 
-Latest visual QA reference reviewed on 20 September 2026: `MM_2026-09-20.pptx`. It is a populated 18-slide reference used to verify the current slide/shape placement and visual result; it is **not** a runtime input and must never be requested from the user. The bundled `MM_W38.pptx` remains the restorable master asset used for generation.
+Latest visual QA reference reviewed on 20 September 2026: `MM_2026-09-20.pptx`. It is a populated 18-slide reference used to verify the current slide/shape placement and visual result; it is **not** a runtime input and must never be requested from the user. The bundled `monday-meeting-master.pptx` is the restorable master asset used for generation.
 
 ## Bundled implementation
 
@@ -37,10 +37,10 @@ monday-meeting-report/
 │   ├── report_gate_v2.py
 │   └── restore_template.py
 └── assets/
-    └── MM_W38.pptx
+    └── monday-meeting-master.pptx
 ```
 
-The complete approved master is bundled as `assets/MM_W38.pptx` (legacy name only). Its SHA-256 is `0a91475077b86cb2c0d8e2089eb8016ea665cf8c0eb86dc655bf45f40b7eb69e`. `restore_template.py` verifies that asset and copies it into the working `template/` directory when needed. Run `build_report.py` with the three current Excel inputs; `report_gate_v2.py` is the current mandatory final repair and QA gate.
+The complete approved master is bundled as `assets/monday-meeting-master.pptx`. Its SHA-256 is `6f66a2e16d370e24e26b208b6b75f8b036f573430cc735d40e2f102fddf59db3`. `restore_template.py` verifies that asset and copies it into the working `template/` directory when needed. Run `build_report.py` with the three current Excel inputs; `report_gate_v2.py` is the current mandatory final repair and QA gate.
 
 ## Python runtime and automatic bootstrap
 
@@ -379,7 +379,7 @@ Do not shrink 11 pt text to 10 pt, omit a title row, or reuse a previous-week ro
 
 ### Template-version rule
 
-The legacy asset name `MM_W38.pptx` is an internal filename only. It must never be interpreted as week 38 data. The current visual acceptance reference remains `MM_2026-09-20.pptx`. If the restored bundled master renders differently from that reference in layout, title rows, fonts, sizes, or table geometry, stop and report a template-asset mismatch rather than silently continuing.
+The runtime master asset is `monday-meeting-master.pptx`. The current visual acceptance reference remains `MM_2026-09-20.pptx`. If the restored bundled master renders differently from that reference in layout, title rows, fonts, sizes, or table geometry, stop and report a template-asset mismatch rather than silently continuing.
 
 ### Delivery rule
 

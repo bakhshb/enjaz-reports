@@ -170,7 +170,7 @@ def patch_charts(pptx, task_rows, suhail_rows):
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template')
-    a=ap.parse_args(); template=Path(a.template) if a.template else Path(__file__).resolve().parents[1]/'template'/'MM_W38.pptx'
+    a=ap.parse_args(); template=Path(a.template) if a.template else Path(__file__).resolve().parents[1]/'template'/'monday-meeting-master.pptx'
     if not template.exists() and not a.template:
         subprocess.run([sys.executable,str(Path(__file__).with_name('restore_template.py'))],check=True)
     if not template.exists(): raise FileNotFoundError(template)
