@@ -7,14 +7,18 @@
 #   "python-pptx>=1.0",
 # ]
 # ///
-import argparse, copy, datetime as dt, os, re, shutil, subprocess, sys, tempfile, zipfile
+import argparse, copy, datetime as dt, math, os, re, shutil, statistics, subprocess, sys, tempfile, zipfile
 from pathlib import Path
 from lxml import etree
 import openpyxl
 from pptx import Presentation
+from pptx.oxml.xmlchemy import OxmlElement
+from pptx.oxml.ns import qn
 
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
 MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+AGENDA_HEADERS=['م','جدول الأعمال','المسؤول','المدة الزمنية (بالدقيقة)']
+
 
 def val(v):
     if v is None: return ''
@@ -22,12 +26,10 @@ def val(v):
     if isinstance(v, float) and v.is_integer(): return str(int(v))
     return str(v)
 
+
 def set_text(shape, value):
     tf=shape.text_frame; text=val(value)
     lines=text.splitlines() or ['']
-    # Preserve template paragraph/run formatting instead of collapsing all
-    # source text into the first run. This keeps approved mixed formatting
-    # such as a bold "تاريخ التحديث" line followed by regular body text.
     while len(tf.paragraphs)<len(lines):
         src=tf.paragraphs[1]._p if len(tf.paragraphs)>1 else tf.paragraphs[0]._p
         tf._txBody.append(copy.deepcopy(src))
@@ -38,6 +40,18 @@ def set_text(shape, value):
             for r in p.runs[1:]: r.text=''
         elif line:
             p.add_run().text=line
+
+
+def clear_cell_bullets(cell):
+    for p in cell.text_frame.paragraphs:
+        pPr=p._p.get_or_add_pPr()
+        for child in list(pPr):
+            if child.tag in {qn('a:buChar'),qn('a:buAutoNum'),qn('a:buBlip'),qn('a:buNone')}:
+                pPr.remove(child)
+        pPr.insert(0,OxmlElement('a:buNone'))
+
+def set_cell_text(cell,value):
+    set_text(cell,value); clear_cell_bullets(cell)
 
 def shape_by_id(slide, sid):
     def walk(items):
@@ -50,51 +64,222 @@ def shape_by_id(slide, sid):
     if not x: raise KeyError(f'shape {sid} not found')
     return x
 
-def resize_table(table, rows_needed):
+
+def recursive_text(shape):
+    out=[]
+    if getattr(shape,'has_text_frame',False) and shape.text.strip(): out.append(shape.text.strip())
+    if getattr(shape,'shape_type',None)==6:
+        for child in shape.shapes: out.extend(recursive_text(child))
+    return out
+
+
+def slide_texts(slide):
+    out=[]
+    for sh in slide.shapes: out.extend(recursive_text(sh))
+    return out
+
+
+def resize_table(table, rows_needed, body_template_index=None):
     tbl=table._tbl
+    if body_template_index is None:
+        body_template_index=max(0,len(table.rows)-1)
     while len(table.rows)<rows_needed:
-        tbl.append(copy.deepcopy(tbl.tr_lst[-1]))
+        src=table.rows[min(body_template_index,len(table.rows)-1)]._tr
+        tbl.append(copy.deepcopy(src))
     while len(table.rows)>rows_needed:
         tbl.remove(tbl.tr_lst[-1])
 
-def fill_table(shape, rows, title=None):
-    t=shape.table; resize_table(t, 2+len(rows))
-    if title is not None:
-        for j,c in enumerate(t.rows[0].cells): set_text(c, title if j==0 else '')
-    for i,row in enumerate(rows,2):
-        for j,x in enumerate(row): set_text(t.cell(i,j),x)
 
-def header_map(ws, row):
+def _body_base_height(table, fixed_rows):
+    hs=[table.rows[i].height for i in range(fixed_rows,len(table.rows)) if table.rows[i].height]
+    if hs: return int(statistics.median(hs))
+    return 520000
+
+
+def fill_titled_table(shape, rows, title=None, weights=None):
+    t=shape.table
+    base=_body_base_height(t,2)
+    title_h=t.rows[0].height; header_h=t.rows[1].height
+    resize_table(t,2+len(rows),2 if len(t.rows)>2 else len(t.rows)-1)
+    if title is not None:
+        for j,c in enumerate(t.rows[0].cells): set_cell_text(c,title if j==0 else '')
+    for i,row in enumerate(rows,2):
+        for j,x in enumerate(row): set_cell_text(t.cell(i,j),x)
+    if weights is None: weights=[1]*len(rows)
+    for i,w in enumerate(weights,2): t.rows[i].height=max(base,int(base*w))
+    if title_h: t.rows[0].height=title_h
+    if header_h: t.rows[1].height=header_h
+    shape.height=sum((r.height or 0) for r in t.rows)
+
+
+def fill_agenda_table(shape, rows, weights=None):
+    t=shape.table
+    base=_body_base_height(t,1); header_h=t.rows[0].height
+    resize_table(t,1+len(rows),1 if len(t.rows)>1 else 0)
+    for j,x in enumerate(AGENDA_HEADERS): set_cell_text(t.cell(0,j),x)
+    for i,row in enumerate(rows,1):
+        for j,x in enumerate(row): set_cell_text(t.cell(i,j),x)
+    if weights is None: weights=[1]*len(rows)
+    for i,w in enumerate(weights,1): t.rows[i].height=max(base,int(base*w))
+    if header_h: t.rows[0].height=header_h
+    shape.height=sum((r.height or 0) for r in t.rows)
+
+
+def estimate_lines(text,width_inches,font_pt):
+    text=val(text).strip()
+    if not text: return 1
+    # Arabic at the approved font sizes is typically around 10-13 visible
+    # characters per inch; use a conservative estimate so long records move
+    # to a continuation page before they become cramped.
+    chars_per_line=max(6,int(width_inches*(12 if font_pt<=11 else 10)))
+    return sum(max(1,math.ceil(len(part)/chars_per_line)) for part in text.splitlines() or [''])
+
+
+def row_units(row, table, font_pt=11):
+    widths=[c.width/914400 for c in table.columns]
+    lines=max(estimate_lines(x,widths[i] if i<len(widths) else 1.5,font_pt) for i,x in enumerate(row))
+    return max(1,math.ceil(lines/3))
+
+
+def paginate_rows(rows, shape, fixed_rows=2, font_pt=11, capacity_units=None):
+    t=shape.table
+    if capacity_units is None: capacity_units=max(1,len(t.rows)-fixed_rows)
+    pages=[]; cur=[]; weights=[]; used=0
+    for row in rows:
+        w=min(capacity_units,row_units(row,t,font_pt))
+        if cur and used+w>capacity_units:
+            pages.append((cur,weights)); cur=[]; weights=[]; used=0
+        cur.append(row); weights.append(w); used+=w
+    if cur or not pages: pages.append((cur,weights))
+    return pages
+
+
+def slide_index(prs,target):
+    for i,sl in enumerate(prs.slides):
+        if sl.part is target.part: return i
+    raise ValueError('slide is not in presentation')
+
+
+def clone_slide(prs,source,after=None,shape_predicate=None):
+    dest=prs.slides.add_slide(source.slide_layout)
+    for sh in list(dest.shapes):
+        el=sh.element; el.getparent().remove(el)
+    for sh in source.shapes:
+        if shape_predicate is None or shape_predicate(sh):
+            dest.shapes._spTree.insert_element_before(copy.deepcopy(sh.element),'p:extLst')
+    for k,v in source._element.attrib.items(): dest._element.set(k,v)
+    if after is not None:
+        lst=prs.slides._sldIdLst; el=lst[-1]; lst.remove(el); lst.insert(slide_index(prs,after)+1,el)
+    return dest
+
+
+def remove_slide(prs,slide):
+    idx=slide_index(prs,slide); sldId=prs.slides._sldIdLst[idx]; rid=sldId.rId
+    prs.slides._sldIdLst.remove(sldId); prs.part.drop_rel(rid)
+
+
+def tables(slide,cols=None):
+    out=[sh for sh in slide.shapes if getattr(sh,'has_table',False)]
+    return [sh for sh in out if cols is None or len(sh.table.columns)==cols]
+
+
+def first_table(slide,cols):
+    xs=tables(slide,cols)
+    if not xs: raise ValueError(f'{cols}-column table pattern missing')
+    return xs[0]
+
+
+def find_slide_with_text(prs,text,require_table=None):
+    for sl in prs.slides:
+        if text in slide_texts(sl):
+            if require_table is None or bool(tables(sl))==require_table: return sl
+    raise ValueError(f'slide pattern missing: {text}')
+
+
+def find_pattern_slides(prs,cols):
+    return [sl for sl in prs.slides if tables(sl,cols)]
+
+
+def canonical_pattern(slides,cols,fixed_rows=2):
+    if not slides: raise ValueError(f'no {cols}-column table pattern in master')
+    return max(slides,key=lambda sl:max(len(sh.table.rows)-fixed_rows for sh in tables(sl,cols)))
+
+
+def summary_capacity(prs,shape,fixed_rows=2,margin_inches=.95):
+    t=shape.table; base=_body_base_height(t,fixed_rows)
+    max_h=prs.slide_height-shape.top-int(margin_inches*914400)
+    fixed=sum((t.rows[i].height or 0) for i in range(min(fixed_rows,len(t.rows))))
+    return max(len(t.rows)-fixed_rows,int(max(0,max_h-fixed)/max(1,base)))
+
+
+def fill_summary_pages(prs,source_slide,table_shape,rows,title,section_title):
+    capacity=summary_capacity(prs,table_shape,2)
+    pages=paginate_rows(rows,table_shape,2,11,capacity)
+    target_slides=[source_slide]
+    last=source_slide
+    # A continuation summary page needs only the approved section heading,
+    # decorative heading lines, and the table; charts/KPIs remain on page one.
+    def keep(sh):
+        if getattr(sh,'has_table',False) and sh.shape_id==table_shape.shape_id: return True
+        if getattr(sh,'has_text_frame',False) and sh.text.strip()==section_title: return True
+        if getattr(sh,'shape_type',None)==9 and sh.top<int(.65*914400): return True
+        return False
+    for _ in range(1,len(pages)):
+        last=clone_slide(prs,source_slide,after=last,shape_predicate=keep); target_slides.append(last)
+    for i,(chunk,weights) in enumerate(pages):
+        sh=shape_by_id(target_slides[i],table_shape.shape_id)
+        fill_titled_table(sh,chunk,title=title,weights=weights)
+        if i:
+            for x in target_slides[i].shapes:
+                if getattr(x,'has_text_frame',False) and x.text.strip()==section_title:
+                    set_text(x,section_title+' (تابع)')
+    return target_slides
+
+
+def validate_master_patterns(prs):
+    agenda=[sh for sl in prs.slides for sh in tables(sl,4) if len(sh.table.rows)>=1]
+    task_detail=find_pattern_slides(prs,7); suhail_detail=find_pattern_slides(prs,6)
+    if not agenda: raise ValueError('agenda table pattern missing from master')
+    if not task_detail: raise ValueError('task detail table pattern missing from master')
+    if not suhail_detail: raise ValueError('Suhail detail table pattern missing from master')
+    if not any(getattr(sh,'has_chart',False) for sl in prs.slides for sh in sl.shapes):
+        raise ValueError('summary chart patterns missing from master')
+
+
+def header_map(ws,row):
     return {str(c.value).strip():c.column for c in ws[row] if c.value is not None}
+
 
 def agenda_rows(path):
     ws=openpyxl.load_workbook(path,data_only=True)['Sheet1']; hm=header_map(ws,2); out=[]; found=False
     for r in range(3,ws.max_row+1):
-        topic=val(ws.cell(r,hm['الموضوع']).value).strip()
-        order=ws.cell(r,hm['الترتيب']).value
+        topic=val(ws.cell(r,hm['الموضوع']).value).strip(); order=ws.cell(r,hm['الترتيب']).value
         if order not in (None,''):
             out.append((f'{int(order):02d}',topic,val(ws.cell(r,hm['المتحدث']).value),val(ws.cell(r,hm['الوقت المطلوب من المالك']).value)))
         if re.sub(r'\s+',' ',topic)=='ملخص الاجتماع': found=True; break
     if not found: raise ValueError('ملخص الاجتماع is missing from topics workbook')
     return out
 
-def find_header(ws, labels, start=1):
+
+def find_header(ws,labels,start=1):
     labels=[x.strip() for x in labels]
     for r in range(start,ws.max_row+1):
         got=[val(ws.cell(r,c).value).strip() for c in range(1,len(labels)+1)]
-        if got==labels: return r
+        if got==labels:return r
     raise ValueError(f'header not found: {labels}')
 
-def read_block(ws, header_row, cols, stop_titles=()):
+
+def read_block(ws,header_row,cols,stop_titles=()):
     out=[]
     for r in range(header_row+1,ws.max_row+1):
         first=val(ws.cell(r,1).value).strip()
-        if first in stop_titles or (first and all(ws.cell(r,c).value is None for c in range(2,cols+1))): break
+        if first in stop_titles or (first and all(ws.cell(r,c).value is None for c in range(2,cols+1))):break
         row=[ws.cell(r,c).value for c in range(1,cols+1)]
-        if any(x not in (None,'') for x in row): out.append(row)
+        if any(x not in (None,'') for x in row):out.append(row)
     return out
 
-def detail_sections(ws, cols):
+
+def detail_sections(ws,cols):
     out=[]; r=1
     expected_task=['#','المهمة','القطاع','تاريخ الانجاز المخطط','الحالة','ملاحظات','الجهات ذات العلاقة']
     expected_proj=['#','اسم المشروع','تاريخ البداية','تاريخ النهاية','الحالة','ما تم حتى تاريخه']
@@ -102,133 +287,145 @@ def detail_sections(ws, cols):
     while r<=ws.max_row:
         got=[val(ws.cell(r,c).value).strip() for c in range(1,cols+1)]
         if got==expected:
-            title=val(ws.cell(r-1,1).value).strip()
-            title=re.sub(r'^مهام مصدر\s*\((.*)\)$',r'\1',title)
+            title=val(ws.cell(r-1,1).value).strip(); title=re.sub(r'^مهام مصدر\s*\((.*)\)$',r'\1',title)
             out.append((title,read_block(ws,r,cols)))
         r+=1
     return out
 
+
 def task_data(path):
     wb=openpyxl.load_workbook(path,data_only=True); s=wb['ملخص المهام']
     k=[s.cell(r,2).value for r in range(2,7)]
-    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','معلق'])
-    chart=read_block(s,hr,5)
+    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','معلق']); chart=read_block(s,hr,5)
     cr=find_header(s,['#','المهمة','القطاع'],hr+1); completed=read_block(s,cr,3,('المهام المتأخرة','طلبات الدعم'))
     return k,chart,completed,detail_sections(wb['تفاصيل المهام'],7)
+
 
 def suhail_data(path):
     wb=openpyxl.load_workbook(path,data_only=True); s=wb['ملخص مشاريع سهيل']
     k=[s.cell(3,c).value for c in range(1,6)]
-    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','لم تبدأ'])
-    chart=read_block(s,hr,5)
+    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','لم تبدأ']); chart=read_block(s,hr,5)
     ur=find_header(s,['#','المشروع','القطاع','التحديث'],hr+1); updates=read_block(s,ur,4)
     return k,chart,updates,detail_sections(wb['تفاصيل مشاريع سهيل'],6)
 
-def find_tables_by_title(prs, slide_nums):
-    d={}
-    for n in slide_nums:
-        for sh in prs.slides[n-1].shapes:
-            if sh.has_table:
-                title=sh.table.cell(0,0).text.strip()
-                d.setdefault(title,[]).append((n,sh))
-    return d
 
-def preflight_master(prs):
-    if len(prs.slides)!=18:
-        raise ValueError(f'approved Monday Meeting master must have 18 slides; found {len(prs.slides)}')
-    required=[
-        (2,7,4),(5,48,3),(11,5,7),(12,3,7),(12,18,7),(12,4,7),
-        (14,44,4),(15,4,6),(16,4,6),(16,6,6),(16,10,6),
-        (17,6,6),(17,3,6),(18,8,6),(18,4,6),
-    ]
-    for slide_num,shape_id,cols in required:
-        sh=shape_by_id(prs.slides[slide_num-1],shape_id)
-        if not sh.has_table or len(sh.table.columns)!=cols:
-            raise ValueError(f'template structure mismatch on slide {slide_num}, shape {shape_id}')
-    for slide_num,shape_id in [(5,3),(14,24)]:
-        sh=shape_by_id(prs.slides[slide_num-1],shape_id)
-        if not sh.has_chart:
-            raise ValueError(f'template chart missing on slide {slide_num}, shape {shape_id}')
-
-def save_chart_payload(rows, path):
-    wb=openpyxl.load_workbook(path); ws=wb.active
-    maxr=max(ws.max_row,len(rows)+1)
+def save_chart_payload(rows,path):
+    wb=openpyxl.load_workbook(path); ws=wb.active; maxr=max(ws.max_row,len(rows)+1)
     for r in range(2,maxr+1):
-        for c in range(1,6): ws.cell(r,c).value=None
+        for c in range(1,6):ws.cell(r,c).value=None
     for r,row in enumerate(rows,2):
-        for c,x in enumerate(row,1): ws.cell(r,c).value=x
+        for c,x in enumerate(row,1):ws.cell(r,c).value=x
     wb.save(path)
 
-def update_chart_xml(xml_bytes, rows):
-    root=etree.fromstring(xml_bytes)
-    root_range=len(rows)+1
+
+def update_chart_xml(xml_bytes,rows):
+    root=etree.fromstring(xml_bytes); root_range=len(rows)+1
     for ser_i,ser in enumerate(root.xpath('.//c:ser',namespaces=NS_C)):
-        if ser_i>=4: continue
-        for f in ser.xpath('.//c:f',namespaces=NS_C):
-            f.text=re.sub(r'\$\d+$',f'${root_range}',f.text)
-        cats=[val(r[0]) for r in rows]
-        nums=[r[ser_i+1] for r in rows]
-        for cache,values,numeric in [(ser.find('.//c:cat//c:strCache',NS_C),cats,False),(ser.find('.//c:val//c:numCache',NS_C),nums,True)]:
-            if cache is None: continue
-            for p in list(cache.findall('c:pt',NS_C)): cache.remove(p)
+        if ser_i>=4:continue
+        for f in ser.xpath('.//c:f',namespaces=NS_C):f.text=re.sub(r'\$\d+$',f'${root_range}',f.text)
+        cats=[val(r[0]) for r in rows]; nums=[r[ser_i+1] for r in rows]
+        for cache,values in [(ser.find('.//c:cat//c:strCache',NS_C),cats),(ser.find('.//c:val//c:numCache',NS_C),nums)]:
+            if cache is None:continue
+            for p in list(cache.findall('c:pt',NS_C)):cache.remove(p)
             pc=cache.find('c:ptCount',NS_C)
-            if pc is not None: pc.set('val',str(len(values)))
+            if pc is not None:pc.set('val',str(len(values)))
             for idx,x in enumerate(values):
-                if x in (None,''): continue
+                if x in (None,''):continue
                 pt=etree.SubElement(cache,'{%s}pt'%NS_C['c'],idx=str(idx)); v=etree.SubElement(pt,'{%s}v'%NS_C['c']); v.text=val(x)
     disp=root.find('.//c:dispBlanksAs',NS_C)
-    if disp is None: disp=etree.SubElement(root,'{%s}dispBlanksAs'%NS_C['c'])
+    if disp is None:disp=etree.SubElement(root,'{%s}dispBlanksAs'%NS_C['c'])
     disp.set('val','gap')
     return etree.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
 
-def patch_charts(pptx, task_rows, suhail_rows):
+
+def patch_charts(pptx,task_rows,suhail_rows):
     tmp=Path(tempfile.mkdtemp()); src=tmp/'src'; src.mkdir()
-    with zipfile.ZipFile(pptx) as z: z.extractall(src)
+    with zipfile.ZipFile(pptx) as z:z.extractall(src)
     for chart_name,book_name,rows in [('chart1.xml','Microsoft_Excel_Worksheet.xlsx',task_rows),('chart2.xml','Microsoft_Excel_Worksheet1.xlsx',suhail_rows)]:
         save_chart_payload(rows,src/'ppt'/'embeddings'/book_name)
         cp=src/'ppt'/'charts'/chart_name; cp.write_bytes(update_chart_xml(cp.read_bytes(),rows))
     out=tmp/'out.pptx'
     with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
         for p in src.rglob('*'):
-            if p.is_file(): z.write(p,p.relative_to(src))
+            if p.is_file():z.write(p,p.relative_to(src))
     shutil.copy2(out,pptx); shutil.rmtree(tmp)
+
+
+def build_dynamic_detail_section(prs,pattern_slides,sections,cols,title_prefix=None):
+    pattern=canonical_pattern(pattern_slides,cols,2)
+    pattern_shape=max(tables(pattern,cols),key=lambda sh:len(sh.table.rows))
+    pages=[]
+    for section,rows in sections:
+        if not rows:
+            continue
+        for chunk,weights in paginate_rows(rows,pattern_shape,2,11):
+            pages.append((section,chunk,weights))
+    if not pages:
+        return [],list(pattern_slides)
+    # Allocate all generated slide parts before deleting any seed slides. This
+    # keeps OOXML part names unique and avoids duplicate slide*.xml entries.
+    targets=[pattern]; last=pattern
+    for _ in range(1,len(pages)):
+        last=clone_slide(prs,pattern,after=last); targets.append(last)
+    for sl,(section,chunk,weights) in zip(targets,pages):
+        sh=first_table(sl,cols)
+        title=f'{title_prefix} ({section})' if title_prefix else section
+        fill_titled_table(sh,chunk,title=title,weights=weights)
+    unused=[sl for sl in pattern_slides if sl.part is not pattern.part]
+    return targets,unused
 
 def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template')
     a=ap.parse_args(); template=Path(a.template) if a.template else Path(__file__).resolve().parents[1]/'template'/'monday-meeting-master.pptx'
-    if not template.exists() and not a.template:
-        subprocess.run([sys.executable,str(Path(__file__).with_name('restore_template.py'))],check=True)
-    if not template.exists(): raise FileNotFoundError(template)
-    out=Path(a.output); shutil.copy2(template,out)
-    prs=Presentation(out)
-    preflight_master(prs)
-    today=dt.datetime.now().astimezone().date(); set_text(shape_by_id(prs.slides[0],4),f'{today.day} {MONTHS[today.month-1]} {today.year}')
-    agenda=agenda_rows(a.topics); fill_table(shape_by_id(prs.slides[1],7),agenda,title='م')
-    tk,tchart,completed,tdetails=task_data(a.tasks)
-    for sid,x in zip([21,23,25,19,18],tk): set_text(shape_by_id(prs.slides[4],sid),x)
-    fill_table(shape_by_id(prs.slides[4],48),[(r[2],r[1],r[0]) for r in completed],title='المهام المكتملة')
-    task_targets={'اجتماع القيادات':[(11,5),(12,3)],'اجتماع التجربة الرقمية':[(12,18)],'لجنة المتابعة':[(12,4)]}
-    for title,rows in tdetails:
-        targets=task_targets.get(title,[]); cap=sum(len(shape_by_id(prs.slides[s-1],i).table.rows)-2 for s,i in targets)
-        if len(rows)>cap: raise ValueError(f'task detail overflow requires a new continuation pattern: {title}')
-        pos=0
-        for s,i in targets:
-            sh=shape_by_id(prs.slides[s-1],i); n=min(len(rows)-pos,len(sh.table.rows)-2)
-            fill_table(sh,rows[pos:pos+n],title=f'تفاصيل المهام ({title})'); pos+=n
-    sk,schart,updates,sdetails=suhail_data(a.suhail)
-    for sid,x in zip([5,8,11,17,13],sk): set_text(shape_by_id(prs.slides[13],sid),x)
-    set_text(shape_by_id(prs.slides[13],14),'لم تبدأ')
-    fill_table(shape_by_id(prs.slides[13],44),[(r[3],r[2],r[1],r[0]) for r in updates],title='أبرز التحديثات')
-    ptargets=find_tables_by_title(prs,[15,16,17,18])
-    for title,rows in sdetails:
-        targets=ptargets.get(title,[])
-        if not targets: raise ValueError(f'new Suhail sector requires a template pattern: {title}')
-        cap=sum(len(sh.table.rows)-2 for _,sh in targets)
-        if len(rows)>cap: raise ValueError(f'Suhail detail overflow requires continuation: {title}')
-        pos=0
-        for _,sh in targets:
-            n=min(len(rows)-pos,len(sh.table.rows)-2)
-            fill_table(sh,rows[pos:pos+n],title=title); pos+=n
-    prs.save(out); patch_charts(out,tchart,schart)
-    print(out.resolve())
-if __name__=='__main__': main()
+    if not template.exists() and not a.template:subprocess.run([sys.executable,str(Path(__file__).with_name('restore_template.py'))],check=True)
+    if not template.exists():raise FileNotFoundError(template)
+
+    agenda=agenda_rows(a.topics); tk,tchart,completed,tdetails=task_data(a.tasks); sk,schart,updates,sdetails=suhail_data(a.suhail)
+    out=Path(a.output); shutil.copy2(template,out); prs=Presentation(out); validate_master_patterns(prs)
+
+    # Capture all master patterns before any slide is cloned or removed.
+    agenda_slide=next(sl for sl in prs.slides if any(len(sh.table.columns)==4 and sh.table.cell(0,0).text.strip()=='م' for sh in tables(sl)))
+    agenda_shape=next(sh for sh in tables(agenda_slide,4) if sh.table.cell(0,0).text.strip()=='م')
+    task_summary=find_slide_with_text(prs,'ملخص المهام')
+    suhail_summary=find_slide_with_text(prs,'ملخص مشاريع سهيل')
+    task_patterns=find_pattern_slides(prs,7); suhail_patterns=find_pattern_slides(prs,6)
+
+    # Cover + agenda. Agenda automatically adds continuation pages when needed.
+    set_text(shape_by_id(prs.slides[0],4),f'{dt.datetime.now().astimezone().date().day} {MONTHS[dt.datetime.now().astimezone().date().month-1]} {dt.datetime.now().astimezone().date().year}')
+    agenda_pages=paginate_rows(agenda,agenda_shape,1,14)
+    agenda_targets=[agenda_slide]; last=agenda_slide
+    for _ in range(1,len(agenda_pages)):
+        last=clone_slide(prs,agenda_slide,after=last); agenda_targets.append(last)
+    for sl,(chunk,weights) in zip(agenda_targets,agenda_pages):fill_agenda_table(first_table(sl,4),chunk,weights)
+
+    # Task summary can expand down the left side; when that area fills, create a
+    # clean continuation page containing only the approved heading/table pattern.
+    for sid,x in zip([21,23,25,19,18],tk):set_text(shape_by_id(task_summary,sid),x)
+    completed_rows=[(r[2],r[1],r[0]) for r in completed]
+    completed_shape=next(sh for sh in tables(task_summary,3) if sh.table.cell(0,0).text.strip()=='المهام المكتملة')
+    fill_summary_pages(prs,task_summary,completed_shape,completed_rows,'المهام المكتملة','ملخص المهام')
+
+    # Task details are data-driven. The master contributes one approved detail
+    # pattern; every source and overflow page is generated from it.
+    task_generated,task_unused=build_dynamic_detail_section(prs,task_patterns,tdetails,7,'تفاصيل المهام')
+
+    # Suhail summary and updates.
+    for sid,x in zip([5,8,11,17,13],sk):set_text(shape_by_id(suhail_summary,sid),x)
+    set_text(shape_by_id(suhail_summary,14),'لم تبدأ')
+    updates_rows=[(r[3],r[2],r[1],r[0]) for r in updates]
+    updates_shape=next(sh for sh in tables(suhail_summary,4) if sh.table.cell(0,0).text.strip()=='أبرز التحديثات')
+    fill_summary_pages(prs,suhail_summary,updates_shape,updates_rows,'أبرز التحديثات','ملخص مشاريع سهيل')
+
+    # Suhail details are also data-driven: new sectors and any amount of projects
+    # simply create more pages from the approved six-column detail pattern.
+    suhail_generated,suhail_unused=build_dynamic_detail_section(prs,suhail_patterns,sdetails,6,None)
+
+    # Only after every dynamic page has been allocated do we remove the unused
+    # seed-pattern slides from the master.
+    for sl in task_unused+suhail_unused:
+        remove_slide(prs,sl)
+
+    prs.save(out); patch_charts(out,tchart,schart); print(out.resolve())
+
+
+if __name__=='__main__':main()
