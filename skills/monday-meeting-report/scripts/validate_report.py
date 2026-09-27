@@ -14,7 +14,7 @@ def main():
     ap=argparse.ArgumentParser(); ap.add_argument('--report',required=True); a=ap.parse_args(); errors=[]
     try: prs=Presentation(a.report)
     except Exception as e: raise SystemExit(f'PPTX parse failed: {e}')
-    if len(prs.slides)<19: errors.append('slide count is below 19')
+    if len(prs.slides)<18: errors.append('slide count is below 18')
     with zipfile.ZipFile(a.report) as z:
         names=set(z.namelist())
         for n in ['ppt/charts/chart1.xml','ppt/charts/chart2.xml','ppt/embeddings/Microsoft_Excel_Worksheet.xlsx','ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx']:

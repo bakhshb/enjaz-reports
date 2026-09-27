@@ -44,26 +44,16 @@ The complete approved master is bundled as `assets/monday-meeting-master.pptx`. 
 
 ## Python runtime and automatic bootstrap
 
-Use `uv` for every Python command in this skill. The required Python version and packages are declared as inline script metadata, so do not install them with `pip` and do not modify the host Python environment.
+Prefer `uv run` for the bundled Python scripts because their required Python versions and packages are declared as inline script metadata. Do not modify the host Python environment.
 
-Before the first run, execute `uv --version`:
+Before generation:
 
-- If `uv` is available, keep the existing installation and continue.
-- If it is missing, install it automatically with Astral's official user-scoped standalone installer, then refresh `PATH` or call the installed executable by its full path and verify `uv --version` again.
+1. Check `uv --version`.
+2. If `uv` is available, run the script with `uv run`.
+3. If `uv run` fails specifically because package/network resolution is unavailable, check whether the active system Python can import `lxml`, `openpyxl`, and `pptx` and satisfies the script's Python-version requirement. If it can, run the same bundled script with that Python interpreter instead; do not install or upgrade packages.
+4. If neither path can satisfy the declared requirements, stop and report the exact runtime/dependency error instead of producing a partial report.
 
-Windows PowerShell:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-macOS or Linux:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-Do not reinstall or upgrade a working `uv`. If the skill was copied without running its installation step and `uv` is missing at report time, perform the same bootstrap automatically. Stop only when the official installer cannot run because of a real environment restriction, and report the exact error.
+If `uv` itself is missing and network access is available, it may be installed with Astral's official user-scoped standalone installer. Do not reinstall or upgrade a working `uv`.
 
 ## Authoritative rules
 
@@ -380,6 +370,12 @@ Do not shrink 11 pt text to 10 pt, omit a title row, or reuse a previous-week ro
 ### Template-version rule
 
 The runtime master asset is `monday-meeting-master.pptx`. The current visual acceptance reference remains `MM_2026-09-20.pptx`. If the restored bundled master renders differently from that reference in layout, title rows, fonts, sizes, or table geometry, stop and report a template-asset mismatch rather than silently continuing.
+
+### Mandatory visual QA after the gate
+
+After the v2 gate passes, render the **same gated PPTX bytes** with an available PowerPoint/PDF renderer and visually inspect at minimum slides 2, 5, 11, 12, and 14-18 before delivery. This is a final presentation-quality check, not a data source.
+
+Block delivery if the render shows any clipped/overflowing text, missing or duplicated rows, broken Arabic glyphs, title/header misalignment, all-bold text caused by formatting inheritance, overlaps, misplaced continuation content, or any visible deviation from the approved master geometry. Preserve the master's hidden-slide state in the delivered PPTX; temporary un-hiding is allowed only in a disposable QA copy so appendix slides 13-18 can be rendered and inspected.
 
 ### Delivery rule
 

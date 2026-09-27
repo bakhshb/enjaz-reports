@@ -24,12 +24,20 @@ def val(v):
 
 def set_text(shape, value):
     tf=shape.text_frame; text=val(value)
-    if tf.paragraphs and tf.paragraphs[0].runs:
-        runs=tf.paragraphs[0].runs; runs[0].text=text
-        for r in runs[1:]: r.text=''
-        for p in tf.paragraphs[1:]:
-            for r in p.runs: r.text=''
-    else: tf.text=text
+    lines=text.splitlines() or ['']
+    # Preserve template paragraph/run formatting instead of collapsing all
+    # source text into the first run. This keeps approved mixed formatting
+    # such as a bold "تاريخ التحديث" line followed by regular body text.
+    while len(tf.paragraphs)<len(lines):
+        src=tf.paragraphs[1]._p if len(tf.paragraphs)>1 else tf.paragraphs[0]._p
+        tf._txBody.append(copy.deepcopy(src))
+    for i,p in enumerate(tf.paragraphs):
+        line=lines[i] if i<len(lines) else ''
+        if p.runs:
+            p.runs[0].text=line
+            for r in p.runs[1:]: r.text=''
+        elif line:
+            p.add_run().text=line
 
 def shape_by_id(slide, sid):
     def walk(items):
@@ -52,7 +60,7 @@ def resize_table(table, rows_needed):
 def fill_table(shape, rows, title=None):
     t=shape.table; resize_table(t, 2+len(rows))
     if title is not None:
-        for j,c in enumerate(t.rows[0].cells): c.text = title if j==0 else ''
+        for j,c in enumerate(t.rows[0].cells): set_text(c, title if j==0 else '')
     for i,row in enumerate(rows,2):
         for j,x in enumerate(row): set_text(t.cell(i,j),x)
 
@@ -122,8 +130,25 @@ def find_tables_by_title(prs, slide_nums):
         for sh in prs.slides[n-1].shapes:
             if sh.has_table:
                 title=sh.table.cell(0,0).text.strip()
-                d[title]=(n,sh)
+                d.setdefault(title,[]).append((n,sh))
     return d
+
+def preflight_master(prs):
+    if len(prs.slides)!=18:
+        raise ValueError(f'approved Monday Meeting master must have 18 slides; found {len(prs.slides)}')
+    required=[
+        (2,7,4),(5,48,3),(11,5,7),(12,3,7),(12,18,7),(12,4,7),
+        (14,44,4),(15,4,6),(16,4,6),(16,6,6),(16,10,6),
+        (17,6,6),(17,3,6),(18,8,6),(18,4,6),
+    ]
+    for slide_num,shape_id,cols in required:
+        sh=shape_by_id(prs.slides[slide_num-1],shape_id)
+        if not sh.has_table or len(sh.table.columns)!=cols:
+            raise ValueError(f'template structure mismatch on slide {slide_num}, shape {shape_id}')
+    for slide_num,shape_id in [(5,3),(14,24)]:
+        sh=shape_by_id(prs.slides[slide_num-1],shape_id)
+        if not sh.has_chart:
+            raise ValueError(f'template chart missing on slide {slide_num}, shape {shape_id}')
 
 def save_chart_payload(rows, path):
     wb=openpyxl.load_workbook(path); ws=wb.active
@@ -176,12 +201,13 @@ def main():
     if not template.exists(): raise FileNotFoundError(template)
     out=Path(a.output); shutil.copy2(template,out)
     prs=Presentation(out)
+    preflight_master(prs)
     today=dt.datetime.now().astimezone().date(); set_text(shape_by_id(prs.slides[0],4),f'{today.day} {MONTHS[today.month-1]} {today.year}')
     agenda=agenda_rows(a.topics); fill_table(shape_by_id(prs.slides[1],7),agenda,title='م')
     tk,tchart,completed,tdetails=task_data(a.tasks)
     for sid,x in zip([21,23,25,19,18],tk): set_text(shape_by_id(prs.slides[4],sid),x)
     fill_table(shape_by_id(prs.slides[4],48),[(r[2],r[1],r[0]) for r in completed],title='المهام المكتملة')
-    task_targets={'اجتماع القيادات':[(11,5),(12,3)],'اجتماع التجربة الرقمية':[(12,18)],'لجنة المتابعة':[(13,4)]}
+    task_targets={'اجتماع القيادات':[(11,5),(12,3)],'اجتماع التجربة الرقمية':[(12,18)],'لجنة المتابعة':[(12,4)]}
     for title,rows in tdetails:
         targets=task_targets.get(title,[]); cap=sum(len(shape_by_id(prs.slides[s-1],i).table.rows)-2 for s,i in targets)
         if len(rows)>cap: raise ValueError(f'task detail overflow requires a new continuation pattern: {title}')
@@ -190,15 +216,19 @@ def main():
             sh=shape_by_id(prs.slides[s-1],i); n=min(len(rows)-pos,len(sh.table.rows)-2)
             fill_table(sh,rows[pos:pos+n],title=f'تفاصيل المهام ({title})'); pos+=n
     sk,schart,updates,sdetails=suhail_data(a.suhail)
-    for sid,x in zip([5,8,11,17,13],sk): set_text(shape_by_id(prs.slides[14],sid),x)
-    set_text(shape_by_id(prs.slides[14],14),'لم تبدأ')
-    fill_table(shape_by_id(prs.slides[14],44),[(r[3],r[2],r[1],r[0]) for r in updates],title='أبرز التحديثات')
-    ptargets=find_tables_by_title(prs,[16,17,18,19])
+    for sid,x in zip([5,8,11,17,13],sk): set_text(shape_by_id(prs.slides[13],sid),x)
+    set_text(shape_by_id(prs.slides[13],14),'لم تبدأ')
+    fill_table(shape_by_id(prs.slides[13],44),[(r[3],r[2],r[1],r[0]) for r in updates],title='أبرز التحديثات')
+    ptargets=find_tables_by_title(prs,[15,16,17,18])
     for title,rows in sdetails:
-        if title not in ptargets: raise ValueError(f'new Suhail sector requires a template pattern: {title}')
-        _,sh=ptargets[title]
-        if len(rows)>len(sh.table.rows)-2: raise ValueError(f'Suhail detail overflow requires continuation: {title}')
-        fill_table(sh,rows,title=title)
+        targets=ptargets.get(title,[])
+        if not targets: raise ValueError(f'new Suhail sector requires a template pattern: {title}')
+        cap=sum(len(sh.table.rows)-2 for _,sh in targets)
+        if len(rows)>cap: raise ValueError(f'Suhail detail overflow requires continuation: {title}')
+        pos=0
+        for _,sh in targets:
+            n=min(len(rows)-pos,len(sh.table.rows)-2)
+            fill_table(sh,rows[pos:pos+n],title=title); pos+=n
     prs.save(out); patch_charts(out,tchart,schart)
     print(out.resolve())
 if __name__=='__main__': main()
