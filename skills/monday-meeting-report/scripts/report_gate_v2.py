@@ -1,0 +1,263 @@
+# /// script
+# requires-python = ">=3.11"
+# dependencies = ["python-pptx>=1.0.2", "openpyxl>=3.1.5"]
+# ///
+"""Mandatory post-build repair + delivery gate for monday-meeting-report.
+
+Run after build_report.py and before delivery.  This script fixes the agenda and
+table typography, then blocks delivery when the deck is structurally invalid,
+uses stale/current-input-mismatched data, loses table titles/headers, or contains
+external PowerPoint relationships.
+"""
+from __future__ import annotations
+import argparse, collections, copy, hashlib, os, re, shutil, tempfile, zipfile
+from pathlib import Path, PurePosixPath
+from xml.etree import ElementTree as ET
+from openpyxl import load_workbook
+from pptx import Presentation
+from pptx.util import Pt
+
+AGENDA_HEADERS=["م","جدول الأعمال","المسؤول","المدة الزمنية (بالدقيقة)"]
+TASK_HEADERS=["#","المهمة","القطاع","تاريخ الإنجاز المخطط","الحالة","ملاحظات","الجهة ذات العلاقة"]
+SUHAIL_HEADERS=["#","اسم المشروع","تاريخ البداية","تاريخ النهاية","الحالة","ما تم حتى تاريخه"]
+COMPLETED_HEADERS=["القطاع","المهمة","#"]
+UPDATES_HEADERS=["التحديث","القطاع","المشروع","#"]
+FONT="Abar Mid"; ALLOWED={"Abar Mid","Abar Mid SemiBold"}
+AGENDA_PT=14.0; TABLE_PT=11.0
+
+def norm(v):
+    if v is None:return ""
+    if isinstance(v,float) and v.is_integer():v=int(v)
+    return re.sub(r"\s+"," ",str(v).replace("\u00a0"," ")).strip()
+
+def sha(path):
+    h=hashlib.sha256()
+    with open(path,"rb") as f:
+        for b in iter(lambda:f.read(1<<20),b""):h.update(b)
+    return h.hexdigest()
+
+def header_row(ws,required,max_scan=30):
+    for r in range(1,min(ws.max_row,max_scan)+1):
+        m={norm(ws.cell(r,c).value):c for c in range(1,ws.max_column+1)}
+        if required.issubset(m):return r,m
+    return None,None
+
+def read_agenda(path):
+    wb=load_workbook(path,read_only=True,data_only=False); ws=wb["Sheet1"]
+    req={"الترتيب","الموضوع","المتحدث","الوقت المطلوب من المالك"}; hr,c=header_row(ws,req)
+    if not hr:raise RuntimeError("topics workbook headers not found")
+    out=[]; stop=False
+    for r in range(hr+1,ws.max_row+1):
+        order=ws.cell(r,c["الترتيب"]).value; topic=norm(ws.cell(r,c["الموضوع"]).value)
+        if order in (None,"") or not topic:continue
+        try:o=f"{int(float(order)):02d}"
+        except:o=norm(order)
+        dur=ws.cell(r,c["الوقت المطلوب من المالك"]).value
+        if isinstance(dur,float) and dur.is_integer():dur=int(dur)
+        out.append((o,topic,norm(ws.cell(r,c["المتحدث"]).value),norm(dur)))
+        if topic=="ملخص الاجتماع":stop=True;break
+    if not stop:raise RuntimeError("topics workbook missing final item ملخص الاجتماع")
+    return out
+
+def read_tasks(path):
+    wb=load_workbook(path,read_only=True,data_only=False); ws=wb["تفاصيل المهام"]
+    out=[]; r=1
+    while r<=ws.max_row:
+        m=re.fullmatch(r"مهام مصدر \((.+)\)",norm(ws.cell(r,1).value))
+        if not m:r+=1;continue
+        sec=norm(m.group(1)); r+=2
+        while r<=ws.max_row:
+            a=norm(ws.cell(r,1).value)
+            if re.fullmatch(r"مهام مصدر \((.+)\)",a):break
+            if re.fullmatch(r"\d+(?:\.0)?",a):
+                vals=[norm(ws.cell(r,c).value) for c in range(1,8)]
+                out.append((sec,*vals))
+            r+=1
+    return out
+
+def read_suhail(path):
+    wb=load_workbook(path,read_only=True,data_only=False); ws=wb["تفاصيل مشاريع سهيل"]
+    out=[]; r=1
+    while r<=ws.max_row:
+        vals=[norm(ws.cell(r,c).value) for c in range(1,7)]
+        if vals[0] and not any(vals[1:]) and r<ws.max_row:
+            nxt=[norm(ws.cell(r+1,c).value) for c in range(1,7)]
+            if nxt[:2]==["#","اسم المشروع"]:
+                sec=vals[0]; r+=2
+                while r<=ws.max_row:
+                    row=[norm(ws.cell(r,c).value) for c in range(1,7)]
+                    if not re.fullmatch(r"\d+(?:\.0)?",row[0]):break
+                    out.append((sec,*row)); r+=1
+                continue
+        r+=1
+    return out
+
+def delrow(t,i):t._tbl.remove(t.rows[i]._tr)
+def addrow(t,style=1):t._tbl.append(copy.deepcopy(t.rows[style]._tr))
+def setcell(cell,text):
+    tf=cell.text_frame; p=tf.paragraphs[0] if tf.paragraphs else tf.add_paragraph()
+    if p.runs:
+        p.runs[0].text=text
+        for rr in list(p.runs[1:]):p._p.remove(rr._r)
+        p.runs[0].font.name=FONT
+    else:
+        rr=p.add_run();rr.text=text;rr.font.name=FONT
+    for extra in list(tf.paragraphs[1:]):tf._txBody.remove(extra._p)
+
+def agenda_table(prs):
+    sl=prs.slides[1]
+    for sh in sl.shapes:
+        if getattr(sh,"has_table",False) and len(sh.table.columns)==4:return sh.table
+    raise RuntimeError("agenda table not found on slide 2")
+
+def repair(prs,topics):
+    t=agenda_table(prs); rows=read_agenda(topics); target=1+len(rows)
+    while len(t.rows)>target:delrow(t,len(t.rows)-1)
+    while len(t.rows)<target:addrow(t,1)
+    for c,x in enumerate(AGENDA_HEADERS):setcell(t.cell(0,c),x)
+    for r,row in enumerate(rows,1):
+        for c,x in enumerate(row):setcell(t.cell(r,c),x)
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if getattr(sh,"has_table",False):
+                tt=sh.table; is_ag=len(tt.columns)==4 and norm(tt.cell(0,0).text)=="م"; pt=AGENDA_PT if is_ag else TABLE_PT
+                for rw in tt.rows:
+                    for cell in rw.cells:
+                        for p in cell.text_frame.paragraphs:
+                            for run in p.runs:
+                                if run.text:
+                                    if run.font.name not in ALLOWED:run.font.name=FONT
+                                    run.font.size=Pt(pt)
+            elif getattr(sh,"has_text_frame",False):
+                for p in sh.text_frame.paragraphs:
+                    for run in p.runs:
+                        if run.text and run.font.name in {"Arial","Calibri","+mn-lt","+mj-lt"}:run.font.name=FONT
+
+def slide_suhail_sectors(slide):
+    out=[]
+    for sh in slide.shapes:
+        if not getattr(sh,"has_table",False):continue
+        t=sh.table
+        if len(t.columns)!=6 or len(t.rows)<2:continue
+        rr=[[norm(c.text) for c in row.cells] for row in t.rows]
+        if rr[1]!=SUHAIL_HEADERS:continue
+        sec=re.sub(r"\s*\(تابع\)\s*$","",rr[0][0]).strip()
+        if sec:out.append(sec)
+    return out
+
+def reorder_suhail_continuations(prs):
+    sld_ids=prs.slides._sldIdLst
+    while True:
+        per=[slide_suhail_sectors(sl) for sl in prs.slides]
+        moved=False
+        for idx,sectors in enumerate(per):
+            uniq=list(dict.fromkeys(sectors))
+            if len(uniq)!=1:continue
+            sec=uniq[0]
+            prev=[j for j in range(idx) if sec in per[j]]
+            if not prev:continue
+            last=max(prev)
+            if idx==last+1:continue
+            el=sld_ids[idx]; sld_ids.remove(el); sld_ids.insert(last+1,el)
+            moved=True; break
+        if not moved:break
+
+def canon(v):
+    s=norm(v)
+    s=re.sub(r"تاريخ التحديث\s*[:：]\s*","تاريخ التحديث ",s)
+    return norm(s)
+
+def canon_record(rec):
+    return tuple(canon(x) for x in rec)
+
+def rows(t):return [[norm(c.text) for c in r.cells] for r in t.rows]
+def isnum(s):return bool(re.fullmatch(r"\d+(?:\.0)?",norm(s)))
+
+def package(path,errors):
+    try:
+        with zipfile.ZipFile(path) as z:
+            bad=z.testzip(); names=set(z.namelist())
+            if bad:errors.append(f"ZIP CRC failure: {bad}")
+            relns="{http://schemas.openxmlformats.org/package/2006/relationships}"
+            for n in names:
+                if n.endswith((".xml",".rels")):
+                    try:ET.fromstring(z.read(n))
+                    except Exception as e:errors.append(f"malformed XML {n}: {e}")
+                if not n.endswith(".rels"):continue
+                root=ET.fromstring(z.read(n)); p=PurePosixPath(n)
+                source=PurePosixPath("") if p.name==".rels" and str(p.parent)=="_rels" else p.parent.parent/p.name[:-5]
+                for rel in root.findall(f"{relns}Relationship"):
+                    if rel.attrib.get("TargetMode")=="External":errors.append(f"external relationship: {n} -> {rel.attrib.get('Target')}")
+    except Exception as e:errors.append(f"invalid PPTX package: {e}")
+
+def collect(prs,errors):
+    ag=[]; task=[]; suh=[]; suh_seq=[]
+    for si,sl in enumerate(prs.slides,1):
+        for sh in sl.shapes:
+            if not getattr(sh,"has_table",False):continue
+            t=sh.table; rr=rows(t); cols=len(t.columns)
+            if si==2 and cols==4:
+                if not rr or rr[0]!=AGENDA_HEADERS:errors.append(f"slide 2 agenda headers missing/corrupt: {rr[0] if rr else []}")
+                ag=[tuple(x) for x in rr[1:] if any(x)]
+                if ag and ag[-1][1]!="ملخص الاجتماع":errors.append("agenda does not end at ملخص الاجتماع")
+                if len(ag)!=len(set(ag)):errors.append("agenda contains duplicate rows")
+            elif cols==7:
+                if len(rr)<2 or not rr[0][0].startswith("تفاصيل المهام ("):errors.append(f"slide {si} task table missing title row")
+                if len(rr)<2 or rr[1]!=TASK_HEADERS:errors.append(f"slide {si} task headers missing/corrupt")
+                m=re.fullmatch(r"تفاصيل المهام \((.+)\)",rr[0][0] if rr else ""); sec=norm(m.group(1)) if m else ""
+                for x in rr[2:]:
+                    if x and isnum(x[0]):task.append((sec,*x[:7]))
+            elif cols==6 and len(rr)>=2 and rr[1][:2]==["#","اسم المشروع"]:
+                if not rr[0][0]:errors.append(f"slide {si} Suhail table missing sector/title row")
+                if rr[1]!=SUHAIL_HEADERS:errors.append(f"slide {si} Suhail headers missing/corrupt")
+                sec=re.sub(r"\s*\(تابع\)\s*$","",rr[0][0]).strip()
+                if not suh_seq or suh_seq[-1]!=sec:suh_seq.append(sec)
+                for x in rr[2:]:
+                    if x and isnum(x[0]):suh.append((sec,*x[:6]))
+            elif cols==3 and rr and rr[0][0]=="المهام المكتملة":
+                if len(rr)<2 or rr[1]!=COMPLETED_HEADERS:errors.append(f"slide {si} completed-task headers missing/corrupt")
+            elif cols==4 and rr and rr[0][0]=="أبرز التحديثات":
+                if len(rr)<2 or rr[1]!=UPDATES_HEADERS:errors.append(f"slide {si} updates headers missing/corrupt")
+            is_ag=si==2 and cols==4; want=AGENDA_PT if is_ag else TABLE_PT
+            for rw in t.rows:
+                for cell in rw.cells:
+                    for p in cell.text_frame.paragraphs:
+                        for run in p.runs:
+                            if not run.text.strip():continue
+                            if run.font.name not in ALLOWED:errors.append(f"slide {si} unapproved font {run.font.name!r}: {run.text[:30]!r}")
+                            sz=run.font.size.pt if run.font.size else None
+                            if sz is None or abs(sz-want)>.01:errors.append(f"slide {si} wrong table font size {sz!r}; expected {want:g}")
+    if len(suh_seq)!=len(set(suh_seq)):
+        errors.append(f"Suhail sector continuation is non-contiguous: {suh_seq!r}")
+    return ag,task,suh
+
+def cmp(label,exp,act,errors):
+    ce=collections.Counter(canon_record(x) for x in exp); ca=collections.Counter(canon_record(x) for x in act)
+    if ce==ca:return
+    miss=list((ce-ca).elements()); extra=list((ca-ce).elements())
+    if miss:errors.append(f"{label}: missing {len(miss)} current-input record(s); first={miss[0]!r}")
+    if extra:errors.append(f"{label}: stale/extra {len(extra)} record(s); first={extra[0]!r}")
+
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument("--report",required=True); ap.add_argument("--topics",required=True); ap.add_argument("--tasks",required=True); ap.add_argument("--suhail",required=True); a=ap.parse_args()
+    for p in [a.report,a.topics,a.tasks,a.suhail]:
+        if not os.path.isfile(p):raise SystemExit(f"missing input: {p}")
+    exp_ag=read_agenda(a.topics); exp_task=read_tasks(a.tasks); exp_suh=read_suhail(a.suhail)
+    report=Path(a.report)
+    with tempfile.TemporaryDirectory(prefix="mm-gate-") as td:
+        tmp=Path(td)/report.name; shutil.copy2(report,tmp)
+        prs=Presentation(str(tmp)); repair(prs,Path(a.topics)); reorder_suhail_continuations(prs); prs.save(str(tmp))
+        errors=[]; package(tmp,errors)
+        try:prs2=Presentation(str(tmp)); ag,task,suh=collect(prs2,errors)
+        except Exception as e:errors.append(f"PowerPoint reopen failed: {e}");ag=task=suh=[]
+        if ag!=exp_ag:errors.append(f"agenda mismatch: expected={exp_ag!r}; actual={ag!r}")
+        cmp("task details",exp_task,task,errors); cmp("Suhail details",exp_suh,suh,errors)
+        print("REPORT_SHA256",sha(tmp)); print("TOPICS_SHA256",sha(a.topics)); print("TASKS_SHA256",sha(a.tasks)); print("SUHAIL_SHA256",sha(a.suhail))
+        if errors:
+            print(f"QA FAILED: {len(errors)} blocking issue(s)")
+            for e in errors:print("ERROR:",e)
+            return 1
+        shutil.copy2(tmp,report)
+    print("QA PASSED - report repaired and safe to deliver")
+    return 0
+if __name__=="__main__":raise SystemExit(main())

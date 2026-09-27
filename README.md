@@ -1,13 +1,13 @@
 # enjaz-reports
 
-Report skills migrated from Notion exports.
+مهارات إعداد تقارير الإنجاز الأسبوعية واجتماع الاثنين. كل مهارة مستقلة داخل `skills/`، وتعليمات تشغيلها في ملف `SKILL.md` الخاص بها.
 
-The skill files under `skills/` were copied without editing their contents.
+## التسلسل
 
-Skills:
-- monday-meeting-report
-- weekly-consolidated-report
-- weekly-report-by-sector
-- suhail-project-report
-- delayed-transactions-summary
-- task-details
+1. `task-details`: تصدير المهام وطلبات الدعم ← ملخص وتفاصيل المهام Excel.
+2. `suhail-project-report`: تصدير سهيل ← ملخص وتفاصيل مشاريع سهيل Excel.
+3. `delayed-transactions-summary`: معاملات الجهات ← تقرير معاملات موحد Excel.
+4. `weekly-consolidated-report`: ملفات Excel الثلاثة النهائية ← تقرير إنجاز أسبوعي PowerPoint.
+5. `weekly-report-by-sector`: التقرير الأسبوعي الموحد ← عروض مستقلة حسب الجهة، عند الطلب.
+
+`monday-meeting-report` مسار مستقل يأخذ ملف مواضيع الأسبوع وملفي Excel النهائيين للمهام وسهيل لينشئ عرض اجتماع الاثنين. ملفات القوالب كاملة وغير مجزأة. `weekly-consolidated-report` يحدد قواعد التعبئة والقالب، ولا يضم سكربت إنشاء آليًا. يجب التحقق من المدخلات الحالية والملف النهائي وفق تعليمات كل مهارة.
