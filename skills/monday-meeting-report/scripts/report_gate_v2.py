@@ -2,15 +2,15 @@
 # requires-python = ">=3.11"
 # dependencies = ["python-pptx>=1.0.2", "openpyxl>=3.1.5"]
 # ///
-"""Mandatory post-build repair + delivery gate for monday-meeting-report.
+"""Mandatory post-build delivery gate for monday-meeting-report.
 
-Run after build_report.py and before delivery.  This script fixes the agenda and
-table typography, then blocks delivery when the deck is structurally invalid,
+Run after build_report.py and before delivery. This script normalizes approved
+table typography and blocks delivery when the deck is structurally invalid,
 uses stale/current-input-mismatched data, loses table titles/headers, or contains
 external PowerPoint relationships.
 """
 from __future__ import annotations
-import argparse, collections, copy, hashlib, os, re, shutil, tempfile, zipfile
+import argparse, collections, hashlib, os, re, shutil, tempfile, zipfile
 from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree as ET
 from openpyxl import load_workbook
@@ -92,35 +92,11 @@ def read_suhail(path):
         r+=1
     return out
 
-def delrow(t,i):t._tbl.remove(t.rows[i]._tr)
-def addrow(t,style=1):t._tbl.append(copy.deepcopy(t.rows[style]._tr))
-def setcell(cell,text):
-    tf=cell.text_frame; p=tf.paragraphs[0] if tf.paragraphs else tf.add_paragraph()
-    if p.runs:
-        p.runs[0].text=text
-        for rr in list(p.runs[1:]):p._p.remove(rr._r)
-        p.runs[0].font.name=FONT
-    else:
-        rr=p.add_run();rr.text=text;rr.font.name=FONT
-    for extra in list(tf.paragraphs[1:]):tf._txBody.remove(extra._p)
-
-def agenda_table(prs):
-    sl=prs.slides[1]
-    for sh in sl.shapes:
-        if getattr(sh,"has_table",False) and len(sh.table.columns)==4:return sh.table
-    raise RuntimeError("agenda table not found on slide 2")
-
-def repair(prs,topics):
-    t=agenda_table(prs); rows=read_agenda(topics); target=1+len(rows)
-    while len(t.rows)>target:delrow(t,len(t.rows)-1)
-    while len(t.rows)<target:addrow(t,1)
-    for c,x in enumerate(AGENDA_HEADERS):setcell(t.cell(0,c),x)
-    for r,row in enumerate(rows,1):
-        for c,x in enumerate(row):setcell(t.cell(r,c),x)
+def normalize_typography(prs):
     for sl in prs.slides:
         for sh in sl.shapes:
             if getattr(sh,"has_table",False):
-                tt=sh.table; is_ag=len(tt.columns)==4 and norm(tt.cell(0,0).text)=="م"; pt=AGENDA_PT if is_ag else TABLE_PT
+                tt=sh.table; rr=rows(tt); is_ag=bool(rr and rr[0]==AGENDA_HEADERS); pt=AGENDA_PT if is_ag else TABLE_PT
                 for rw in tt.rows:
                     for cell in rw.cells:
                         for p in cell.text_frame.paragraphs:
@@ -133,34 +109,6 @@ def repair(prs,topics):
                     for run in p.runs:
                         if run.text and run.font.name in {"Arial","Calibri","+mn-lt","+mj-lt"}:run.font.name=FONT
 
-def slide_suhail_sectors(slide):
-    out=[]
-    for sh in slide.shapes:
-        if not getattr(sh,"has_table",False):continue
-        t=sh.table
-        if len(t.columns)!=6 or len(t.rows)<2:continue
-        rr=[[norm(c.text) for c in row.cells] for row in t.rows]
-        if rr[1]!=SUHAIL_HEADERS:continue
-        sec=re.sub(r"\s*\(تابع\)\s*$","",rr[0][0]).strip()
-        if sec:out.append(sec)
-    return out
-
-def reorder_suhail_continuations(prs):
-    sld_ids=prs.slides._sldIdLst
-    while True:
-        per=[slide_suhail_sectors(sl) for sl in prs.slides]
-        moved=False
-        for idx,sectors in enumerate(per):
-            uniq=list(dict.fromkeys(sectors))
-            if len(uniq)!=1:continue
-            sec=uniq[0]
-            prev=[j for j in range(idx) if sec in per[j]]
-            if not prev:continue
-            last=max(prev)
-            if idx==last+1:continue
-            el=sld_ids[idx]; sld_ids.remove(el); sld_ids.insert(last+1,el)
-            moved=True; break
-        if not moved:break
 
 def canon(v):
     s=norm(v)
@@ -196,11 +144,8 @@ def collect(prs,errors):
         for sh in sl.shapes:
             if not getattr(sh,"has_table",False):continue
             t=sh.table; rr=rows(t); cols=len(t.columns)
-            if si==2 and cols==4:
-                if not rr or rr[0]!=AGENDA_HEADERS:errors.append(f"slide 2 agenda headers missing/corrupt: {rr[0] if rr else []}")
-                ag=[tuple(x) for x in rr[1:] if any(x)]
-                if ag and ag[-1][1]!="ملخص الاجتماع":errors.append("agenda does not end at ملخص الاجتماع")
-                if len(ag)!=len(set(ag)):errors.append("agenda contains duplicate rows")
+            if cols==4 and rr and rr[0]==AGENDA_HEADERS:
+                ag.extend(tuple(x) for x in rr[1:] if any(x))
             elif cols==7:
                 if len(rr)<2 or not rr[0][0].startswith("تفاصيل المهام ("):errors.append(f"slide {si} task table missing title row")
                 if len(rr)<2 or rr[1]!=TASK_HEADERS:errors.append(f"slide {si} task headers missing/corrupt")
@@ -218,7 +163,7 @@ def collect(prs,errors):
                 if len(rr)<2 or rr[1]!=COMPLETED_HEADERS:errors.append(f"slide {si} completed-task headers missing/corrupt")
             elif cols==4 and rr and rr[0][0]=="أبرز التحديثات":
                 if len(rr)<2 or rr[1]!=UPDATES_HEADERS:errors.append(f"slide {si} updates headers missing/corrupt")
-            is_ag=si==2 and cols==4; want=AGENDA_PT if is_ag else TABLE_PT
+            is_ag=cols==4 and rr and rr[0]==AGENDA_HEADERS; want=AGENDA_PT if is_ag else TABLE_PT
             for rw in t.rows:
                 for cell in rw.cells:
                     for p in cell.text_frame.paragraphs:
@@ -227,6 +172,8 @@ def collect(prs,errors):
                             if run.font.name not in ALLOWED:errors.append(f"slide {si} unapproved font {run.font.name!r}: {run.text[:30]!r}")
                             sz=run.font.size.pt if run.font.size else None
                             if sz is None or abs(sz-want)>.01:errors.append(f"slide {si} wrong table font size {sz!r}; expected {want:g}")
+    if ag and ag[-1][1]!="ملخص الاجتماع":errors.append("agenda does not end at ملخص الاجتماع")
+    if len(ag)!=len(set(ag)):errors.append("agenda contains duplicate rows")
     if len(suh_seq)!=len(set(suh_seq)):
         errors.append(f"Suhail sector continuation is non-contiguous: {suh_seq!r}")
     return ag,task,suh
@@ -246,7 +193,7 @@ def main():
     report=Path(a.report)
     with tempfile.TemporaryDirectory(prefix="mm-gate-") as td:
         tmp=Path(td)/report.name; shutil.copy2(report,tmp)
-        prs=Presentation(str(tmp)); repair(prs,Path(a.topics)); reorder_suhail_continuations(prs); prs.save(str(tmp))
+        prs=Presentation(str(tmp)); normalize_typography(prs); prs.save(str(tmp))
         errors=[]; package(tmp,errors)
         try:prs2=Presentation(str(tmp)); ag,task,suh=collect(prs2,errors)
         except Exception as e:errors.append(f"PowerPoint reopen failed: {e}");ag=task=suh=[]
