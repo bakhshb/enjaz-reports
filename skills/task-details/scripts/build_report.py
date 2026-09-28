@@ -291,4 +291,3 @@ if __name__ == "__main__":
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
     build(args.input, args.output)
-
