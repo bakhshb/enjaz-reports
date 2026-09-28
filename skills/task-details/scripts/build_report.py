@@ -123,8 +123,7 @@ def build(input_path, output_path):
         assert sum(v[s] for v in sector_status.values()) == status_counts[s]
 
     completed_tasks = df[df["_status_norm"] == "مكتملة"].to_dict("records")
-    delayed_tasks = df[df["_status_norm"] == "متأخر"][[c_task, c_sector]].rename(
-        columns={c_task: "task", c_sector: "sector"}).to_dict("records")
+    delayed_tasks = df[df["_status_norm"] == "متأخر"].to_dict("records")
 
     present_sources = list(dict.fromkeys(df[c_source].tolist()))
     sources = [s for s in SOURCE_ORDER if s in present_sources] + \
@@ -235,12 +234,14 @@ def build(input_path, output_path):
         r += 1
     r += 1
 
-    style_title(ws1, r, 5, "المهام المتأخرة")
+    style_title(ws1, r, 4, "المهام المتأخرة")
     r += 1
-    style_header_row(ws1, r, ["#", "المهمة", "القطاع"])
+    style_header_row(ws1, r, ["م", "المهمة", "القطاع", "ملاحظات"])
     r += 1
     for i, t in enumerate(delayed_tasks, start=1):
-        write_row(ws1, r, [i, t["task"], t["sector"]], wrap_cols={2, 3}, center_cols={1})
+        notes = t.get(c_notes) if c_notes else None
+        notes = None if pd.isna(notes) else notes
+        write_row(ws1, r, [i, t[c_task], t[c_sector], notes], wrap_cols={2, 3, 4}, center_cols={1})
         r += 1
     r += 1
 
