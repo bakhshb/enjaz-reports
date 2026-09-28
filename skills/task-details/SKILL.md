@@ -1,6 +1,6 @@
 ---
 name: task-details
-description: "Consolidate a raw 'حالة المهام الاستراتيجية' (strategic tasks status) Excel export — a tasks sheet plus a طلبات الدعم (support requests) sheet — into one clean two-sheet Arabic workbook: 'ملخص المهام' (overall counts, per-sector breakdown, completed-tasks table, delayed-tasks table, support-requests table) and 'تفاصيل المهام' (every task grouped into its own section by المصدر / source). Use this skill whenever the user uploads a tasks/متابعة المهام Excel file and asks for a ملخص المهام, تفاصيل المهام, تصنيف المهام حسب القطاع or حسب المصدر, or a consolidated tasks status report — even if they re-describe the layout from scratch instead of naming this skill by name."
+description: "Consolidate a raw 'حالة المهام الاستراتيجية' (strategic tasks status) Excel export — a tasks sheet plus a طلبات الدعم (support requests) sheet — into one clean two-sheet Arabic workbook: 'ملخص المهام' (overall counts, per-sector breakdown, completed-tasks table, delayed-tasks table, suspended-tasks table, support-requests table) and 'تفاصيل المهام' (every task grouped into its own section by المصدر / source). Use this skill whenever the user uploads a tasks/متابعة المهام Excel file and asks for a ملخص المهام, تفاصيل المهام, تصنيف المهام حسب القطاع or حسب المصدر, or a consolidated tasks status report — even if they re-describe the layout from scratch instead of naming this skill by name."
 ---
 
 # Task Details — ملخص وتفاصيل المهام الاستراتيجية
@@ -125,7 +125,10 @@ with white bold text spanning the full table width, and a light-gray
     
 4. **المهام المتأخرة** — `# | المهمة | القطاع | ملاحظات`, filtered to متأخر.
     Carry each task's الملاحظات from the source; keep an empty note blank.
-5. **طلبات الدعم** — `# | المهمة | القطاع | طلب الدعم`, one row per record in
+5. **المهام المعلقة** — `# | المهمة | القطاع | ملاحظات`, filtered to معلق.
+    Carry each task's الملاحظات from the source; keep an empty note blank.
+    Render the title and header even when there are no suspended tasks.
+6. **طلبات الدعم** — `# | المهمة | القطاع | طلب الدعم`, one row per record in
     
     the طلبات الدعم sheet, values carried over as-is (blank stays blank, never
     
@@ -271,9 +274,9 @@ relay that to the user rather than trying to patch around it silently.
     
     المهام متأخر ثم معلق ثم مكتملة ثم على المخطط، والقطاعات مرتبة داخل كل حالة.
     
-- جدول المهام المكتملة لا يحتوي إلا على حالة "مكتملة"، وجدول المتأخرة لا يحتوي
+- جداول المهام المكتملة والمتأخرة والمعلقة لا تحتوي إلا على حالات "مكتملة"
     
-    إلا على "متأخر" (true by construction — built via the filtered dataframe).
+    و"متأخر" و"معلق" على التوالي (true by construction — built via filtered dataframes).
     
 - لا تكرار غير مقصود لنفس نص المهمة (script warns on stderr; review before
     
