@@ -112,9 +112,10 @@ with white bold text spanning the full table width, and a light-gray
     
     never written as "0" — this is the one place zeros are hidden.
     
-3. **المهام المكتملة** — `# | المهمة | القطاع`, only tasks whose normalised
+3. **المهام المكتملة** — `م | المهمة | القطاع | ملاحظات`, only tasks whose normalised
     
-    status is مكتملة. Sequential numbering from 1. If there are none, the title
+    status is مكتملة. Carry each task's الملاحظات from the source; keep an empty
+    note blank. Sequential numbering from 1. If there are none, the title
     
     and header row still render, with no data rows underneath — an empty
     
@@ -285,4 +286,5 @@ Then hand the user only the file plus, if relevant, one short note on data
 caveats (statuses that had to be flagged, an empty مكتملة/متأخر section) — the
 
 workbook itself carries no analysis, so the reply shouldn't smuggle any in.
+
 
