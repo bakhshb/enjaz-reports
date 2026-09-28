@@ -225,7 +225,7 @@ def build(input_path, output_path):
 
     style_title(ws1, r, 4, "المهام المكتملة")
     r += 1
-    style_header_row(ws1, r, ["م", "المهمة", "القطاع", "ملاحظات"])
+    style_header_row(ws1, r, ["#", "المهمة", "القطاع", "ملاحظات"])
     r += 1
     for i, t in enumerate(completed_tasks, start=1):
         notes = t.get(c_notes) if c_notes else None
@@ -236,7 +236,7 @@ def build(input_path, output_path):
 
     style_title(ws1, r, 4, "المهام المتأخرة")
     r += 1
-    style_header_row(ws1, r, ["م", "المهمة", "القطاع", "ملاحظات"])
+    style_header_row(ws1, r, ["#", "المهمة", "القطاع", "ملاحظات"])
     r += 1
     for i, t in enumerate(delayed_tasks, start=1):
         notes = t.get(c_notes) if c_notes else None
