@@ -149,7 +149,11 @@ def paginate_rows(rows, shape, fixed_rows=2, font_pt=11, capacity_units=None):
     if capacity_units is None: capacity_units=max(1,len(t.rows)-fixed_rows)
     pages=[]; cur=[]; weights=[]; used=0
     for row in rows:
-        w=min(capacity_units,row_units(row,t,font_pt))
+        w=row_units(row,t,font_pt)
+        if w>capacity_units:
+            raise ValueError('A single row needs %d units but the template page holds %d; '
+                             'shorten the source text or use a taller approved template row.'
+                             % (w,capacity_units))
         if cur and used+w>capacity_units:
             pages.append((cur,weights)); cur=[]; weights=[]; used=0
         cur.append(row); weights.append(w); used+=w

@@ -1,6 +1,8 @@
 # Design rules
 
-The master deck is the template. Reuse its shapes; change text, status fills,
+The master deck is the template. When an optional table is absent, use the same
+approved shape from `weekly-consolidated-report/assets/weekly-report-master.pptx`.
+Reuse its shapes; change text, status fills,
 accent colour and geometry, nothing else. No new layouts, no new charts, no new
 KPIs, no analysis or recommendations added anywhere.
 
@@ -64,11 +66,12 @@ match without being sampled by eye.
 
 | table | cloned from | columns |
 |---|---|---|
-| tasks by status | ملخص المهام table | `#`, المهمة, القطاع |
-| a task status whose master table has an extra column | that table | as in the master (e.g. المعلقة + التحديث) |
+| tasks by status | matching titled status table on ملخص المهام, or the approved asset when absent | as in that table, including ملاحظات or التحديث |
+| طلبات الدعم | its own table on ملخص المهام | as in the master |
 | أبرز التحديثات | its own table on ملخص مشاريع سهيل | `#`, المشروع, القطاع, التحديث |
+| التحديات | its own table on ملخص مشاريع سهيل | `#`, المشروع, القطاع, التحدي |
 | projects by status | a تفاصيل مشاريع سهيل table, rescaled to the content width | `#`, اسم المشروع, تاريخ البداية, تاريخ النهاية, الحالة, ما تم حتى تاريخه |
-| المعاملات المتأخرة | its own table, rows replaced | as in the master |
+| المعاملات المتأخرة | its own table, rows replaced | as in the master; sector is joined from final Excel when absent |
 
 Project status tables take the gold-bar title row from the أبرز التحديثات table
 (expanded to six columns) so every table on that slide shares one title style.

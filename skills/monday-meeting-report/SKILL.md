@@ -66,6 +66,7 @@ Use the approved six-column task-detail page as the reusable pattern. For each s
 The Excel task detail sheet has a seventh field, `الجهات ذات العلاقة`. The user intentionally removed this column from the PowerPoint template; do not transfer it to the deck or append it to `ملاحظات`.
 
 Longer text consumes more page capacity than short text. Prefer an extra continuation page over compressed or clipped content.
+If a single record is taller than an otherwise empty approved page, stop with a clear error; never silently cap its estimated height.
 
 ### Suhail summary
 

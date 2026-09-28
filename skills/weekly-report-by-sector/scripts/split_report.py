@@ -2,14 +2,17 @@
 """Split the ministry-wide weekly report (تقرير المهام) into one deck per جهة.
 
 Usage:
-    python split_report.py MASTER.pptx --outdir out [--aliases aliases.json] [--no-refine]
+    python split_report.py MASTER.pptx --outdir out [--transactions FINAL.xlsx]
+                           [--aliases aliases.json] [--no-refine]
 
-The master deck is the single source of both data and design. Nothing here
+The master deck supplies data and design. The final transactions Excel supplies
+sector membership when the displayed transactions table omits that column. Nothing here
 re-designs anything: every table, row, KPI card and title bar is cloned from a
 shape that already exists in the master, and only the text, the fills that encode
 status, and the geometry are changed.
 """
 import argparse, json, math, os, re, shutil, subprocess, sys, zipfile, pathlib, tempfile
+from collections import defaultdict
 from copy import deepcopy
 
 from pptx import Presentation
@@ -29,6 +32,7 @@ CX, CW   = 474245, 6623050      # content column: x and width of the KPI card
 TOP_Y    = 1780255              # first table starts where the comparison chart was
 GAP      = 200000               # vertical gap between stacked tables
 KPI_ZONE = 1700000              # everything below this y on a section slide is body
+FOOTER_Y = 12687759
 NAV_XS   = (5741129, 5741130, 3970297, 2199462)   # nav tabs that stay
 NAV_DROP_X = 428628                                # the التفاصيل tab
 NAV_SHIFT  = 1012345            # shift left so the 3 remaining tabs are page-centred
@@ -207,7 +211,7 @@ def add_frame(spTree, gf, name):
     return gf
 
 def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, accent=None,
-               bold_update_col=None):
+               bold_update_col=None, headers=None):
     gf = deepcopy(tmpl_gf)
     tbl = gf_tbl(gf)
     trs = tbl.findall(q('tr'))
@@ -223,6 +227,11 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
     tcell = next((tc for tc in tcs_t if tc.get('gridSpan')), tcs_t[0])
     clean_title_row(ttr, accent)
     set_cell(tcell, title, algn='r', fallback_rpr=fb)
+    if headers is not None:
+        if len(headers) != ncols:
+            raise ValueError('Header width does not match table: ' + title)
+        for tc, value in zip(tbl.findall(q('tr'))[1].findall(q('tc')), headers):
+            set_cell(tc, value, fallback_rpr=fb)
     for tr in tbl.findall(q('tr'))[2:]: tbl.remove(tr)
     for row in rows:
         if isinstance(row, dict):
@@ -234,8 +243,9 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
             tbl.append(tr)
             continue
         tr = deepcopy(body); tcs = tr.findall(q('tc'))
+        if len(row) != ncols:
+            raise ValueError('Row width does not match table: ' + title)
         for ci, val in enumerate(row):
-            if ci >= len(tcs): break
             set_cell(tcs[ci], val, algn=algns[ci], fallback_rpr=fb,
                      bold_date_line=(ci == bold_update_col))
         if status_col is not None:
@@ -261,6 +271,23 @@ def est_table(rows, widths):
         h += PAD + lines * LINE
     return h * EMU
 
+def set_estimated_row_heights(gf, rows, widths, frame_height):
+    """Keep editable PowerPoint row geometry consistent before PDF refinement."""
+    heights = [int(0.28 * EMU), int(0.30 * EMU)]
+    if rows and isinstance(rows[0], dict):
+        heights.extend(int(row['tr'].get('h', 152400)) for row in rows)
+    else:
+        for row in rows:
+            lines = 1
+            for value, width in zip(row, widths):
+                cpl = max(6, (width / EMU - 0.12) * CPI)
+                lines = max(lines, sum(max(1, math.ceil(len(part) / cpl))
+                                       for part in str(value).split('\n')))
+            heights.append(int((PAD + lines * LINE) * EMU))
+    heights[-1] += int(frame_height) - sum(heights)
+    for tr, height in zip(gf_tbl(gf).findall(q('tr')), heights):
+        tr.set('h', str(height))
+
 # ======================= reading the master deck ==========================
 def find_tables(slide, must_contain):
     hits = []
@@ -271,6 +298,32 @@ def find_tables(slide, must_contain):
         if all(k in head for k in must_contain): hits.append((sh, rows))
     return hits
 
+def table_title(rows):
+    return norm(next((x for x in rows[0] if norm(x)), '')) if rows else ''
+
+def title_tables(slides, titles):
+    for slide in slides:
+        for sh in slide.shapes:
+            if sh.has_table:
+                rows = table_rows(sh)
+                if rows and table_title(rows) in titles:
+                    yield sh, rows
+
+def summary_records(slides, title, text_key):
+    out = []
+    for _, rows in title_tables(slides, {title}):
+        head = [norm(x) for x in rows[1]]
+        detail_key = 'طلب الدعم' if title == 'طلبات الدعم' else 'التحدي'
+        for required in (text_key, 'القطاع', detail_key):
+            if required not in head:
+                raise ValueError('%s is missing %s column' % (title, required))
+        for row in rows[2:]:
+            if any(norm(x) for x in row):
+                out.append({'sector': row[head.index('القطاع')],
+                            'name': row[head.index(text_key)],
+                            'text': row[head.index(detail_key)]})
+    return out
+
 def locate(prs):
     """Identify slide roles by content, not by fixed slide numbers."""
     slides = list(prs.slides)
@@ -280,20 +333,32 @@ def locate(prs):
                   visible[-1])
     role = {'cover': visible[0], 'thanks': thanks,
             'tasks': None, 'projects': None, 'trans': None,
-            'task_details': [], 'proj_details': [], 'trans_slides': []}
+            'task_details': [], 'proj_details': [], 'trans_slides': [],
+            'task_summaries': [], 'project_summaries': []}
     for i in visible:
         s = slides[i]
         has_chart = any(sh.has_chart for sh in s.shapes)
-        if find_tables(s, ['رقم المعاملة']):
+        labels = ' '.join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame)
+        tables = [(sh, table_rows(sh)) for sh in s.shapes if sh.has_table]
+        if any('رقم المعاملة' in [norm(x) for x in r[1]] for _, r in tables if len(r) > 1):
             role['trans_slides'].append(i)
             if role['trans'] is None: role['trans'] = i
-        if has_chart and find_tables(s, ['المشروع', 'التحديث']) and not find_tables(s, ['المهمة']):
-            role['projects'] = i
-        elif has_chart and find_tables(s, ['المهمة']):
+        task_summary = any(table_title(r) in {'طلبات الدعم', 'المهام المعلقة',
+            'المهام المكتملة', 'المهام المتأخرة', 'المهام على المخطط'} for _, r in tables)
+        project_summary = any(table_title(r) in {'أبرز التحديثات', 'التحديات',
+            'المشاريع المتأخرة'} for _, r in tables)
+        if task_summary:
+            role['task_summaries'].append(i)
+        if project_summary:
+            role['project_summaries'].append(i)
+        if has_chart and 'إجمالي المهام' in labels and role['tasks'] is None:
             role['tasks'] = i
-        elif not has_chart and find_tables(s, ['اسم المشروع']):
+        if has_chart and 'إجمالي مشاريع سهيل' in labels and role['projects'] is None:
+            role['projects'] = i
+        if any(len(r[1]) == 6 and 'اسم المشروع' in r[1] for _, r in tables if len(r) > 1):
             role['proj_details'].append(i)
-        elif not has_chart and find_tables(s, ['المهمة']):
+        if any(len(r[1]) == 6 and 'المهمة' in r[1] and 'الحالة' in r[1]
+               for _, r in tables if len(r) > 1):
             role['task_details'].append(i)
     missing = [k for k in ('tasks', 'projects') if role[k] is None]
     if missing:
@@ -304,15 +369,17 @@ def locate(prs):
 
 def read_data(prs, role):
     slides = list(prs.slides)
-    tasks, projs, trans, ups = [], [], [], []
+    tasks, projs, trans, ups, support, challenges = [], [], [], [], [], []
     for i in role['task_details']:
-        for sh, rows in find_tables(slides[i], ['المهمة']):
+        for sh, rows in find_tables(slides[i], ['المهمة', 'الحالة']):
+            if len(rows[1]) != 6: continue
             for r in rows[2:]:
                 if r[0].strip(): tasks.append({'text': r[1], 'sector': r[2],
                                                'status': norm_status(r[4]),
                                                'note': r[5] if len(r) > 5 else ''})
     for i in role['proj_details']:
         for sh, rows in find_tables(slides[i], ['اسم المشروع']):
+            if len(rows[1]) != 6: continue
             sector = rows[0][0]
             trs = sh._element.find('.//' + q('tbl')).findall(q('tr'))
             for ri, r in enumerate(rows[2:], start=2):
@@ -322,12 +389,80 @@ def read_data(prs, role):
                                   'tr': deepcopy(trs[ri])})
     for i in role['trans_slides']:
         for sh, rows in find_tables(slides[i], ['رقم المعاملة']):
+            head = [norm(x) for x in rows[1]]
+            id_col = head.index('رقم المعاملة')
             for r in rows[2:]:
-                if r[0].strip(): trans.append(r)
-    for sh, rows in find_tables(slides[role['projects']], ['التحديث']):
-        for r in rows[2:]:
-            if r[0].strip(): ups.append({'project': r[1], 'sector': r[2], 'text': r[3]})
-    return tasks, projs, trans, ups
+                if norm(r[id_col]): trans.append({'row': r, 'head': head})
+    for i in role['project_summaries']:
+        for sh, rows in title_tables([slides[i]], {'أبرز التحديثات'}):
+            head = [norm(x) for x in rows[1]]
+            for r in rows[2:]:
+                if norm(r[head.index('المشروع')]):
+                    ups.append({'project': r[head.index('المشروع')],
+                                'sector': r[head.index('القطاع')],
+                                'text': r[head.index('التحديث')]})
+    for i in role['task_summaries']:
+        support.extend(summary_records([slides[i]], 'طلبات الدعم', 'المهمة'))
+    for i in role['project_summaries']:
+        challenges.extend(summary_records([slides[i]], 'التحديات', 'المشروع'))
+    return tasks, projs, trans, ups, support, challenges
+
+TRANS_FIELDS = ('رقم المعاملة', 'موضوع المعاملة', 'الجهة الوارد منها المعاملة',
+                'تاريخ انشاء المعاملة', 'تاريخ الإنجاز المخطط له')
+
+def transaction_value(value):
+    if value is None: return ''
+    if hasattr(value, 'strftime'): return value.strftime('%d/%m/%Y')
+    return str(value).strip()
+
+def field_key(name):
+    return norm(name).replace('إنشاء', 'انشاء').replace('الانجاز', 'الإنجاز').replace('المخطط له', 'المخطط')
+
+def transaction_key(values):
+    return tuple(norm(transaction_value(x)) for x in values)
+
+def attach_transaction_sectors(trans, workbook_path):
+    """Join the five displayed PPTX fields to the final Excel's sector column."""
+    if not trans: return trans
+    if all('القطاع' in item['head'] for item in trans):
+        for item in trans:
+            item['sector'] = item['row'][item['head'].index('القطاع')]
+        return trans
+    if not workbook_path:
+        raise ValueError('The five-column transactions table needs --transactions FINAL.xlsx '
+                         'to identify sectors.')
+    from openpyxl import load_workbook
+    wb = load_workbook(workbook_path, read_only=True, data_only=True)
+    ws = wb['المعاملات'] if 'المعاملات' in wb.sheetnames else wb.active
+    excel_rows = list(ws.values)
+    header_i = next((i for i, r in enumerate(excel_rows)
+                     if {'رقم المعاملة', 'موضوع المعاملة', 'القطاع'}.issubset(
+                         {field_key(x) for x in r if x is not None})), None)
+    if header_i is None:
+        raise ValueError('Could not find the delayed-transactions header in ' + workbook_path)
+    head = [field_key(x) for x in excel_rows[header_i]]
+    col = {name: head.index(field_key(name)) for name in TRANS_FIELDS}
+    sector_col = head.index('القطاع')
+    lookup = defaultdict(list)
+    for row in excel_rows[header_i + 1:]:
+        if not norm(transaction_value(row[col['رقم المعاملة']])): continue
+        values = [row[col[name]] for name in TRANS_FIELDS]
+        lookup[transaction_key(values)].append(transaction_value(row[sector_col]))
+    for item in trans:
+        head = [field_key(x) for x in item['head']]
+        try:
+            values = [item['row'][head.index(field_key(name))] for name in TRANS_FIELDS]
+        except ValueError as exc:
+            raise ValueError('Unexpected five-column transactions header') from exc
+        key = transaction_key(values)
+        sectors = lookup.get(key, [])
+        if not sectors:
+            raise ValueError('Transaction %s does not match the final Excel workbook' % values[0])
+        if len(set(sectors)) != 1:
+            raise ValueError('Transaction %s matches multiple sectors in Excel' % values[0])
+        item['sector'] = sectors.pop()
+    wb.close()
+    return trans
 
 def kpi_shapes(slide):
     """Pair each KPI number box with its label box by horizontal proximity."""
@@ -429,6 +564,51 @@ def clear_body(slide):
         if sh.top is not None and sh.top >= KPI_ZONE:
             spTree.remove(sh._element)
 
+def continuation_slide(prs, source_index, keep, base_count):
+    """Clone the section heading/KPIs for a continuation without its data body."""
+    source = prs.slides[source_index]
+    slide = prs.slides.add_slide(source.slide_layout)
+    for sh in list(slide.shapes): slide.shapes._spTree.remove(sh._element)
+    for sh in source.shapes:
+        if sh.top is not None and sh.top < KPI_ZONE:
+            slide.shapes._spTree.append(deepcopy(sh._element))
+    new_index = len(prs.slides) - 1
+    at = keep.index(source_index) + 1
+    while at < len(keep) and keep[at] >= base_count:
+        at += 1
+    keep.insert(at, new_index)
+    return slide, new_index
+
+def place_table(prs, slide, y, source_index, keep, base_count, tmpl, title, rows, algns,
+                frame_name, estimate, x=CX, frame_width=CW, page_top=TOP_Y, **kwargs):
+    """Place whole rows on as many same-design summary pages as required."""
+    width = tbl_colwidths(gf_tbl(tmpl))
+    remaining = list(rows)
+    while remaining:
+        n = 0
+        for count in range(1, len(remaining) + 1):
+            if estimate(remaining[:count], width) + y <= FOOTER_Y - 300000:
+                n = count
+            else:
+                break
+        if n == 0:
+            if y == page_top:
+                raise ValueError('A single %s row cannot fit on an empty section page' % title)
+            slide, _ = continuation_slide(prs, source_index, keep, base_count)
+            y = page_top
+            continue
+        chunk = remaining[:n]
+        gf = make_table(tmpl, title, chunk, algns, **kwargs)
+        h = estimate(chunk, width)
+        set_estimated_row_heights(gf, chunk, width, h)
+        gf_set_pos(add_frame(slide.shapes._spTree, gf, frame_name), x, y, frame_width, h)
+        y += h + GAP
+        remaining = remaining[n:]
+        if remaining:
+            slide, _ = continuation_slide(prs, source_index, keep, base_count)
+            y = page_top
+    return slide, y
+
 def single_kpi(slide, count, label_text):
     """Transactions: keep only the gold total, recentred, relabelled."""
     kp = kpi_shapes(slide)
@@ -453,75 +633,107 @@ def single_kpi(slide, count, label_text):
             pPr = etree.Element(q('pPr')); p._p.insert(0, pPr)
         pPr.set('algn', 'ctr'); pPr.set('rtl', '1')
 
-def build(master, outdir, aliases, do_refine=True):
+def build(master, outdir, aliases, transactions=None, only=None):
     os.makedirs(outdir, exist_ok=True)
     full_dir = os.path.join(outdir, '_full'); os.makedirs(full_dir, exist_ok=True)
 
     src = Presentation(master)
     role = locate(src)
-    tasks, projs, trans, ups = read_data(src, role)
+    tasks, projs, trans, ups, support, challenges = read_data(src, role)
+    attach_transaction_sectors(trans, transactions)
 
     canon = {norm(k): v for k, v in aliases.items()}
     def C(name): return canon.get(norm(name), norm(name))
 
     sectors = {}
-    def B(n): return sectors.setdefault(n, {'tasks': [], 'projs': [], 'trans': [], 'ups': []})
+    def B(n): return sectors.setdefault(n, {'tasks': [], 'projs': [], 'trans': [],
+                                           'ups': [], 'support': [], 'challenges': []})
     for t in tasks: B(C(t['sector']))['tasks'].append(t)
     for p in projs: B(C(p['sector']))['projs'].append(p)
-    for r in trans: B(C(r[3]))['trans'].append(r)
+    for r in trans: B(C(r['sector']))['trans'].append(r)
     for u in ups:   B(C(u['sector']))['ups'].append(u)
+    for u in support: B(C(u['sector']))['support'].append(u)
+    for u in challenges: B(C(u['sector']))['challenges'].append(u)
 
     sl = list(src.slides)
-    def frame(i, keyword):
-        return deepcopy(find_tables(sl[i], keyword)[0][0]._element)
-    TMPL_TASK  = frame(role['tasks'], ['المهمة'])
-    TMPL_UPD   = frame(role['projects'], ['التحديث'])
-    TMPL_TRANS = frame(role['trans'], ['رقم المعاملة']) if role['trans'] is not None else None
-    upd_task = find_tables(sl[role['tasks']], ['المهمة', 'التحديث'])
-    TMPL_TASK_UPD = deepcopy(upd_task[0][0]._element) if upd_task else None
-    UPD_TASK_TITLE = norm(upd_task[0][1][0][0]) if upd_task else ''
-    TMPL_PROJ  = frame(role['proj_details'][-1], ['اسم المشروع'])
+    asset_path = pathlib.Path(__file__).resolve().parents[2] / 'weekly-consolidated-report' / 'assets' / 'weekly-report-master.pptx'
+    design = Presentation(str(asset_path)) if asset_path.exists() else None
+    design_slides = list(design.slides) if design else []
+    def titled_frame(indices, title):
+        found = list(title_tables([sl[i] for i in indices], {title}))
+        if not found and design_slides:
+            found = list(title_tables(design_slides, {title}))
+        return deepcopy(found[0][0]._element) if found else None
+    task_templates = {st: titled_frame(role['task_summaries'], TASK_TITLE[st])
+                      for st in TASK_ORDER}
+    task_fallback = next((v for v in task_templates.values() if v is not None), None)
+    TMPL_SUPPORT = titled_frame(role['task_summaries'], 'طلبات الدعم')
+    TMPL_UPD = titled_frame(role['project_summaries'], 'أبرز التحديثات')
+    TMPL_CHALLENGE = titled_frame(role['project_summaries'], 'التحديات')
+    TMPL_TRANS = deepcopy(find_tables(sl[role['trans']], ['رقم المعاملة'])[0][0]._element) if role['trans'] is not None else None
+    detail_shapes = (find_tables(sl[role['proj_details'][-1]], ['اسم المشروع'])
+                     if role['proj_details'] else [])
+    if not detail_shapes and design_slides:
+        detail_shapes = next((find_tables(s, ['اسم المشروع']) for s in design_slides
+                              if find_tables(s, ['اسم المشروع'])), [])
+    if not detail_shapes:
+        raise ValueError('No approved project detail table found for status formatting')
+    TMPL_PROJ = deepcopy(detail_shapes[0][0]._element)
+    if TMPL_UPD is None:
+        raise ValueError('No approved Suhail summary table found for title formatting')
     GOLD_TITLE = deepcopy(gf_tbl(TMPL_UPD).findall(q('tr'))[0])
     rescale(gf_tbl(TMPL_PROJ), CW)
 
     manifest = []
     for sec in sorted(sectors, key=lambda s: (0 if s.startswith('وكالة') else 1, s)):
+        if only and only not in sec: continue
         d = sectors[sec]
-        if not (d['tasks'] or d['projs'] or d['trans']): continue
+        if not any(d.values()): continue
         prs = Presentation(master)
         strip_and_centre_nav(prs)
         fix_cover(prs, sec)
         keep = [role['cover']]
-        if d['tasks']: keep.append(role['tasks'])
-        if d['projs']: keep.append(role['projects'])
+        if d['tasks'] or d['support']: keep.append(role['tasks'])
+        if d['projs'] or d['ups'] or d['challenges']: keep.append(role['projects'])
         if d['trans']: keep.append(role['trans'])
         keep.append(role['thanks'])
 
-        if d['tasks']:
+        if d['tasks'] or d['support']:
             s = prs.slides[role['tasks']]
             kp = kpi_shapes(s)
             cnt = {k: sum(1 for t in d['tasks'] if t['status'] == k) for k in TASK_ORDER}
             for key, val in [('إجمالي', len(d['tasks']))] + list(cnt.items()):
                 if key in kp: set_text(kp[key]['num'], val)
             clear_body(s)
-            widths = tbl_colwidths(gf_tbl(TMPL_TASK)); y = TOP_Y
+            y = TOP_Y
             for st in TASK_ORDER:
                 sel = [x for x in d['tasks'] if x['status'] == st]
                 if not sel: continue
-                if TMPL_TASK_UPD is not None and UPD_TASK_TITLE == TASK_TITLE[st]:
-                    rows = [[str(i + 1), t['text'], sec, t['note'].strip()] for i, t in enumerate(sel)]
-                    gf = make_table(TMPL_TASK_UPD, TASK_TITLE[st], rows, ['ctr', 'r', 'ctr', 'r'],
-                                    accent=ACCENT[st])
-                    h = est_table(rows, tbl_colwidths(gf_tbl(TMPL_TASK_UPD)))
-                else:
-                    rows = [[str(i + 1), t['text'], sec] for i, t in enumerate(sel)]
-                    gf = make_table(TMPL_TASK, TASK_TITLE[st], rows, ['ctr', 'r', 'ctr'],
-                                    accent=ACCENT[st])
-                    h = est_table(rows, widths)
-                gf_set_pos(add_frame(s.shapes._spTree, gf, 'tbl_' + st), CX, y, CW, h)
-                y += h + GAP
+                tmpl = task_templates[st] if task_templates[st] is not None else task_fallback
+                if tmpl is None: raise ValueError('No task status table to clone')
+                headers = [cell_text_el(tc) for tc in gf_tbl(tmpl).findall(q('tr'))[1].findall(q('tc'))]
+                if task_templates[st] is None:
+                    headers = ['#', 'المهمة', 'القطاع', 'ملاحظات'] if len(headers) == 4 else ['#', 'المهمة', 'القطاع']
+                rows = []
+                for i, t in enumerate(sel):
+                    values = {'#': str(i+1), 'المهمة': t['text'], 'القطاع': sec,
+                              'ملاحظات': t['note'].strip(), 'التحديث': t['note'].strip()}
+                    rows.append([values.get(norm(h), '') for h in headers])
+                s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), tmpl,
+                                   TASK_TITLE[st], rows, ['ctr' if h == '#' else 'r' for h in headers],
+                                   'tbl_' + st, est_table, accent=ACCENT[st], headers=headers)
+            if d['support']:
+                if TMPL_SUPPORT is None: raise ValueError('No support table to clone')
+                headers = [cell_text_el(tc) for tc in gf_tbl(TMPL_SUPPORT).findall(q('tr'))[1].findall(q('tc'))]
+                rows = []
+                for i, u in enumerate(d['support']):
+                    values = {'#': str(i+1), 'المهمة': u['name'], 'القطاع': sec, 'طلب الدعم': u['text']}
+                    rows.append([values.get(norm(h), '') for h in headers])
+                s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), TMPL_SUPPORT,
+                                   'طلبات الدعم', rows, ['ctr' if h == '#' else 'r' for h in headers],
+                                   'tbl_support', est_table, accent=ACCENT['تحديثات'])
 
-        if d['projs']:
+        if d['projs'] or d['ups'] or d['challenges']:
             s = prs.slides[role['projects']]
             kp = kpi_shapes(s)
             cnt = {k: sum(1 for p in d['projs'] if p['status'] == k) for k in PROJ_ORDER}
@@ -530,24 +742,30 @@ def build(master, outdir, aliases, do_refine=True):
             clear_body(s)
             y = TOP_Y
             if d['ups']:
+                if TMPL_UPD is None: raise ValueError('No updates table to clone')
                 rows = [[str(i + 1), u['project'], sec, u['text']] for i, u in enumerate(d['ups'])]
-                w = tbl_colwidths(gf_tbl(TMPL_UPD))
-                gf = make_table(TMPL_UPD, 'أبرز التحديثات', rows, ['ctr', 'r', 'ctr', 'r'],
-                                accent=ACCENT['تحديثات'], bold_update_col=3)
-                h = est_table(rows, w)
-                gf_set_pos(add_frame(s.shapes._spTree, gf, 'tbl_updates'), CX, y, CW, h)
-                y += h + GAP
-            wp = tbl_colwidths(gf_tbl(TMPL_PROJ))
+                s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_UPD,
+                                   'أبرز التحديثات', rows, ['ctr', 'r', 'ctr', 'r'],
+                                   'tbl_updates', est_table, accent=ACCENT['تحديثات'],
+                                   bold_update_col=3)
+            if d['challenges']:
+                if TMPL_CHALLENGE is None: raise ValueError('No challenges table to clone')
+                headers = [cell_text_el(tc) for tc in gf_tbl(TMPL_CHALLENGE).findall(q('tr'))[1].findall(q('tc'))]
+                rows = []
+                for i, u in enumerate(d['challenges']):
+                    values = {'#': str(i+1), 'المشروع': u['name'], 'القطاع': sec, 'التحدي': u['text']}
+                    rows.append([values.get(norm(h), '') for h in headers])
+                s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_CHALLENGE,
+                                   'التحديات', rows, ['ctr' if h == '#' else 'r' for h in headers],
+                                   'tbl_challenges', est_table, accent=ACCENT['متأخرة'])
             for st in PROJ_ORDER:
                 rows = [{'num': str(i + 1), 'tr': p['tr']}
                         for i, p in enumerate([x for x in d['projs'] if x['status'] == st])]
                 if not rows: continue
-                gf = make_table(TMPL_PROJ, PROJ_TITLE[st], rows,
-                                ['ctr', 'r', 'ctr', 'ctr', 'ctr', 'r'],
-                                status_col=4, title_tr=GOLD_TITLE, accent=ACCENT[st])
-                h = est_rows(rows, wp)
-                gf_set_pos(add_frame(s.shapes._spTree, gf, 'proj_' + st), CX, y, CW, h)
-                y += h + GAP
+                s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_PROJ,
+                                   PROJ_TITLE[st], rows, ['ctr', 'r', 'ctr', 'ctr', 'ctr', 'r'],
+                                   'proj_' + st, est_rows, status_col=4,
+                                   title_tr=GOLD_TITLE, accent=ACCENT[st])
 
         if d['trans']:
             s = prs.slides[role['trans']]
@@ -555,21 +773,22 @@ def build(master, outdir, aliases, do_refine=True):
             tx, ty, tw = tframe.left, tframe.top, tframe.width
             clear_body(s)
             single_kpi(s, len(d['trans']), 'إجمالي المعاملات المتأخرة')
-            rows = [[f'{i+1:02d}', r[1], r[2], sec, r[4], r[5], r[6]]
-                    for i, r in enumerate(d['trans'])]
-            w = tbl_colwidths(gf_tbl(TMPL_TRANS))
-            gf = make_table(TMPL_TRANS, 'المعاملات المتأخرة', rows,
-                            ['ctr', 'ctr', 'r', 'ctr', 'r', 'ctr', 'ctr'],
-                            accent=ACCENT['متأخرة'])
-            gf_set_pos(add_frame(s.shapes._spTree, gf, 'tbl_trans'),
-                       tx, ty, tw, est_table(rows, w))
+            rows = []
+            for item in d['trans']:
+                rows.append([item['row'][item['head'].index(h)] for h in item['head']])
+            place_table(prs, s, ty, role['trans'], keep, len(sl), TMPL_TRANS,
+                        'المعاملات المتأخرة', rows,
+                        ['ctr' if 'تاريخ' in h or 'رقم' in h else 'r' for h in d['trans'][0]['head']],
+                        'tbl_trans', est_table, x=tx, frame_width=tw, page_top=ty,
+                        accent=ACCENT['متأخرة'])
 
         path = os.path.join(full_dir, 'تقرير الإنجاز الأسبوعي - %s.pptx' % sec)
         prs.save(path)
         manifest.append({'sector': sec, 'file': path, 'keep': keep,
-                         'edited': [i for i in (role['tasks'], role['projects'], role['trans'])
-                                    if i in keep],
-                         'n': [len(d['tasks']), len(d['projs']), len(d['trans']), len(d['ups'])],
+                         'edited': [i for i in keep if i in (role['tasks'], role['projects'], role['trans'])
+                                    or i >= len(sl)],
+                         'n': [len(d['tasks']), len(d['projs']), len(d['trans']), len(d['ups']),
+                               len(d['support']), len(d['challenges'])],
                          'nslides': len(sl)})
     return manifest
 
@@ -691,8 +910,8 @@ def slim(manifest, outdir):
         xml = pres.read_text(encoding='utf-8')
         m = re.search(r'(<p:sldIdLst>)(.*?)(</p:sldIdLst>)', xml, re.S)
         ids = re.findall(r'<p:sldId\b[^>]*/>', m.group(2))
-        keep = set(item['keep'])
-        xml = xml[:m.start()] + m.group(1) + ''.join(s for i, s in enumerate(ids) if i in keep) \
+        keep = item['keep']
+        xml = xml[:m.start()] + m.group(1) + ''.join(ids[i] for i in keep) \
               + m.group(3) + xml[m.end():]
         pres.write_text(xml, encoding='utf-8')
         # Unreferenced slide parts are harmless; dangling relationships are removed below.
@@ -720,7 +939,9 @@ def slim(manifest, outdir):
         shrink_media(wd)
         out = os.path.abspath(os.path.join(outdir, os.path.basename(item['file'])))
         if os.path.exists(out): os.remove(out)
-        subprocess.run(['zip', '-Xqr', out, '.'], cwd=wd, check=True)
+        with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            for part in pathlib.Path(wd).rglob('*'):
+                if part.is_file(): archive.write(part, part.relative_to(wd).as_posix())
         shutil.rmtree(wd, ignore_errors=True)
         item['out'] = out
         final.append(item)
@@ -735,17 +956,17 @@ def main():
         os.path.dirname(os.path.abspath(__file__)), '..', 'references', 'sector-aliases.json'))
     ap.add_argument('--no-refine', action='store_true')
     ap.add_argument('--only', default=None)
+    ap.add_argument('--transactions', help='Final consolidated transactions Excel; required for five-column transaction tables')
     a = ap.parse_args()
     aliases = json.load(open(a.aliases, encoding='utf-8')) if os.path.exists(a.aliases) else {}
-    man = build(a.master, a.outdir, aliases)
-    if a.only: man = [m for m in man if a.only in m['sector']]
+    man = build(a.master, a.outdir, aliases, a.transactions, a.only)
     if not a.no_refine:
         refine_positions(man)
     man = slim(man, a.outdir)
-    json.dump(man, open(os.path.join(a.outdir, 'manifest.json'), 'w'),
-              ensure_ascii=False, indent=1)
+    with open(os.path.join(a.outdir, 'manifest.json'), 'w', encoding='utf-8') as stream:
+        json.dump(man, stream, ensure_ascii=False, indent=1)
     for it in man:
-        print('%-45s tasks=%d projects=%d transactions=%d updates=%d slides=%d'
+        print('%-45s tasks=%d projects=%d transactions=%d updates=%d support=%d challenges=%d slides=%d'
               % (it['sector'], *it['n'], len(it['keep'])))
 
 if __name__ == '__main__':

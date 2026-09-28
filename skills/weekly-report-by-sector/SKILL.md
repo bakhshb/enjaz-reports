@@ -7,7 +7,15 @@ description: Split the ministry-wide weekly report deck (تقرير المهام
 
 Turn one consolidated weekly deck into a standalone report per جهة. The master
 
-deck is both the only data source and the only design reference: never invent a
+deck supplies the report content and design. If an optional status table is absent
+
+from the populated deck, clone its approved shape from the bundled weekly master
+
+asset. When its delayed-transactions table
+
+has no sector column, the final transactions Excel supplies the sector for those
+
+exact rows. Never invent a
 
 number, never redesign anything, never introduce a layout the master doesn't
 
@@ -18,13 +26,33 @@ already contain.
 Use `uv` as the supported runner so the skill uses an isolated, reproducible dependency set. Do not call these scripts with the system Python.
 
 ```bash
-uv run --with python-pptx --with lxml --with pdfplumber --with pillow scripts/split_report.py MASTER.pptx --outdir out
-uv run --with python-pptx --with lxml --with pdfplumber --with pillow scripts/qa_report.py out --master MASTER.pptx --render qa
+uv run --with python-pptx --with lxml --with openpyxl --with pdfplumber --with pillow scripts/split_report.py MASTER.pptx --transactions FINAL_TRANSACTIONS.xlsx --outdir out
+uv run --with python-pptx --with lxml --with openpyxl --with pdfplumber --with pillow scripts/qa_report.py out --master MASTER.pptx --render qa
 ```
 
 `--only <name>` builds a single sector, which is the fast way to test a change
 
 before rebuilding all ten.
+
+When LibreOffice is unavailable, run the splitter with `--no-refine` and run
+
+`qa_report.py` without `--render`. The initial pass still sets each table's row
+
+heights to match its frame and creates continuation pages. Open the resulting
+
+deck in PowerPoint for a visual check before delivery.
+
+`--transactions` is required when delayed transactions use the approved five-column
+
+table (which omits sector). Use the **final** `المعاملات` Excel summary from the
+
+same reporting week. The splitter matches all five visible transaction fields to
+
+the Excel row; it stops if a row is missing or matches multiple sectors. If there
+
+are no delayed rows, or an older deck includes a sector column, this argument is
+
+optional.
 
 `split_report.py` reads the master, groups everything by sector, writes one deck
 
@@ -51,11 +79,11 @@ still works. Detection keys on table header text:
 | role | how it's found |
 | --- | --- |
 | cover | first visible slide |
-| ملخص المهام | slide with a chart + a table whose header has `المهمة` |
-| ملخص مشاريع سهيل | slide with a chart + a table whose header has `التحديث` |
+| ملخص المهام | chart slide with `إجمالي المهام` KPI; titled chartless continuation tables are also read |
+| ملخص مشاريع سهيل | chart slide with `إجمالي مشاريع سهيل` KPI; titled chartless continuation tables are also read |
 | المعاملات | slide(s) with a table whose header has `رقم المعاملة` |
-| تفاصيل المهام | chart-less slides with `المهمة` in the header |
-| تفاصيل مشاريع سهيل | chart-less slides with `اسم المشروع` in the header |
+| تفاصيل المهام | six-column table with `المهمة` and `الحالة` in the header |
+| تفاصيل مشاريع سهيل | six-column table with `اسم المشروع` in the header |
 | شكرا | last visible slide containing `شكرا` |
 
 Hidden slides (`show="0"`) are template leftovers — the master usually carries one
@@ -70,13 +98,21 @@ The master changes shape from week to week, so treat these as optional:
     
     slide. The script says so and carries on; do not fabricate the section.
     
-- **ملخص المهام status tables gain and lose columns.** المهام المعلقة carried a
+- **ملخص المهام status tables gain and lose columns.** Each status table is
+
+    selected by its title, and every output cell is filled from the matching
+
+    detail row. The `طلبات الدعم` table is read independently and appears only
+
+    for sectors with support requests. المهام المعلقة carried a
     
     `التحديث` column in September 2026. Any status table on that slide whose master
     
     version has the extra column is cloned from that table, so the sector deck keeps
     
-    it; the others stay at `#`, المهمة, القطاع.
+    it. `التحديات` and `أبرز التحديثات` are also read independently from Suhail
+
+    summary pages and appear only when that sector has rows.
     
 
 If detection fails the script stops with a clear message — fix the keys rather
@@ -103,8 +139,8 @@ master's date, unchanged.
 
 Table order — this sequence matters, it's how the report is read:
 
-- Tasks: المتأخرة → المعلقة → المكتملة → على المخطط
-- Projects: أبرز التحديثات → المتأخرة → على المخطط → لم تبدأ → المكتملة
+- Tasks: المتأخرة → المعلقة → المكتملة → على المخطط → طلبات الدعم
+- Projects: أبرز التحديثات → التحديات → المتأخرة → على المخطط → لم تبدأ → المكتملة
 
 ### Formatting أبرز التحديثات
 
