@@ -287,4 +287,3 @@ caveats (statuses that had to be flagged, an empty مكتملة/متأخر secti
 
 workbook itself carries no analysis, so the reply shouldn't smuggle any in.
 
-
