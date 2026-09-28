@@ -123,7 +123,7 @@ with white bold text spanning the full table width, and a light-gray
     
     sign something broke.
     
-4. **المهام المتأخرة** — same shape as above, filtered to متأخر.
+4. **المهام المتأخرة** — `# | المهمة | القطاع`, filtered to متأخر.
 5. **طلبات الدعم** — `# | المهمة | القطاع | طلب الدعم`, one row per record in
     
     the طلبات الدعم sheet, values carried over as-is (blank stays blank, never
