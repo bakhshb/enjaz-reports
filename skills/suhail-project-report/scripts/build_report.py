@@ -97,6 +97,10 @@ c_sector = col(['القطاع'])
 c_name = col(['اسم المشروع'])
 c_start = col(['تاريخ البداية'])
 c_end = col(['تاريخ النهاية'])
+c_notes = col(['ملاحظات'])
+c_challenge = col(['التحدي']) or col(['التحديات'])
+if c_notes is None:
+    print('warning: no project notes column found; delayed-project notes will be blank', file=sys.stderr)
 
 rows = []
 for r in range(2, ws.max_row + 1):
@@ -111,6 +115,8 @@ for r in range(2, ws.max_row + 1):
         'end': norm(ws.cell(r, c_end).value),
         'status': STAT.get(norm(ws.cell(r, i_stat + 1).value), BLANK_STATUS_DEFAULT),
         'done': ws.cell(r, i_done + 1).value or '',
+        'notes': ws.cell(r, c_notes).value if c_notes else None,
+        'challenge': ws.cell(r, c_challenge).value if c_challenge else None,
     })
 
 for x in rows:
@@ -189,14 +195,15 @@ for sec in SUMMARY_SECTORS:
     r += 1
 r += 1
 
-def simple_table(r, heading, status):
-    title(s1, r, heading, 3)
+def simple_table(r, heading, status, include_notes=False):
+    width = 4 if include_notes else 3
+    title(s1, r, heading, width)
     r += 1
-    head(s1, r, ['#', 'المشروع', 'القطاع'])
+    head(s1, r, ['#', 'المشروع', 'القطاع'] + (['ملاحظات'] if include_notes else []))
     r += 1
     sel = [x for x in rows if x['status'] == status]
     if not sel:
-        s1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=3)
+        s1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=width)
         c = s1.cell(r, 1, 'لا يوجد')
         c.font = Font(name=F, size=SZ, italic=True)
         c.alignment = CEN
@@ -206,15 +213,17 @@ def simple_table(r, heading, status):
         s1.cell(r, 1, i).alignment = CEN
         s1.cell(r, 2, x['name']).alignment = RIG
         s1.cell(r, 3, x['sector']).alignment = RIG
-        for j in (1, 2, 3):
+        if include_notes:
+            s1.cell(r, 4, x['notes'] if x['notes'] is not None else '').alignment = RIG
+        for j in range(1, width + 1):
             s1.cell(r, j).font = Font(name=F, size=SZ)
             s1.cell(r, j).border = BORD
-        s1.row_dimensions[r].height = 24
+        s1.row_dimensions[r].height = 70 if include_notes else 24
         r += 1
     return r + 1
 
 r = simple_table(r, 'ثالثا: المشاريع المكتملة', 'مكتملة')
-r = simple_table(r, 'رابعا: المشاريع المتأخرة', 'متأخر')
+r = simple_table(r, 'رابعا: المشاريع المتأخرة', 'متأخر', include_notes=True)
 
 title(s1, r, 'خامسا: أبرز التحديثات', 4)
 r += 1
@@ -237,6 +246,49 @@ if upd_name:
         s1.row_dimensions[r].height = 70
         i += 1
         r += 1
+
+r += 1
+title(s1, r, 'سادسا: التحديات', 4)
+r += 1
+head(s1, r, ['#', 'المشروع', 'القطاع', 'التحدي'])
+r += 1
+challenge_sheet = next((s for s in src.sheetnames if 'تحدي' in s and s != proj_sheet), None)
+challenges = []
+if challenge_sheet:
+    challenge_ws = src[challenge_sheet]
+    challenge_headers = [norm(c.value) for c in challenge_ws[1]]
+    def challenge_col(names):
+        return next((i for i, h in enumerate(challenge_headers) if any(name in h for name in names)), None)
+    i_ch_name = challenge_col(['اسم المشروع', 'المشروع'])
+    i_ch_sector = challenge_col(['القطاع'])
+    i_ch_text = challenge_col(['التحدي', 'التحديات'])
+    if None in (i_ch_name, i_ch_sector, i_ch_text):
+        sys.exit('Challenges sheet needs project, sector, and challenge columns.')
+    for values in challenge_ws.iter_rows(min_row=2, values_only=True):
+        if not values or not values[i_ch_text]:
+            continue
+        sector = norm(values[i_ch_sector])
+        challenges.append((norm(values[i_ch_name]), SECT.get(sector, sector), values[i_ch_text]))
+elif c_challenge:
+    challenges = [(x['name'], x['sector'], x['challenge']) for x in rows if x['challenge']]
+else:
+    print('warning: no challenges sheet or challenge column found; challenges table is empty', file=sys.stderr)
+
+if challenges:
+    for i, (name, sector, challenge) in enumerate(challenges, start=1):
+        for j, value in enumerate((i, name, sector, challenge), start=1):
+            cell = s1.cell(r, j, value)
+            cell.font = Font(name=F, size=SZ)
+            cell.alignment = CEN if j == 1 else RIG
+            cell.border = BORD
+        s1.row_dimensions[r].height = 70
+        r += 1
+else:
+    s1.merge_cells(start_row=r, start_column=1, end_row=r, end_column=4)
+    cell = s1.cell(r, 1, 'لا يوجد')
+    cell.font = Font(name=F, size=SZ, italic=True)
+    cell.alignment = CEN
+    cell.border = BORD
 
 for c_, w in zip('ABCDE', [34, 34, 34, 60, 16]):
     s1.column_dimensions[c_].width = w

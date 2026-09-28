@@ -65,13 +65,14 @@ Defaults to `/mnt/user-data/outputs/ملخص_مشاريع_سهيل.xlsx`. It pri
 
 ## Sheet 1 — «ملخص مشاريع سهيل»
 
-Five sections in this order:
+Six sections in this order:
 
 1. **أولا: الملخص العام** — five KPI tiles: إجمالي مشاريع سهيل, المشاريع المكتملة, المشاريع على المخطط, المشاريع المتأخرة, المشاريع لم تبدأ.
 2. **ثانيا: تفصيل حالات المشاريع حسب القطاع** — columns `القطاع | مكتملة | على المخطط | متأخر | لم تبدأ`. Zeros render as blank cells. Every sector in the fixed list appears even with no projects.
 3. **ثالثا: المشاريع المكتملة** — `# | المشروع | القطاع`.
-4. **رابعا: المشاريع المتأخرة** — same columns; shows `لا يوجد` when empty.
+4. **رابعا: المشاريع المتأخرة** — `# | المشروع | القطاع | ملاحظات`, with each delayed project's note copied from the main projects sheet. Blank notes stay blank; shows `لا يوجد` when empty.
 5. **خامسا: أبرز التحديثات** — taken from the `أبرز التحديثات` sheet: `# | المشروع | القطاع | التحديث`.
+6. **سادسا: التحديات** — `# | المشروع | القطاع | التحدي`. Take nonblank challenges from the `التحديات` sheet when present, one row per challenge. Otherwise use the `التحدي` or `التحديات` column in the main projects sheet. Preserve source order and show `لا يوجد` when no challenges are present. If the source has neither a challenges sheet nor a challenge column, report this rather than inventing entries.
 
 Fixed sector order for section 2:
 
