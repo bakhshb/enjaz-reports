@@ -10,15 +10,11 @@ Content checks (the mandatory ones from the brief):
   * no empty table anywhere
   * no other sector's name appears in any deck
 """
-import argparse, glob, json, os, shutil, subprocess, sys, tempfile
+import argparse, glob, json, os, shutil, subprocess, sys, tempfile, zipfile
 from pptx import Presentation
 from pptx.oxml.ns import qn
 
 SOFFICE = shutil.which('soffice')
-INTEGRITY_CHECK = (
-    '/root/.codex/skills/builtins/presentations/container_tools/'
-    'inspect_presentation_package_integrity.py'
-)
 
 def cell_text(c):
     s = ''
@@ -38,12 +34,14 @@ def check(outdir):
     for it in man:
         path = it.get('out') or os.path.join(outdir, 'التقرير الأسبوعي - %s.pptx' % it['sector'])
         prs = Presentation(path)
-        rows, titles, empty, blob, sector_cells = 0, [], [], '', []
+        rows, titles, empty, geometry, blob, sector_cells = 0, [], [], [], '', []
         for s in prs.slides:
             for sh in s.shapes:
                 if sh.has_table:
                     rr = [[cell_text(c) for c in r.cells] for r in sh.table.rows]
                     titles.append(' '.join(x for x in rr[0] if x)[:40])
+                    if abs(sum(r.height for r in sh.table.rows) - sh.height) > 2:
+                        geometry.append(titles[-1])
                     body = len(rr) - 2
                     rows += body
                     if body == 0: empty.append(titles[-1])
@@ -64,12 +62,13 @@ def check(outdir):
         expected = sum(it['n'])
         sector_blob = ' | '.join(sector_cells)
         leaks = sorted(n for n in names - {it['sector']} if n in sector_blob)
-        good = rows == expected and not leaks and not empty and not over
+        good = rows == expected and not leaks and not empty and not over and not geometry
         ok &= good
         print(('OK   ' if good else 'CHECK') +
               ' | %-42s rows=%-3d expected=%-3d tables=%d' % (it['sector'], rows, expected, len(titles)))
         if leaks: print('        leaked sectors:', leaks)
         if empty: print('        empty tables:', empty)
+        if geometry: print('        inconsistent table heights:', geometry)
         if over: print('        table runs into the footer on:', sorted(set(over)))
         print('        ' + '  //  '.join(titles))
     print('\nALL OK' if ok else '\nISSUES FOUND — fix before delivering')
@@ -105,11 +104,18 @@ def render(outdir, qadir):
         print('rendered', base)
 
 def validate(outdir, master=None):
+    ok = True
     for f in sorted(glob.glob(os.path.join(outdir, '*.pptx'))):
-        cmd = ['python3', INTEGRITY_CHECK, '--fail-on-findings', f]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        state = 'VALID' if r.returncode == 0 else 'INVALID'
-        print(state, '|', os.path.basename(f))
+        try:
+            with zipfile.ZipFile(f) as package:
+                bad = package.testzip()
+                if bad: raise ValueError('damaged package member: ' + bad)
+            Presentation(f)
+            print('VALID |', os.path.basename(f))
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            ok = False
+            print('INVALID |', os.path.basename(f), '|', exc)
+    return ok
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
@@ -117,7 +123,7 @@ if __name__ == '__main__':
     ap.add_argument('--render', metavar='QADIR')
     ap.add_argument('--master')
     a = ap.parse_args()
-    validate(a.outdir, a.master)
-    good = check(a.outdir)
+    valid = validate(a.outdir, a.master)
+    good = check(a.outdir) if valid else False
     if a.render: render(a.outdir, a.render)
     sys.exit(0 if good else 1)

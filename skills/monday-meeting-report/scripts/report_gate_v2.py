@@ -18,10 +18,17 @@ from pptx import Presentation
 from pptx.util import Pt
 
 AGENDA_HEADERS=["م","جدول الأعمال","المسؤول","المدة الزمنية (بالدقيقة)"]
-TASK_HEADERS=["#","المهمة","القطاع","تاريخ الإنجاز المخطط","الحالة","ملاحظات","الجهة ذات العلاقة"]
+TASK_HEADERS=["#","المهمة","القطاع","تاريخ الإنجاز المخطط","الحالة","ملاحظات"]
 SUHAIL_HEADERS=["#","اسم المشروع","تاريخ البداية","تاريخ النهاية","الحالة","ما تم حتى تاريخه"]
-COMPLETED_HEADERS=["القطاع","المهمة","#"]
-UPDATES_HEADERS=["التحديث","القطاع","المشروع","#"]
+SUMMARY_HEADERS={
+    "المهام المكتملة":["ملاحظات","القطاع","المهمة","#"],
+    "المهام المتأخرة":["ملاحظات","القطاع","المهمة","#"],
+    "المهام المعلقة":["ملاحظات","القطاع","المهمة","#"],
+    "طلبات الدعم":["طلب الدعم","القطاع","المهمة","#"],
+    "أبرز التحديثات":["التحديث","القطاع","المشروع","#"],
+    "المشاريع المتأخرة":["ملاحظات","القطاع","المشروع","#"],
+    "التحديات":["التحدي","القطاع","المشروع","#"],
+}
 FONT="Abar Mid"; ALLOWED={"Abar Mid","Abar Mid SemiBold"}
 AGENDA_PT=14.0; TABLE_PT=11.0
 
@@ -70,7 +77,7 @@ def read_tasks(path):
             a=norm(ws.cell(r,1).value)
             if re.fullmatch(r"مهام مصدر \((.+)\)",a):break
             if re.fullmatch(r"\d+(?:\.0)?",a):
-                vals=[norm(ws.cell(r,c).value) for c in range(1,8)]
+                vals=[norm(ws.cell(r,c).value) for c in range(1,7)]
                 out.append((sec,*vals))
             r+=1
     return out
@@ -121,6 +128,23 @@ def canon_record(rec):
 def rows(t):return [[norm(c.text) for c in r.cells] for r in t.rows]
 def isnum(s):return bool(re.fullmatch(r"\d+(?:\.0)?",norm(s)))
 
+
+def read_summary(path,sheet,titles):
+    ws=load_workbook(path,read_only=True,data_only=False)[sheet]
+    result={title:[] for title in titles}
+    for r in range(1,ws.max_row):
+        heading=norm(ws.cell(r,1).value)
+        title=next((t for t in titles if heading==t or heading.endswith(': '+t)),None)
+        if title is None:continue
+        expected=list(reversed(SUMMARY_HEADERS[title]))
+        got=[norm(ws.cell(r+1,c).value) for c in range(1,5)]
+        if got!=expected:continue
+        for rr in range(r+2,ws.max_row+1):
+            first=norm(ws.cell(rr,1).value)
+            if not isnum(first):break
+            result[title].append(tuple(norm(ws.cell(rr,c).value) for c in range(4,0,-1)))
+    return result
+
 def package(path,errors):
     try:
         with zipfile.ZipFile(path) as z:
@@ -139,19 +163,19 @@ def package(path,errors):
     except Exception as e:errors.append(f"invalid PPTX package: {e}")
 
 def collect(prs,errors):
-    ag=[]; task=[]; suh=[]; suh_seq=[]
+    ag=[]; task=[]; suh=[]; suh_seq=[]; summaries={title:[] for title in SUMMARY_HEADERS}
     for si,sl in enumerate(prs.slides,1):
         for sh in sl.shapes:
             if not getattr(sh,"has_table",False):continue
             t=sh.table; rr=rows(t); cols=len(t.columns)
             if cols==4 and rr and rr[0]==AGENDA_HEADERS:
                 ag.extend(tuple(x) for x in rr[1:] if any(x))
-            elif cols==7:
-                if len(rr)<2 or not rr[0][0].startswith("تفاصيل المهام ("):errors.append(f"slide {si} task table missing title row")
-                if len(rr)<2 or rr[1]!=TASK_HEADERS:errors.append(f"slide {si} task headers missing/corrupt")
+            elif cols==6 and len(rr)>=2 and rr[1][:2]==["#","المهمة"]:
+                if not any(x.startswith("تفاصيل المهام (") for x in rr[0]):errors.append(f"slide {si} task table missing title row")
+                if rr[1]!=TASK_HEADERS:errors.append(f"slide {si} task headers missing/corrupt")
                 m=re.fullmatch(r"تفاصيل المهام \((.+)\)",rr[0][0] if rr else ""); sec=norm(m.group(1)) if m else ""
                 for x in rr[2:]:
-                    if x and isnum(x[0]):task.append((sec,*x[:7]))
+                    if x and isnum(x[0]):task.append((sec,*x[:6]))
             elif cols==6 and len(rr)>=2 and rr[1][:2]==["#","اسم المشروع"]:
                 if not rr[0][0]:errors.append(f"slide {si} Suhail table missing sector/title row")
                 if rr[1]!=SUHAIL_HEADERS:errors.append(f"slide {si} Suhail headers missing/corrupt")
@@ -159,10 +183,12 @@ def collect(prs,errors):
                 if not suh_seq or suh_seq[-1]!=sec:suh_seq.append(sec)
                 for x in rr[2:]:
                     if x and isnum(x[0]):suh.append((sec,*x[:6]))
-            elif cols==3 and rr and rr[0][0]=="المهام المكتملة":
-                if len(rr)<2 or rr[1]!=COMPLETED_HEADERS:errors.append(f"slide {si} completed-task headers missing/corrupt")
-            elif cols==4 and rr and rr[0][0]=="أبرز التحديثات":
-                if len(rr)<2 or rr[1]!=UPDATES_HEADERS:errors.append(f"slide {si} updates headers missing/corrupt")
+            elif cols==4 and rr:
+                title=next((x for x in rr[0] if x in SUMMARY_HEADERS),None)
+                if title:
+                    if len(rr)<2 or rr[1]!=SUMMARY_HEADERS[title]:errors.append(f"slide {si} {title} headers missing/corrupt")
+                    for x in rr[2:]:
+                        if x and isnum(x[-1]):summaries[title].append(tuple(x))
             is_ag=cols==4 and rr and rr[0]==AGENDA_HEADERS; want=AGENDA_PT if is_ag else TABLE_PT
             for rw in t.rows:
                 for cell in rw.cells:
@@ -176,7 +202,7 @@ def collect(prs,errors):
     if len(ag)!=len(set(ag)):errors.append("agenda contains duplicate rows")
     if len(suh_seq)!=len(set(suh_seq)):
         errors.append(f"Suhail sector continuation is non-contiguous: {suh_seq!r}")
-    return ag,task,suh
+    return ag,task,suh,summaries
 
 def cmp(label,exp,act,errors):
     ce=collections.Counter(canon_record(x) for x in exp); ca=collections.Counter(canon_record(x) for x in act)
@@ -190,15 +216,18 @@ def main():
     for p in [a.report,a.topics,a.tasks,a.suhail]:
         if not os.path.isfile(p):raise SystemExit(f"missing input: {p}")
     exp_ag=read_agenda(a.topics); exp_task=read_tasks(a.tasks); exp_suh=read_suhail(a.suhail)
+    task_titles=list(SUMMARY_HEADERS)[:4];suhail_titles=list(SUMMARY_HEADERS)[4:]
+    exp_summaries={**read_summary(a.tasks,"ملخص المهام",task_titles),**read_summary(a.suhail,"ملخص مشاريع سهيل",suhail_titles)}
     report=Path(a.report)
     with tempfile.TemporaryDirectory(prefix="mm-gate-") as td:
         tmp=Path(td)/report.name; shutil.copy2(report,tmp)
         prs=Presentation(str(tmp)); normalize_typography(prs); prs.save(str(tmp))
         errors=[]; package(tmp,errors)
-        try:prs2=Presentation(str(tmp)); ag,task,suh=collect(prs2,errors)
-        except Exception as e:errors.append(f"PowerPoint reopen failed: {e}");ag=task=suh=[]
+        try:prs2=Presentation(str(tmp)); ag,task,suh,summaries=collect(prs2,errors)
+        except Exception as e:errors.append(f"PowerPoint reopen failed: {e}");ag=task=suh=[];summaries={}
         if ag!=exp_ag:errors.append(f"agenda mismatch: expected={exp_ag!r}; actual={ag!r}")
         cmp("task details",exp_task,task,errors); cmp("Suhail details",exp_suh,suh,errors)
+        for title,expected in exp_summaries.items():cmp(title,expected,summaries.get(title,[]),errors)
         print("REPORT_SHA256",sha(tmp)); print("TOPICS_SHA256",sha(a.topics)); print("TASKS_SHA256",sha(a.tasks)); print("SUHAIL_SHA256",sha(a.suhail))
         if errors:
             print(f"QA FAILED: {len(errors)} blocking issue(s)")

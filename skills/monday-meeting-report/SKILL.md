@@ -20,8 +20,9 @@ Do not use old Library files or template text as weekly data. If an input workbo
 ## Master asset
 
 - Runtime master: `assets/monday-meeting-master.pptx`
-- Approved SHA-256: `6f66a2e16d370e24e26b208b6b75f8b036f573430cc735d40e2f102fddf59db3`
+- Approved SHA-256: `86a1ed90844059c88d9da10a33c81cd14902a6b99c02cfa37661f527e774ab4a`
 - `scripts/restore_template.py` verifies the checksum and restores a working copy when needed.
+- Visual reference: `assets/monday-meeting-reference.pdf`. Use it to inspect the approved design, never as weekly data or a slide-count limit.
 
 Treat the master as a library of approved patterns:
 
@@ -45,9 +46,9 @@ If the approved agenda table fills, clone the agenda slide and continue automati
 
 ### Task summary
 
-Update the task KPIs, native chart, and completed-task table from the current summary sheet. Blank chart cells remain truly blank and `dispBlanksAs="gap"` is preserved.
+Update the task KPIs and native chart from the current summary sheet. Blank chart cells remain truly blank and `dispBlanksAs="gap"` is preserved.
 
-The completed-task table may expand down the available left-side area. If it still needs more space, create a clean continuation summary page using the same heading/table pattern. Do not shrink typography to force records onto one page.
+Read the four independent Excel sections `المهام المكتملة`, `المهام المتأخرة`, `المهام المعلقة`, and `طلبات الدعم`. Populate the matching four-column PowerPoint table for every nonempty section, preserving its source rows and notes or support requests. Remove the entire corresponding table, including its title and headers, when the Excel section has no records. Never display template example rows. Flow overflowing records onto continuation summary pages, repeating each continued table's title and headers. Keep KPIs and the chart on the first summary page.
 
 ### Task details
 
@@ -55,20 +56,21 @@ Read every `مهام مصدر (...)` section from `تفاصيل المهام` in
 
 There is **no whitelist of task-source names**. Existing names such as `اجتماع القيادات`, `اجتماع التجربة الرقمية`, or `لجنة المتابعة` are examples only.
 
-Use the approved seven-column task-detail page as the reusable pattern. For each source:
+Use the approved six-column task-detail page as the reusable pattern. For each source:
 
 - populate records in source order;
 - when the page fills, clone the same detail pattern and continue;
 - when a new task source appears, clone the same pattern and use the new source name;
 - keep the approved title/header/table geometry and typography.
 
+The Excel task detail sheet has a seventh field, `الجهات ذات العلاقة`. The user intentionally removed this column from the PowerPoint template; do not transfer it to the deck or append it to `ملاحظات`.
+
 Longer text consumes more page capacity than short text. Prefer an extra continuation page over compressed or clipped content.
+If a single record is taller than an otherwise empty approved page, stop with a clear error; never silently cap its estimated height.
 
 ### Suhail summary
 
-Update the Suhail KPIs, native chart, and `أبرز التحديثات` from the current summary sheet. Replace the stale template label with `لم تبدأ` where applicable.
-
-The updates table may expand down the available area. If it fills, create continuation summary pages using the same approved heading/table pattern. Do not stop because the number of updates increased.
+Update the Suhail KPIs and native chart from the current summary sheet. Read its three independent sections: `أبرز التحديثات`, `المشاريع المتأخرة`, and `التحديات`. Populate a matching four-column template table only when that Excel section contains records; otherwise remove the table with its title and headers. Preserve each section's exact Excel content, including notes and challenge text. Flow overflow onto continuation summary pages, repeating the applicable title and headers. Keep KPIs and the chart on the first summary page.
 
 ### Suhail project details
 
@@ -134,6 +136,7 @@ The final gate checks that:
 - agenda records match the current topics workbook and end at `ملخص الاجتماع`;
 - all task-detail records match the current task workbook;
 - all Suhail-detail records match the current Suhail workbook;
+- every populated task and Suhail summary table matches its own Excel section, and every empty section has no table in the deck;
 - task and Suhail tables retain their title/header structure;
 - dynamic tables use approved fonts and sizes.
 
