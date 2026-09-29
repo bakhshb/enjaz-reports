@@ -20,7 +20,7 @@ Do not use old Library files or template text as weekly data. If an input workbo
 ## Master asset
 
 - Runtime master: `assets/monday-meeting-master.pptx`
-- Approved SHA-256: `bcb663c934e7295bd7b0039ac865fa7ffe007d7510bc67283b5121dba21c1363`
+- Approved SHA-256: `1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255`
 - `scripts/restore_template.py` verifies the checksum and restores a working copy when needed.
 - Visual reference: `assets/monday-meeting-reference.pdf`. Use it to inspect the approved design, never as weekly data or a slide-count limit.
 
@@ -142,7 +142,8 @@ The final gate checks that:
 - every populated task and Suhail summary table matches its own Excel section, and every empty section has no table in the deck;
 - task and Suhail tables retain their title/header structure;
 - dynamic tables use approved fonts and sizes.
-- completed and on-plan detail cells use their verified template status fills, rather than inheriting a previous record's fill. Other statuses require a verified visual exemplar before final delivery; a programmatic pass does not approve an unverified status style.
+- every detail status cell copies its approved master example: completed (blue), on-plan (green), delayed (light red), suspended tasks (light gray), and not-started Suhail projects (light gray). `لم يبدأ` and `لم تبدأ` denote the same project status; it is not a task status. Reject unknown statuses or missing/conflicting master examples. Validate status fill, Abar font, size, weight, and alignment without silently repairing a mismatched status style.
+- generation validates a temporary candidate before replacing the requested output. A failed build or gate preserves any existing output and all source files; temporary candidates are cleaned up. Output paths may not alias the master or an input workbook.
 
 Do **not** reject a deck because it has more than 18 slides, a new task source, a new Suhail sector, or more projects/rows than the master examples.
 

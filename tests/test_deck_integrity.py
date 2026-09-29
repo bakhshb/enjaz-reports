@@ -12,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -202,6 +203,74 @@ class MondayGateTests(unittest.TestCase):
     def test_generated_deck_passes(self):
         result=self.check(self.candidate())
         self.assertEqual(result.returncode,0,result.stderr+result.stdout)
+
+    def test_status_typography_corruption_is_not_hidden(self):
+        for attribute,value in [('name','Calibri'),('size',Inches(.4)),('bold',True)]:
+            with self.subTest(attribute=attribute):
+                path=self.candidate();prs=Presentation(path)
+                cell=next(sh.table.cell(2,4) for sl in prs.slides for sh in sl.shapes
+                          if sh.has_table and len(sh.table.columns)==6 and len(sh.table.rows)>2)
+                setattr(cell.text_frame.paragraphs[0].runs[0].font,attribute,value)
+                prs.save(path);before=path.read_bytes()
+                result=self.check(path)
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('typography differs',result.stdout)
+                self.assertEqual(path.read_bytes(),before)
+
+    def test_failed_build_preserves_output_and_cleans_candidates(self):
+        builder=load_module('monday_transaction_tests',MONDAY/'build_report.py')
+        for stage in ['save','charts','validation','publish']:
+            for existing in [False,True]:
+                with self.subTest(stage=stage,existing=existing),tempfile.TemporaryDirectory() as td:
+                    output=Path(td)/'report.pptx'
+                    if existing:output.write_bytes(b'previous accepted report')
+                    argv=['--topics',str(self.topics),'--tasks',str(self.tasks),
+                          '--suhail',str(self.projects),'--output',str(output)]
+                    def failed_save(prs,path):
+                        Path(path).write_bytes(b'incomplete candidate')
+                        raise OSError('injected save failure')
+                    if stage=='save':
+                        from pptx.presentation import Presentation as PresentationClass
+                        failure=patch.object(PresentationClass,'save',failed_save)
+                    elif stage=='publish':
+                        failure=patch.object(builder.status_styles.os,'replace',side_effect=OSError('injected publication failure'))
+                    else:
+                        failure=patch.object(builder,'patch_charts' if stage=='charts' else 'validate_candidate',
+                                             side_effect=ValueError('injected failure'))
+                    with failure,self.assertRaises((ValueError,OSError)):builder.main(argv)
+                    self.assertEqual(list(Path(td).iterdir()),[output] if existing else [])
+                    if existing:self.assertEqual(output.read_bytes(),b'previous accepted report')
+
+    def test_output_cannot_overwrite_input_or_master(self):
+        builder=load_module('monday_collision_tests',MONDAY/'build_report.py')
+        for output in [self.topics,self.tasks,self.projects,MONDAY.parent/'assets/monday-meeting-master.pptx']:
+            with self.subTest(output=output):
+                before=output.read_bytes()
+                with self.assertRaisesRegex(ValueError,'must not overwrite'):
+                    builder.main(['--topics',str(self.topics),'--tasks',str(self.tasks),
+                                  '--suhail',str(self.projects),'--output',str(output)])
+                self.assertEqual(output.read_bytes(),before)
+
+    def test_oversized_agenda_preserves_existing_report(self):
+        with tempfile.TemporaryDirectory() as td:
+            topics=Path(td)/'topics.xlsx';wb=load_workbook(self.topics)
+            wb['Sheet1']['B3']='موضوع طويل ' * 2500;wb.save(topics)
+            output=Path(td)/'report.pptx';output.write_bytes(b'accepted report')
+            result=run(MONDAY/'build_report.py','--topics',topics,'--tasks',self.tasks,
+                       '--suhail',self.projects,'--output',output)
+            self.assertNotEqual(result.returncode,0)
+            self.assertEqual(output.read_bytes(),b'accepted report')
+            self.assertFalse(list(Path(td).glob('.monday-build-*')))
+
+    def test_conflicting_master_status_examples_fail(self):
+        with tempfile.TemporaryDirectory() as td:
+            master=Path(td)/'master.pptx';prs=Presentation(gate.status_styles.MASTER)
+            cells=[r.cells[4] for sl in prs.slides for sh in sl.shapes
+                   if sh.has_table and len(sh.table.columns)==6
+                   for r in list(sh.table.rows)[2:] if r.cells[4].text.strip()=='على المخطط']
+            cells[-1].text_frame.paragraphs[0].runs[0].font.bold=True;prs.save(master)
+            with self.assertRaisesRegex(ValueError,'Conflicting approved'):
+                gate.status_styles.examples(master)
 
     def test_chart_cache_corruption_fails(self):
         path=self.candidate()

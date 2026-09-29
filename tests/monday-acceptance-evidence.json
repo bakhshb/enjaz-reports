@@ -1,0 +1,79 @@
+{
+  "master_sha256": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255",
+  "reference_sha256": "a1c1b10073bf4837fc6569e6a405f91330964adb3603fc90ef30ed4bfeb59018",
+  "regression_tests": 54,
+  "final_focused_tests": 24,
+  "visual_review": "All dynamic pages reviewed for normal, empty, new-sector and overflow. Status styles match the master; no clipping, overlap, or footer collisions observed.",
+  "scope": "Synthetic test data only; production inputs not provided.",
+  "files": [
+    {
+      "file": "..\\monday-fix-acceptance\\empty\\monday.pptx",
+      "pdf": "..\\monday-fix-acceptance\\empty\\monday.pdf",
+      "pages": 12,
+      "arabic_runs": 26,
+      "fonts": [
+        "/LBHFAM+AbarMid-Regular",
+        "/RCLUGA+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "be1366c0b4410bddf30f1d634d0062f9b76776b8c048da17935d7dde35aeb463",
+      "pdf_sha256": "3c86dc6c9fbc66e55000ca07bc0061f56a3b0e3dcd8abdf7d507f6ccbb18c6a9"
+    },
+    {
+      "file": "..\\monday-fix-acceptance\\master\\master.pptx",
+      "pdf": "..\\monday-fix-acceptance\\master\\master.pdf",
+      "pages": 18,
+      "arabic_runs": 666,
+      "fonts": [
+        "/BCIANG+AbarMid-Regular",
+        "/LJFNXM+AbarMid-Bold",
+        "/RLCIDA+Calibri",
+        "/TOBUFW+ArialMT"
+      ],
+      "errors": [],
+      "pptx_sha256": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255",
+      "pdf_sha256": "a1c1b10073bf4837fc6569e6a405f91330964adb3603fc90ef30ed4bfeb59018"
+    },
+    {
+      "file": "..\\monday-fix-acceptance\\new\\monday.pptx",
+      "pdf": "..\\monday-fix-acceptance\\new\\monday.pdf",
+      "pages": 14,
+      "arabic_runs": 119,
+      "fonts": [
+        "/OXOSUG+AbarMid-Regular",
+        "/TMFBMW+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "d137b3e2373c66535d49ca0fe7bcd2337c7d05d8a683c61dd50a25938fd1a0a8",
+      "pdf_sha256": "a2794964766a7874f411bedbed4b18a2b3c84bbbd0f73f95911c2c8f5cd8d936"
+    },
+    {
+      "file": "..\\monday-fix-acceptance\\normal\\monday.pptx",
+      "pdf": "..\\monday-fix-acceptance\\normal\\monday.pdf",
+      "pages": 14,
+      "arabic_runs": 110,
+      "fonts": [
+        "/ANPHND+AbarMid-Regular",
+        "/DEHEDX+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "ad2d0ac97c4e14cea8630d6fe9dad2350f3c538e7f1c664dfb18d6f6e175c038",
+      "pdf_sha256": "878a2449305e32ac773f9911c4123a145d106897af71ed464375aa0a4d093a4e"
+    },
+    {
+      "file": "..\\monday-fix-acceptance\\overflow\\monday.pptx",
+      "pdf": "..\\monday-fix-acceptance\\overflow\\monday.pdf",
+      "pages": 25,
+      "arabic_runs": 503,
+      "fonts": [
+        "/QJIKAX+AbarMid-Bold",
+        "/ZPUHWF+AbarMid-Regular"
+      ],
+      "errors": [],
+      "pptx_sha256": "d5f28dd5e7999f39be7011b6e7721be896df9122e123b64a679af4a88e4ac899",
+      "pdf_sha256": "a847aa87ad885f69c642d77771c69d1684eba0b83323757a2bb3c33210c71f69"
+    }
+  ],
+  "installed_files_verified": 24,
+  "installed_smoke_tests": 4
+}

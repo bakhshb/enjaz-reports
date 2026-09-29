@@ -47,6 +47,17 @@ A successful export does not establish font or visual acceptance. Record the fin
 
 ## Scope limits carried forward from the audit
 
-The weekly visual scenarios use completed/on-plan task and project details, plus delayed transactions, because those task/project status patterns have verified template examples. Other task/project statuses are covered by data checks; complete visual approval of their detail-cell styles requires an approved matching exemplar. Monday reports a visual-acceptance warning when a status lacks one. Do not claim that this synthetic run approves every possible production input or status design. Legacy `.xls` and live ministry exports were not exercised in this run.
+The weekly visual scenarios use completed/on-plan task and project details, plus delayed transactions, because those task/project status patterns have verified template examples. Other task/project statuses are covered by data checks; complete visual approval of their detail-cell styles requires an approved matching exemplar. The original Monday limitation is superseded by the follow-up below. Do not claim that this synthetic run approves every possible production input or status design. Legacy `.xls` and live ministry exports were not exercised in this run.
 
 Definition of full release completion: every required check above passes for the exact final files, and any additional status styles used by a production report have an approved reference and pass its visual review. Pushing the reviewed branch does not itself merge or release it.
+
+
+## Monday follow-up: updated status examples and protected output
+
+The user supplied master `1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255` supplies all five required styles. `لم يبدأ` / `لم تبدأ` is valid for Suhail projects only; `معلق` is valid for tasks. The matching PDF reference was regenerated with Adobe PDFMaker from an unchanged master copy.
+
+Acceptance requires exact master status formatting, rejection of unknown/missing/conflicting styles, source/chart/KPI reconciliation, and preservation of prior output through oversized input or save/chart/gate/publication failures. Publication uses a validated temporary candidate and a sibling file with normal inherited Windows access. Input and master paths are protected against output collisions.
+
+Results: 54 full-suite tests passed, then 24 final focused tests passed after the Windows publication correction. Four fresh synthetic scenarios (normal, empty, new-sector, overflow) reconcile and visually pass, covering all valid task and project statuses. Five native PowerPoint opens preserved source bytes. Five Adobe PDFs, totaling 83 pages including the 18-page master, passed actual Abar usage and page-count checks. Every generated dynamic page was visually inspected. See `tests/monday-acceptance-evidence.json` for exact output hashes. This resolves the Monday status-style limitation; the older weekly visual scope above remains unchanged. Production input acceptance remains a separate per-report check.
+
+Installed refresh: all 24 files match the tested repository. Four installed-copy smoke checks passed, including normal generation and empty/new-sector/overflow scenarios. The previous installed snapshot remains backed up.
