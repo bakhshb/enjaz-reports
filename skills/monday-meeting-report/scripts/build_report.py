@@ -7,18 +7,20 @@
 #   "python-pptx>=1.0",
 # ]
 # ///
-import argparse, copy, datetime as dt, hashlib, math, re, shutil, statistics, tempfile, zipfile
+import argparse, copy, datetime as dt, hashlib, math, re, shutil, statistics, tempfile, zipfile, os, subprocess, sys
 from pathlib import Path
 from lxml import etree
 import openpyxl
 from pptx import Presentation
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+import monday_status_styles as status_styles
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.oxml.ns import qn
 
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
 MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
 AGENDA_HEADERS=['م','جدول الأعمال','المسؤول','المدة الزمنية (بالدقيقة)']
-MASTER_SHA256='bcb663c934e7295bd7b0039ac865fa7ffe007d7510bc67283b5121dba21c1363'
+MASTER_SHA256='1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255'
 TASK_SUMMARY_TITLES=('المهام المكتملة','المهام المتأخرة','المهام المعلقة','طلبات الدعم')
 SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المتأخرة','التحديات')
 
@@ -434,29 +436,23 @@ def update_chart_xml(xml_bytes,rows):
 
 
 def patch_charts(pptx,task_rows,suhail_rows):
-    tmp=Path(tempfile.mkdtemp()); src=tmp/'src'; src.mkdir()
-    with zipfile.ZipFile(pptx) as z:z.extractall(src)
-    for chart_name,book_name,rows in [('chart1.xml','Microsoft_Excel_Worksheet.xlsx',task_rows),('chart2.xml','Microsoft_Excel_Worksheet1.xlsx',suhail_rows)]:
-        rows=[row for row in rows if any(float(value or 0)>0 for value in row[1:])]
-        rows=rows or [[None]*5]  # Valid blank chart range when the source has no sectors.
-        save_chart_payload(rows,src/'ppt'/'embeddings'/book_name)
-        cp=src/'ppt'/'charts'/chart_name; cp.write_bytes(update_chart_xml(cp.read_bytes(),rows))
-    out=tmp/'out.pptx'
-    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
-        for p in src.rglob('*'):
-            if p.is_file():z.write(p,p.relative_to(src))
-    shutil.copy2(out,pptx); shutil.rmtree(tmp)
+    with tempfile.TemporaryDirectory(prefix='.monday-charts-') as temporary:
+        tmp=Path(temporary); src=tmp/'src'; src.mkdir()
+        with zipfile.ZipFile(pptx) as z:z.extractall(src)
+        for chart_name,book_name,rows in [('chart1.xml','Microsoft_Excel_Worksheet.xlsx',task_rows),('chart2.xml','Microsoft_Excel_Worksheet1.xlsx',suhail_rows)]:
+            rows=[row for row in rows if any(float(value or 0)>0 for value in row[1:])]
+            rows=rows or [[None]*5]  # Valid blank chart range when the source has no sectors.
+            save_chart_payload(rows,src/'ppt'/'embeddings'/book_name)
+            cp=src/'ppt'/'charts'/chart_name; cp.write_bytes(update_chart_xml(cp.read_bytes(),rows))
+        out=tmp/'out.pptx'
+        with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+            for p in src.rglob('*'):
+                if p.is_file():z.write(p,p.relative_to(src))
+        shutil.copy2(out,pptx)
 
 
-def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=None):
-    status_styles={}
-    for slide in pattern_slides:
-        for table_shape in detail_tables(slide,kind):
-            for row in list(table_shape.table.rows)[2:]:
-                status=' '.join(row.cells[4].text.split())
-                status={'مكتمل':'مكتملة'}.get(status,status)
-                if status in ('مكتملة','على المخطط'):
-                    status_styles[status]=copy.deepcopy(row.cells[4]._tc.get_or_add_tcPr())
+def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=None,approved_styles=None):
+    approved=approved_styles if approved_styles is not None else status_styles.examples()
     pattern=max(pattern_slides,key=lambda sl:max(len(sh.table.rows) for sh in detail_tables(sl,kind)))
     pattern_shape=max(detail_tables(pattern,kind),key=lambda sh:len(sh.table.rows))
     cols=6
@@ -478,26 +474,31 @@ def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=N
         sh=detail_tables(sl,kind)[0]
         title=f'{title_prefix} ({section})' if title_prefix else section
         fill_titled_table(sh,chunk,title=title,weights=weights)
-        unverified=set()
         for row in list(sh.table.rows)[2:]:
-            cell=row.cells[4];status={'مكتمل':'مكتملة'}.get(cell.text.strip(),cell.text.strip())
-            if status in status_styles:
-                cell._tc.remove(cell._tc.get_or_add_tcPr())
-                cell._tc.append(copy.deepcopy(status_styles[status]))
-            else:unverified.add(status)
-        if unverified:print('VISUAL ACCEPTANCE REQUIRED: no verified template status style for '+', '.join(sorted(unverified)))
+            cell=row.cells[4];text=cell.text;status=status_styles.canonical(text)
+            if status not in approved:
+                raise ValueError('Missing approved template status style: '+status)
+            allowed=status_styles.TASK_STATUSES if kind=='task' else status_styles.PROJECT_STATUSES
+            if status not in allowed:raise ValueError('Unsupported '+kind+' status: '+status)
+            status_styles.apply(cell,approved[status])
+            set_cell_text(cell,text)
     unused=[sl for sl in pattern_slides if sl.part is not pattern.part]
     return targets,unused
 
-def main():
+def parse_args(argv=None):
     ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template')
-    a=ap.parse_args(); template=Path(a.template) if a.template else Path(__file__).resolve().parents[1]/'assets'/'monday-meeting-master.pptx'
+    return ap.parse_args(argv)
+
+
+def build_candidate(a):
+    template=Path(a.template) if a.template else Path(__file__).resolve().parents[1]/'assets'/'monday-meeting-master.pptx'
     if not template.exists():raise FileNotFoundError(template)
     if not a.template and hashlib.sha256(template.read_bytes()).hexdigest()!=MASTER_SHA256:
         raise ValueError('Bundled Monday meeting template checksum mismatch')
 
     agenda=agenda_rows(a.topics); tk,tchart,task_summaries,tdetails=task_data(a.tasks); sk,schart,suhail_summaries,sdetails=suhail_data(a.suhail)
-    out=Path(a.output); shutil.copy2(template,out); prs=Presentation(out); validate_master_patterns(prs)
+    out=Path(a.output); prs=Presentation(template); validate_master_patterns(prs)
+    approved=status_styles.examples(template)
 
     # Capture all master patterns before any slide is cloned or removed.
     agenda_slide=next(sl for sl in prs.slides if any(len(sh.table.columns)==4 and sh.table.cell(0,0).text.strip()=='م' for sh in tables(sl)))
@@ -521,7 +522,7 @@ def main():
 
     # Task details are data-driven. The master contributes one approved detail
     # pattern; every source and overflow page is generated from it.
-    task_generated,task_unused=build_dynamic_detail_section(prs,task_patterns,tdetails,'task','تفاصيل المهام')
+    task_generated,task_unused=build_dynamic_detail_section(prs,task_patterns,tdetails,'task','تفاصيل المهام',approved_styles=approved)
 
     # Suhail summary and updates.
     for sid,x in zip([5,8,11,17,13],sk):set_text(shape_by_id(suhail_summary,sid),x)
@@ -530,14 +531,43 @@ def main():
 
     # Suhail details are also data-driven: new sectors and any amount of projects
     # simply create more pages from the approved six-column detail pattern.
-    suhail_generated,suhail_unused=build_dynamic_detail_section(prs,suhail_patterns,sdetails,'suhail',None)
+    suhail_generated,suhail_unused=build_dynamic_detail_section(prs,suhail_patterns,sdetails,'suhail',None,approved_styles=approved)
 
     # Only after every dynamic page has been allocated do we remove the unused
     # seed-pattern slides from the master.
     for sl in task_unused+suhail_unused:
         remove_slide(prs,sl)
 
-    prs.save(out); patch_charts(out,tchart,schart); print(out.resolve())
+    prs.save(out); patch_charts(out,tchart,schart)
 
 
-if __name__=='__main__':main()
+def validate_candidate(a):
+    command=[sys.executable,str(Path(__file__).with_name('report_gate_v2.py')),
+             '--report',str(a.output),'--topics',str(a.topics),'--tasks',str(a.tasks),
+             '--suhail',str(a.suhail)]
+    if a.template:command.extend(['--template',str(a.template)])
+    result=subprocess.run(command,capture_output=True,text=True,encoding='utf-8',
+                          env={**os.environ,'PYTHONIOENCODING':'utf-8'})
+    if result.returncode:
+        raise ValueError('Candidate validation failed:\n'+result.stdout+result.stderr)
+
+
+def main(argv=None):
+    args=parse_args(argv)
+    output=Path(args.output).resolve()
+    template=Path(args.template) if args.template else Path(__file__).resolve().parents[1]/'assets/monday-meeting-master.pptx'
+    protected=[template,Path(args.topics),Path(args.tasks),Path(args.suhail)]
+    if any(output==p.resolve() or (output.exists() and p.exists() and output.samefile(p)) for p in protected):
+        raise ValueError('Output must not overwrite the template or an input workbook')
+    output.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.monday-build-',dir=output.parent) as temporary:
+        candidate=copy.copy(args)
+        candidate.output=str(Path(temporary)/'report.pptx')
+        build_candidate(candidate)
+        validate_candidate(candidate)
+        status_styles.publish(candidate.output,output)
+    print(output)
+    return 0
+
+
+if __name__=='__main__':raise SystemExit(main())

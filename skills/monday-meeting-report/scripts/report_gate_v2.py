@@ -16,6 +16,9 @@ from xml.etree import ElementTree as ET
 from openpyxl import load_workbook
 from openpyxl.utils.cell import range_boundaries
 from pptx import Presentation
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+import monday_status_styles as status_styles
 from pptx.util import Pt
 
 AGENDA_HEADERS=["م","جدول الأعمال","المسؤول","المدة الزمنية (بالدقيقة)"]
@@ -105,8 +108,12 @@ def normalize_typography(prs):
         for sh in sl.shapes:
             if getattr(sh,"has_table",False):
                 tt=sh.table; rr=rows(tt); is_ag=bool(rr and rr[0]==AGENDA_HEADERS); pt=AGENDA_PT if is_ag else TABLE_PT
-                for rw in tt.rows:
-                    for cell in rw.cells:
+                detail=len(tt.columns)==6 and len(rr)>1 and rr[1][4]=='الحالة'
+                for row_index,rw in enumerate(tt.rows):
+                    for column_index,cell in enumerate(rw.cells):
+                        # Approved status examples must be checked as generated;
+                        # normalization must not hide an incorrect status style.
+                        if detail and row_index>=2 and column_index==4:continue
                         for p in cell.text_frame.paragraphs:
                             for run in p.runs:
                                 if run.text:
@@ -184,18 +191,21 @@ def package(path,errors):
                         if resolved not in names:errors.append(f'missing relationship target: {n} -> {target}')
     except Exception as e:errors.append(f"invalid PPTX package: {e}")
 
-def collect(prs,errors):
+def collect(prs,errors,template=status_styles.MASTER):
     ag=[]; task=[]; suh=[]; suh_seq=[]; summaries={title:[] for title in SUMMARY_HEADERS}
+    approved=status_styles.examples(template)
     for slide in prs.slides:
         for shape in slide.shapes:
             if not shape.has_table or len(shape.table.columns)!=6:continue
+            if len(shape.table.rows)<2 or shape.table.cell(1,4).text.strip()!='الحالة':continue
             for row in list(shape.table.rows)[2:]:
-                cell=row.cells[4]
-                color={'مكتمل':'DCE6F2','مكتملة':'DCE6F2','على المخطط':'EBF1DE'}.get(norm(cell.text))
-                if color:
-                    fill=cell._tc.get_or_add_tcPr().find('{http://schemas.openxmlformats.org/drawingml/2006/main}solidFill')
-                    actual=fill.find('{http://schemas.openxmlformats.org/drawingml/2006/main}srgbClr') if fill is not None else None
-                    if actual is None or actual.get('val')!=color:errors.append('detail status fill differs from approved template')
+                cell=row.cells[4];status=status_styles.canonical(cell.text)
+                allowed=status_styles.TASK_STATUSES if shape.table.cell(1,1).text.strip()=='المهمة' else status_styles.PROJECT_STATUSES
+                if status not in allowed:errors.append('Unsupported detail status: '+status)
+                if status not in approved:
+                    errors.append('Missing approved template status style: '+status)
+                elif status_styles.signature(cell)!=status_styles.signature(approved[status]):
+                    errors.append('detail status fill or typography differs from approved template: '+status)
     for si,sl in enumerate(prs.slides,1):
         for sh in sl.shapes:
             if not getattr(sh,"has_table",False):continue
@@ -365,19 +375,19 @@ def verify_metrics(path, prs, tasks_path, suhail_path, errors):
                     errors.append(f'{title}: KPI shape {sid} differs from source')
         except Exception as exc:errors.append(f'{title}: {exc}')
 
-def main():
-    ap=argparse.ArgumentParser(); ap.add_argument("--report",required=True); ap.add_argument("--topics",required=True); ap.add_argument("--tasks",required=True); ap.add_argument("--suhail",required=True); a=ap.parse_args()
+def main(argv=None):
+    ap=argparse.ArgumentParser(); ap.add_argument("--report",required=True); ap.add_argument("--topics",required=True); ap.add_argument("--tasks",required=True); ap.add_argument("--suhail",required=True); ap.add_argument("--template",default=str(status_styles.MASTER)); a=ap.parse_args(argv)
     for p in [a.report,a.topics,a.tasks,a.suhail]:
         if not os.path.isfile(p):raise SystemExit(f"missing input: {p}")
     exp_ag=read_agenda(a.topics); exp_task=read_tasks(a.tasks); exp_suh=read_suhail(a.suhail)
     task_titles=list(SUMMARY_HEADERS)[:4];suhail_titles=list(SUMMARY_HEADERS)[4:]
     exp_summaries={**read_summary(a.tasks,"ملخص المهام",task_titles),**read_summary(a.suhail,"ملخص مشاريع سهيل",suhail_titles)}
     report=Path(a.report)
-    with tempfile.TemporaryDirectory(prefix="mm-gate-") as td:
+    with tempfile.TemporaryDirectory(prefix=".mm-gate-",dir=report.resolve().parent) as td:
         tmp=Path(td)/report.name; shutil.copy2(report,tmp)
         prs=Presentation(str(tmp)); normalize_typography(prs); prs.save(str(tmp))
         errors=[]; package(tmp,errors); prs2=None
-        try:prs2=Presentation(str(tmp)); ag,task,suh,summaries=collect(prs2,errors)
+        try:prs2=Presentation(str(tmp)); ag,task,suh,summaries=collect(prs2,errors,a.template)
         except Exception as e:errors.append(f"PowerPoint reopen failed: {e}");ag=task=suh=[];summaries={}
         if ag!=exp_ag:errors.append(f"agenda mismatch: expected={exp_ag!r}; actual={ag!r}")
         cmp("task details",exp_task,task,errors); cmp("Suhail details",exp_suh,suh,errors)
@@ -388,7 +398,7 @@ def main():
             print(f"QA FAILED: {len(errors)} blocking issue(s)")
             for e in errors:print("ERROR:",e)
             return 1
-        shutil.copy2(tmp,report)
+        status_styles.publish(tmp,report)
     print("PROGRAMMATIC QA PASSED - render and inspect these final bytes before delivery")
     return 0
 if __name__=="__main__":raise SystemExit(main())
