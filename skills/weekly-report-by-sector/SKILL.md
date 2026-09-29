@@ -23,12 +23,19 @@ already contain.
 
 ## Run it
 
-Use `uv` as the supported runner so the skill uses an isolated, reproducible dependency set. Do not call these scripts with the system Python.
+Prefer `uv` for isolated dependencies. If resolution is unavailable but a compatible Python already has the declared packages, use that interpreter and record the fallback. Do not modify the host Python environment.
 
 ```bash
 uv run --with python-pptx --with lxml --with openpyxl --with pdfplumber --with pillow scripts/split_report.py MASTER.pptx --transactions FINAL_TRANSACTIONS.xlsx --outdir out
-uv run --with python-pptx --with lxml --with openpyxl --with pdfplumber --with pillow scripts/qa_report.py out --master MASTER.pptx --render qa
+uv run --with python-pptx --with lxml --with openpyxl --with pdfplumber --with pillow scripts/qa_report.py out --master MASTER.pptx --transactions FINAL_TRANSACTIONS.xlsx --render qa
 ```
+
+The QA command requires the same source master used for the split. Pass the same
+`--transactions`, `--aliases`, and `--only` arguments to QA when they were used for
+the build. QA compares every output record and its status grouping/order against
+the source rather than trusting manifest totals. It also rejects broken internal
+relationships, external links, and unused slide parts left in the package.
+Programmatic success does not replace the mandatory render and visual review.
 
 `--only <name>` builds a single sector, which is the fast way to test a change
 
@@ -214,7 +221,8 @@ These all cost a rebuild once. They are handled in the scripts; keep them handle
     
 - **Deleting slides via python-pptx** collides part names on save. Remove the
     
-    `<p:sldId>` entries from `presentation.xml` and run the pptx skill's `clean.py`,
+    `<p:sldId>` entries from `presentation.xml` and retain only package parts
+    reachable from the root relationships, as the bundled splitter does,
     
     then strip layout→slide back-reference rels and the nav `hlinkClick` entries
     
@@ -271,3 +279,11 @@ sector's project update when the master's own text names the agencies it coordin
 
 with, and the footer check reads the safety margin as well as the content.
 
+
+## Updated template acceptance
+
+- Use the user-approved current master and matching PDF reference. Preserve Abar typography when populating empty cells and duplicating rows or slides. Verify the generated PowerPoint and exported PDF, especially transaction bodies and ملاحظات columns.
+- Omit a sector from charts only when every plotted status is blank or zero. Retain any sector with a positive count in any plotted status. Apply this to chart caches and embedded workbook categories, without changing source workbooks, totals, or detail records. For entirely empty data, show no named sector or bar and retain zero KPI indicators.
+- Acceptance requires normal, empty, new-sector and overflow cases to reconcile with source records, open without PowerPoint repair, and pass final visual inspection for Abar, readable text, no clipping, no overlap and correct pagination.
+
+- Verify actual font usage in the exported PDF, not just font declarations in PowerPoint. On the validated Windows host, PowerPoint SaveAs PDF substituted Calibri even for the unchanged approved master; Adobe PDFMaker preserved Abar and matches the supplied reference export route. If an exporter substitutes fonts, use a verified available exporter and repeat the visual check. Never mark font acceptance passed from successful export alone.

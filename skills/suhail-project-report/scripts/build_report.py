@@ -99,21 +99,36 @@ c_start = col(['تاريخ البداية'])
 c_end = col(['تاريخ النهاية'])
 c_notes = col(['ملاحظات'])
 c_challenge = col(['التحدي']) or col(['التحديات'])
+missing = [label for label, index in (
+    ('القطاع', c_sector), ('اسم المشروع', c_name),
+    ('تاريخ البداية', c_start), ('تاريخ النهاية', c_end),
+) if index is None]
+if missing:
+    sys.exit('Missing required project columns: ' + ', '.join(missing))
 if c_notes is None:
     print('warning: no project notes column found; delayed-project notes will be blank', file=sys.stderr)
 
 rows = []
+blank_status_count = 0
 for r in range(2, ws.max_row + 1):
     name = norm(ws.cell(r, c_name).value)
     if not name:
         continue
     sec = norm(ws.cell(r, c_sector).value)
+    raw_status = norm(ws.cell(r, i_stat + 1).value)
+    if not raw_status:
+        status = BLANK_STATUS_DEFAULT
+        blank_status_count += 1
+    else:
+        status = STAT.get(raw_status)
+        if status is None:
+            sys.exit(f'Unknown latest-week status in row {r}: {raw_status}')
     rows.append({
         'sector': SECT.get(sec, sec),
         'name': name,
         'start': norm(ws.cell(r, c_start).value),
         'end': norm(ws.cell(r, c_end).value),
-        'status': STAT.get(norm(ws.cell(r, i_stat + 1).value), BLANK_STATUS_DEFAULT),
+        'status': status,
         'done': ws.cell(r, i_done + 1).value or '',
         'notes': ws.cell(r, c_notes).value if c_notes else None,
         'challenge': ws.cell(r, c_challenge).value if c_challenge else None,
@@ -332,5 +347,6 @@ out.save(OUT)
 
 counts = {st: sum(1 for x in rows if x['status'] == st) for st in STATUSES}
 print(f'week used: W{w_stat} (status) / W{w_done} (progress)')
+print(f'blank latest-week statuses defaulted: {blank_status_count}')
 print(f'projects: {len(rows)}  {counts}')
 print(f'saved: {OUT}')

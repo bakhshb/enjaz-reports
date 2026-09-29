@@ -18,7 +18,7 @@ from pptx.oxml.ns import qn
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
 MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
 AGENDA_HEADERS=['م','جدول الأعمال','المسؤول','المدة الزمنية (بالدقيقة)']
-MASTER_SHA256='86a1ed90844059c88d9da10a33c81cd14902a6b99c02cfa37661f527e774ab4a'
+MASTER_SHA256='bcb663c934e7295bd7b0039ac865fa7ffe007d7510bc67283b5121dba21c1363'
 TASK_SUMMARY_TITLES=('المهام المكتملة','المهام المتأخرة','المهام المعلقة','طلبات الدعم')
 SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المتأخرة','التحديات')
 
@@ -51,7 +51,7 @@ def clear_cell_bullets(cell):
         for child in list(pPr):
             if child.tag in {qn('a:buChar'),qn('a:buAutoNum'),qn('a:buBlip'),qn('a:buNone')}:
                 pPr.remove(child)
-        pPr.insert(0,OxmlElement('a:buNone'))
+        pPr.insert_element_before(OxmlElement('a:buNone'),'a:tabLst','a:defRPr','a:extLst')
 
 def set_cell_text(cell,value):
     set_text(cell,value); clear_cell_bullets(cell)
@@ -169,12 +169,32 @@ def slide_index(prs,target):
 
 def clone_slide(prs,source,after=None,shape_predicate=None):
     dest=prs.slides.add_slide(source.slide_layout)
-    for sh in list(dest.shapes):
-        el=sh.element; el.getparent().remove(el)
-    for sh in source.shapes:
-        if shape_predicate is None or shape_predicate(sh):
-            dest.shapes._spTree.insert_element_before(copy.deepcopy(sh.element),'p:extLst')
-    for k,v in source._element.attrib.items(): dest._element.set(k,v)
+    # Preserve the source root and shape-tree metadata/namespaces as a unit.
+    # Rebuilding only its shapes can discard Office compatibility metadata.
+    root=copy.deepcopy(source._element)
+    # Office tags and creation IDs describe the original object's identity;
+    # sharing them between slides can make PowerPoint reject the copy.
+    for element in list(root.iter()):
+        if etree.QName(element).localname in {'custDataLst','creationId'}:
+            element.getparent().remove(element)
+    dest._element=root;dest.part._element=root
+    dest.__dict__.pop('shapes',None)
+    if shape_predicate is not None:
+        keep={sh.shape_id for sh in source.shapes if shape_predicate(sh)}
+        for sh in list(dest.shapes):
+            if sh.shape_id not in keep:sh.element.getparent().remove(sh.element)
+    # Copied shapes may contain image or navigation references. Their rIds are
+    # local to the source slide and must be recreated in the destination part.
+    relationship_ns='{http://schemas.openxmlformats.org/officeDocument/2006/relationships}'
+    remapped={}
+    for element in dest._element.iter():
+        for key,rid in list(element.attrib.items()):
+            if not key.startswith(relationship_ns) or not rid:continue
+            if rid not in remapped:
+                rel=source.part.rels[rid]
+                target=rel.target_ref if rel.is_external else rel.target_part
+                remapped[rid]=dest.part.relate_to(target,rel.reltype,is_external=rel.is_external)
+            element.set(key,remapped[rid])
     if after is not None:
         lst=prs.slides._sldIdLst; el=lst[-1]; lst.remove(el); lst.insert(slide_index(prs,after)+1,el)
     return dest
@@ -355,7 +375,7 @@ def summary_records(ws,title,headers):
 def task_data(path):
     wb=openpyxl.load_workbook(path,data_only=True); s=wb['ملخص المهام']
     k=[s.cell(r,2).value for r in range(2,7)]
-    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','معلق']); chart=read_block(s,hr,5)
+    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','معلق']); chart=read_sector_counts(s,hr)
     specs=[('#','المهمة','القطاع','ملاحظات')]*3+[('#','المهمة','القطاع','طلب الدعم')]
     summaries={title:summary_records(s,title,list(headers)) for title,headers in zip(TASK_SUMMARY_TITLES,specs)}
     return k,chart,summaries,detail_sections(wb['تفاصيل المهام'],7)
@@ -364,10 +384,22 @@ def task_data(path):
 def suhail_data(path):
     wb=openpyxl.load_workbook(path,data_only=True); s=wb['ملخص مشاريع سهيل']
     k=[s.cell(3,c).value for c in range(1,6)]
-    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','لم تبدأ']); chart=read_block(s,hr,5)
+    hr=find_header(s,['القطاع','مكتملة','على المخطط','متأخر','لم تبدأ']); chart=read_sector_counts(s,hr)
     specs=[['#','المشروع','القطاع','التحديث'],['#','المشروع','القطاع','ملاحظات'],['#','المشروع','القطاع','التحدي']]
     summaries={title:summary_records(s,title,headers) for title,headers in zip(SUHAIL_SUMMARY_TITLES,specs)}
     return k,chart,summaries,detail_sections(wb['تفاصيل مشاريع سهيل'],6)
+
+
+def read_sector_counts(ws,header):
+    records=[]
+    for r in range(header+1,ws.max_row+1):
+        sector=ws.cell(r,1).value
+        if sector in (None,''):break
+        values=[ws.cell(r,c).value for c in range(2,6)]
+        if any(v is not None and not isinstance(v,(int,float)) for v in values):
+            raise ValueError(f'Invalid sector counts at row {r}')
+        records.append([sector,*values])
+    return records
 
 
 def save_chart_payload(rows,path):
@@ -375,7 +407,7 @@ def save_chart_payload(rows,path):
     for r in range(2,maxr+1):
         for c in range(1,6):ws.cell(r,c).value=None
     for r,row in enumerate(rows,2):
-        for c,x in enumerate(row,1):ws.cell(r,c).value=x
+        for c,x in enumerate(row,1):ws.cell(r,c).value=None if c>1 and x==0 else x
     wb.save(path)
 
 
@@ -383,8 +415,10 @@ def update_chart_xml(xml_bytes,rows):
     root=etree.fromstring(xml_bytes); root_range=len(rows)+1
     for ser_i,ser in enumerate(root.xpath('.//c:ser',namespaces=NS_C)):
         if ser_i>=4:continue
-        for f in ser.xpath('.//c:f',namespaces=NS_C):f.text=re.sub(r'\$\d+$',f'${root_range}',f.text)
-        cats=[val(r[0]) for r in rows]; nums=[r[ser_i+1] for r in rows]
+        # Series-name formulas refer to the header row and must not grow with data.
+        for f in ser.xpath('./c:cat//c:f | ./c:val//c:f',namespaces=NS_C):
+            f.text=re.sub(r'\$\d+$',f'${root_range}',f.text)
+        cats=[val(r[0]) for r in rows]; nums=[r[ser_i+1] if r[ser_i+1] else None for r in rows]
         for cache,values in [(ser.find('.//c:cat//c:strCache',NS_C),cats),(ser.find('.//c:val//c:numCache',NS_C),nums)]:
             if cache is None:continue
             for p in list(cache.findall('c:pt',NS_C)):cache.remove(p)
@@ -403,6 +437,8 @@ def patch_charts(pptx,task_rows,suhail_rows):
     tmp=Path(tempfile.mkdtemp()); src=tmp/'src'; src.mkdir()
     with zipfile.ZipFile(pptx) as z:z.extractall(src)
     for chart_name,book_name,rows in [('chart1.xml','Microsoft_Excel_Worksheet.xlsx',task_rows),('chart2.xml','Microsoft_Excel_Worksheet1.xlsx',suhail_rows)]:
+        rows=[row for row in rows if any(float(value or 0)>0 for value in row[1:])]
+        rows=rows or [[None]*5]  # Valid blank chart range when the source has no sectors.
         save_chart_payload(rows,src/'ppt'/'embeddings'/book_name)
         cp=src/'ppt'/'charts'/chart_name; cp.write_bytes(update_chart_xml(cp.read_bytes(),rows))
     out=tmp/'out.pptx'
@@ -413,6 +449,14 @@ def patch_charts(pptx,task_rows,suhail_rows):
 
 
 def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=None):
+    status_styles={}
+    for slide in pattern_slides:
+        for table_shape in detail_tables(slide,kind):
+            for row in list(table_shape.table.rows)[2:]:
+                status=' '.join(row.cells[4].text.split())
+                status={'مكتمل':'مكتملة'}.get(status,status)
+                if status in ('مكتملة','على المخطط'):
+                    status_styles[status]=copy.deepcopy(row.cells[4]._tc.get_or_add_tcPr())
     pattern=max(pattern_slides,key=lambda sl:max(len(sh.table.rows) for sh in detail_tables(sl,kind)))
     pattern_shape=max(detail_tables(pattern,kind),key=lambda sh:len(sh.table.rows))
     cols=6
@@ -434,6 +478,14 @@ def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=N
         sh=detail_tables(sl,kind)[0]
         title=f'{title_prefix} ({section})' if title_prefix else section
         fill_titled_table(sh,chunk,title=title,weights=weights)
+        unverified=set()
+        for row in list(sh.table.rows)[2:]:
+            cell=row.cells[4];status={'مكتمل':'مكتملة'}.get(cell.text.strip(),cell.text.strip())
+            if status in status_styles:
+                cell._tc.remove(cell._tc.get_or_add_tcPr())
+                cell._tc.append(copy.deepcopy(status_styles[status]))
+            else:unverified.add(status)
+        if unverified:print('VISUAL ACCEPTANCE REQUIRED: no verified template status style for '+', '.join(sorted(unverified)))
     unused=[sl for sl in pattern_slides if sl.part is not pattern.part]
     return targets,unused
 
