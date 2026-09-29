@@ -41,6 +41,7 @@ Two sheets in the upload:
 alias, so it tolerates minor renames between exports. If it can't find a
 
 required column it stops and names the missing one rather than guessing.
+The support-requests sheet and its `المهمة`, `القطاع`, and `طلب الدعم` columns are required even when the sheet contains no request rows. Stop if the sheet or one of these headers is absent; do not silently create an empty support table from missing input.
 
 ## التدقيق الإملائي قبل إنشاء ملف Excel
 

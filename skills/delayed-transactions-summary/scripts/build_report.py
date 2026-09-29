@@ -26,6 +26,7 @@ import glob
 import os
 import re
 import sys
+import tempfile
 
 import pandas as pd
 from openpyxl import Workbook, load_workbook
@@ -81,8 +82,10 @@ def read_files(input_dir):
                 header = i
                 break
         if header is None:
-            print(f"  ! skipped (no header row): {os.path.basename(path)}")
-            continue
+            sys.exit(f"Missing رقم المعاملة header in {os.path.basename(path)}")
+        required_columns = max(SECTOR_CELL[1], *COL.values()) + 1
+        if sheet.shape[1] < required_columns or sheet.shape[0] <= SECTOR_CELL[0]:
+            sys.exit(f"Missing required source cells in {os.path.basename(path)}")
 
         sector = clean(sheet.iloc[SECTOR_CELL]) or clean(
             os.path.basename(path).rsplit(".", 1)[0].replace("_", " ")
@@ -113,7 +116,10 @@ def read_files(input_dir):
         if sector not in sectors:
             sectors.append(sector)
         print(f"  read {os.path.basename(path)} -> {sector}")
-    return pd.DataFrame(rows), unmapped, len(paths), sorted(sectors)
+    # Keep the schema when every valid sector export contains zero records.
+    columns = ["num", "subject", "sector", "source", "created", "planned",
+               "plan_key", "status", "raw_status"]
+    return pd.DataFrame(rows, columns=columns), unmapped, len(paths), sorted(sectors)
 
 def style_cell(cell, *, bold=False, color="000000", fill=None,
                align="right", wrap=False, border=None):
@@ -300,22 +306,34 @@ def main():
     if unmapped:
         sys.exit(f"Unmapped status values, stop and ask the user: {sorted(unmapped)}")
     if args.dedupe:
-        conflicts = df.groupby("num").status.nunique()
-        if (conflicts > 1).any():
-            print("  ! duplicate numbers with conflicting statuses: "
-                  f"{list(conflicts[conflicts > 1].index)}")
+        conflicts = df.groupby("num").agg(statuses=("status", "nunique"),
+                                           sectors=("sector", "nunique"))
+        ambiguous = conflicts[(conflicts.statuses > 1) | (conflicts.sectors > 1)]
+        if not ambiguous.empty:
+            sys.exit("Conflicting duplicate transaction numbers need a dedupe decision: "
+                     + ", ".join(ambiguous.index.astype(str)))
         df = df.drop_duplicates(subset="num", keep="first")
 
-    total, counts, delayed = build(df, sectors, args.output, args.dedupe,
-                                   n_files, duplicate_records)
-    print(f"\nاجمالي {total} = "
-          + " + ".join(f"{c} {counts[c]}" for c in CATEGORIES)
-          + f"  -> {'OK' if sum(counts.values()) == total else 'MISMATCH'}")
-    print("sector breakdown table: sorted Arabic alphabetical,", len(sectors), "sectors")
-    print("delayed by sector:",
-          delayed.sector.value_counts().to_dict())
-    ok = verify(args.output, len(delayed), len(sectors))
-    print(("saved: " if ok else "SAVED WITH WARNINGS: ") + args.output)
+    output_dir = os.path.dirname(os.path.abspath(args.output))
+    os.makedirs(output_dir, exist_ok=True)
+    fd, candidate = tempfile.mkstemp(prefix=".transactions-unverified-",
+                                      suffix=".xlsx", dir=output_dir)
+    os.close(fd)
+    try:
+        total, counts, delayed = build(df, sectors, candidate, args.dedupe,
+                                       n_files, duplicate_records)
+        print(f"\nاجمالي {total} = "
+              + " + ".join(f"{c} {counts[c]}" for c in CATEGORIES)
+              + f"  -> {'OK' if sum(counts.values()) == total else 'MISMATCH'}")
+        print("sector breakdown table: sorted Arabic alphabetical,", len(sectors), "sectors")
+        print("delayed by sector:", delayed.sector.value_counts().to_dict())
+        if not verify(candidate, len(delayed), len(sectors)):
+            sys.exit("Workbook verification failed; output was not published")
+        os.replace(candidate, args.output)
+        print("saved: " + args.output)
+    finally:
+        if os.path.exists(candidate):
+            os.remove(candidate)
 
 if __name__ == "__main__":
     main()

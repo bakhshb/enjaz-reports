@@ -1,0 +1,161 @@
+{
+  "date": "2026-09-29",
+  "regression_tests_passed": 48,
+  "installed_smoke_tests_passed": 7,
+  "source_scenarios_passed": [
+    "normal",
+    "empty",
+    "new",
+    "overflow"
+  ],
+  "native_powerpoint_open_export_passed": 11,
+  "pdf_exporter": "Adobe PDFMaker",
+  "visual_scope": "completed/on-plan tasks and projects, delayed transactions; additional status styles require approved references",
+  "artifacts": [
+    {
+      "file": "empty\\monday.pptx",
+      "pdf": "empty\\monday.pdf",
+      "pages": 12,
+      "arabic_runs": 26,
+      "fonts": [
+        "/ALDFAS+AbarMid-Regular",
+        "/AVHKFS+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "7e7a5d5c88eb9b15c67e9fa47efc24e17ecda60ca2fe76db7f34c68b9e8ca0e1",
+      "pdf_sha256": "579e914bc12f72bfa9dab31f2cc80cd23691bf5966c2e0b5e86e94f7b9d5c8d4"
+    },
+    {
+      "file": "empty\\weekly.pptx",
+      "pdf": "empty\\weekly.pdf",
+      "pages": 6,
+      "arabic_runs": 36,
+      "fonts": [
+        "/FELNKI+AbarMid-Regular",
+        "/PDPAZO+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "a97b6b56c921c2cdbaac1b425c1e28b699a7c356443641bec5dab6e88d539be9",
+      "pdf_sha256": "d031c4db448f17e5d7b0004edd90cffd517292698b32fc1af70d9d8e6a17daf2"
+    },
+    {
+      "file": "new\\monday.pptx",
+      "pdf": "new\\monday.pdf",
+      "pages": 14,
+      "arabic_runs": 117,
+      "fonts": [
+        "/FXNQXD+AbarMid-Regular",
+        "/TMTGLB+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "6f020cf442c7dcedc5b4498f020b206960ad876ad8c149b49a37a50b11f601ef",
+      "pdf_sha256": "e3e954082819793333f5a66e051293d7f37a1f4f5a2de72e5a6e0d71edf8294b"
+    },
+    {
+      "file": "new\\sectors\\تقرير الإنجاز الأسبوعي - قطاع جديد تجريبي.pptx",
+      "pdf": "new\\sectors\\تقرير الإنجاز الأسبوعي - قطاع جديد تجريبي.pdf",
+      "pages": 5,
+      "arabic_runs": 120,
+      "fonts": [
+        "/FVUZSD+AbarMid-Regular",
+        "/UTOAZZ+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "7bd6e4dc24f851f7301fa3d60dfe7c922b08394c5321c9467175e81cc969208c",
+      "pdf_sha256": "00dfa1a2c186b88ab23809a9673f8abfed3a5818adf73e7404aa66276ad321a7"
+    },
+    {
+      "file": "new\\weekly.pptx",
+      "pdf": "new\\weekly.pdf",
+      "pages": 8,
+      "arabic_runs": 152,
+      "fonts": [
+        "/ARUFNN+AbarMid-Bold",
+        "/ZYCPZP+AbarMid-Regular"
+      ],
+      "errors": [],
+      "pptx_sha256": "29eb269e997f53b9da864ab7e99df31bae4db7af25153ac22559319b9eef5eaa",
+      "pdf_sha256": "d4a72768c7938c44c18e7095ed19e0682a109578563a61f2414c430df90d8765"
+    },
+    {
+      "file": "normal\\monday.pptx",
+      "pdf": "normal\\monday.pdf",
+      "pages": 14,
+      "arabic_runs": 108,
+      "fonts": [
+        "/TYLUAM+AbarMid-Regular",
+        "/YNXDSC+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "fd67653f6f387f8daaa7dcfa8b830f06ee572ff02d7b77835da17d75db8df223",
+      "pdf_sha256": "f73672e98510889654c7671d125a64bb06e0b73e8e932a744a64b8880161183b"
+    },
+    {
+      "file": "normal\\sectors\\تقرير الإنجاز الأسبوعي - وكالة شؤون الحج.pptx",
+      "pdf": "normal\\sectors\\تقرير الإنجاز الأسبوعي - وكالة شؤون الحج.pdf",
+      "pages": 5,
+      "arabic_runs": 114,
+      "fonts": [
+        "/MUKMRV+AbarMid-Bold",
+        "/QLFAVN+AbarMid-Regular"
+      ],
+      "errors": [],
+      "pptx_sha256": "a70734ba64e3b739e09c11ac0589468eedf461558fa9dc500f4d5b3476c48bc2",
+      "pdf_sha256": "24896d60a8070377d2ce2b99234999fd499ee46ee8e2b7a08960e251ef05dec8"
+    },
+    {
+      "file": "normal\\weekly.pptx",
+      "pdf": "normal\\weekly.pdf",
+      "pages": 8,
+      "arabic_runs": 144,
+      "fonts": [
+        "/NFWWHY+AbarMid-Regular",
+        "/RVYZLQ+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "1f66b95d8606da29d10815f1bd47812022952267ef7442829d18def05e536ed6",
+      "pdf_sha256": "c803a9153d9f71d8d0efdd16ec3ef267d3921a230537a76bed49b6f87254f7af"
+    },
+    {
+      "file": "overflow\\monday.pptx",
+      "pdf": "overflow\\monday.pdf",
+      "pages": 25,
+      "arabic_runs": 525,
+      "fonts": [
+        "/AXHVZT+AbarMid-Regular",
+        "/PGYMBP+AbarMid-Bold"
+      ],
+      "errors": [],
+      "pptx_sha256": "4589fec6aa08de47f598598a0cc7da17b24912022b09b3cefbf5f3bdaa7e6228",
+      "pdf_sha256": "0f3e44ed2270613abc868152e600caaba1f9c30ae7454ae37236298fcd671bbc"
+    },
+    {
+      "file": "overflow\\sectors\\تقرير الإنجاز الأسبوعي - وكالة شؤون الحج.pptx",
+      "pdf": "overflow\\sectors\\تقرير الإنجاز الأسبوعي - وكالة شؤون الحج.pdf",
+      "pages": 10,
+      "arabic_runs": 526,
+      "fonts": [
+        "/NLQQIX+AbarMid-Bold",
+        "/ZEIVUZ+AbarMid-Regular"
+      ],
+      "errors": [],
+      "pptx_sha256": "d7cee9eaf7aa60f1995278300d5fc2de5c21dcb69e66fa64aa628a36455891d8",
+      "pdf_sha256": "b94c45ce6d14d89aee38e44d73f88425e85fdccf2b419fa7f742928b4a928eb8"
+    },
+    {
+      "file": "overflow\\weekly.pptx",
+      "pdf": "overflow\\weekly.pdf",
+      "pages": 18,
+      "arabic_runs": 672,
+      "fonts": [
+        "/ROGDAQ+AbarMid-Bold",
+        "/YPNJUC+AbarMid-Regular"
+      ],
+      "errors": [],
+      "pptx_sha256": "4b1212132c0aa4270ca09f05f735ee71fdb6447c8740641ea5b9c08a5ba6f3d7",
+      "pdf_sha256": "e45d21990453be341d28a847b250afdeb4b6af05937aaf2f3b562fb1b95efba2"
+    }
+  ],
+  "additional_targeted_tests_passed": 3,
+  "visual_review": "All generated table/chart pages reviewed across the four scenarios; transaction continuation KPI divider remnants removed and corrected pages re-exported and inspected."
+}

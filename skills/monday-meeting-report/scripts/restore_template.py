@@ -4,7 +4,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-EXPECTED = '86a1ed90844059c88d9da10a33c81cd14902a6b99c02cfa37661f527e774ab4a'
+EXPECTED = 'bcb663c934e7295bd7b0039ac865fa7ffe007d7510bc67283b5121dba21c1363'
 root = Path(__file__).resolve().parents[1]
 source = root / 'assets' / 'monday-meeting-master.pptx'
 if hashlib.sha256(source.read_bytes()).hexdigest() != EXPECTED:

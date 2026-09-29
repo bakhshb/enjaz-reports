@@ -275,6 +275,8 @@ verification line — read that output before replying, and do not open a
 
 LibreOffice recalculation on the result.
 
+Every selected source file must contain the transaction header and required cells; a malformed file stops the run rather than being skipped. With `--dedupe`, duplicate transaction numbers that disagree on status or sector stop for a decision instead of keeping an arbitrary first record. The script publishes the output path only after its saved-workbook verification passes; a failed verification exits nonzero and leaves any earlier output untouched.
+
 ## Final verification before delivering
 
 - `اجمالي = مكتملة + على المخطط + متأخرة`. If it doesn't balance,

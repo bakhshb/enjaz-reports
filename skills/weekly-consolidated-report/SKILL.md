@@ -18,8 +18,8 @@ Use the outputs of the three upstream skills to create an updated version of the
 
 ## Execution
 
-- Use `assets/weekly-report-master.pptx` as the approved template. Before editing a working copy, verify its size (9538399 bytes) and SHA-256 (`1f76716883c1e0cf1a09570dc781f323c6123d47bd78744bd89219c77427e3b2`). Never fall back to a previous template. Populate a copy directly from the three final Excel outputs. Follow the written rules in this skill; do not depend on a fixed report-building script.
-- Use `uv` for any required Python tooling. If `uv` is unavailable, install it first with `python -m pip install --user uv`, verify the installation, and then continue. A missing `uv` executable is not by itself a reason to stop.
+- Use `assets/weekly-report-master.pptx` as the approved template. Before editing a working copy, verify its size (9545257 bytes) and SHA-256 (`3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5`). Never fall back to a previous template. Populate a copy directly from the three final Excel outputs. Follow the written rules in this skill; do not depend on a fixed report-building script.
+- Prefer `uv` for Python tooling. Reuse an existing installation; when needed, use Astral's official user-scoped standalone installer as documented in the upstream skills. Do not install it with `pip` or modify the host Python environment. If package resolution is unavailable but a compatible Python already has the required packages, use that interpreter and record the fallback.
 - Render the populated deck and make layout decisions from the rendered slides, not from fixed coordinates, estimated row counts, or the number of characters in a cell.
 - Stop only when installation or rendering is blocked by permissions or runtime policy, and state the exact blocker.
 
@@ -185,5 +185,13 @@ These values are for validating template mapping only. Runtime Excel remains the
 
 ## الأصول المرجعية المرفقة
 
-- قالب PowerPoint الكامل المعتمد: `assets/weekly-report-master.pptx`؛ الحجم `9538399` بايت، SHA-256: `1f76716883c1e0cf1a09570dc781f323c6123d47bd78744bd89219c77427e3b2`. تحقّق منه قبل الاستخدام ولا تعدّل الأصل.
+- قالب PowerPoint الكامل المعتمد: `assets/weekly-report-master.pptx`؛ الحجم `9545257` بايت، SHA-256: `3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5`. تحقّق منه قبل الاستخدام ولا تعدّل الأصل.
 - المرجع البصري فقط: `assets/weekly-report-reference.pdf`، وليس مصدر بيانات.
+
+## Updated template acceptance
+
+- Use the user-approved current master and matching PDF reference. Preserve Abar typography when populating empty cells and duplicating rows or slides. Verify the generated PowerPoint and exported PDF, especially transaction bodies and ملاحظات columns.
+- Omit a sector from charts only when every plotted status is blank or zero. Retain any sector with a positive count in any plotted status. Apply this to chart caches and embedded workbook categories, without changing source workbooks, totals, or detail records. For entirely empty data, show no named sector or bar and retain zero KPI indicators.
+- Acceptance requires normal, empty, new-sector and overflow cases to reconcile with source records, open without PowerPoint repair, and pass final visual inspection for Abar, readable text, no clipping, no overlap and correct pagination.
+
+- Verify actual font usage in the exported PDF, not just font declarations in PowerPoint. On the validated Windows host, PowerPoint SaveAs PDF substituted Calibri even for the unchanged approved master; Adobe PDFMaker preserved Abar and matches the supplied reference export route. If an exporter substitutes fonts, use a verified available exporter and repeat the visual check. Never mark font acceptance passed from successful export alone.

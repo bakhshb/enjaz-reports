@@ -20,7 +20,7 @@ Do not use old Library files or template text as weekly data. If an input workbo
 ## Master asset
 
 - Runtime master: `assets/monday-meeting-master.pptx`
-- Approved SHA-256: `86a1ed90844059c88d9da10a33c81cd14902a6b99c02cfa37661f527e774ab4a`
+- Approved SHA-256: `bcb663c934e7295bd7b0039ac865fa7ffe007d7510bc67283b5121dba21c1363`
 - `scripts/restore_template.py` verifies the checksum and restores a working copy when needed.
 - Visual reference: `assets/monday-meeting-reference.pdf`. Use it to inspect the approved design, never as weekly data or a slide-count limit.
 
@@ -131,14 +131,18 @@ QA must protect correctness **without limiting valid data growth**.
 
 The final gate checks that:
 
-- the PPTX package and XML are valid and PowerPoint can reopen it;
+- the PPTX package and XML are valid and every internal relationship resolves (opening in PowerPoint is a separate visual acceptance step);
 - there are no external workbook relationships;
 - agenda records match the current topics workbook and end at `ملخص الاجتماع`;
 - all task-detail records match the current task workbook;
 - all Suhail-detail records match the current Suhail workbook;
+- record order matches the source, including when totals are unchanged;
+- task and project KPIs reconcile with detail records and sector counts;
+- chart categories, series names, and values match both the source summaries and the chart's embedded workbook;
 - every populated task and Suhail summary table matches its own Excel section, and every empty section has no table in the deck;
 - task and Suhail tables retain their title/header structure;
 - dynamic tables use approved fonts and sizes.
+- completed and on-plan detail cells use their verified template status fills, rather than inheriting a previous record's fill. Other statuses require a verified visual exemplar before final delivery; a programmatic pass does not approve an unverified status style.
 
 Do **not** reject a deck because it has more than 18 slides, a new task source, a new Suhail sector, or more projects/rows than the master examples.
 
@@ -151,3 +155,11 @@ Do not deliver if the render shows clipped text, overlaps, broken Arabic glyphs,
 ## Delivery
 
 Deliver the actual `.pptx` bytes that passed the final gate and visual QA. Never return only a local filesystem path.
+
+## Updated template acceptance
+
+- Use the user-approved current master and matching PDF reference. Preserve Abar typography when populating empty cells and duplicating rows or slides. Verify the generated PowerPoint and exported PDF, especially transaction bodies and ملاحظات columns.
+- Omit a sector from charts only when every plotted status is blank or zero. Retain any sector with a positive count in any plotted status. Apply this to chart caches and embedded workbook categories, without changing source workbooks, totals, or detail records. For entirely empty data, show no named sector or bar and retain zero KPI indicators.
+- Acceptance requires normal, empty, new-sector and overflow cases to reconcile with source records, open without PowerPoint repair, and pass final visual inspection for Abar, readable text, no clipping, no overlap and correct pagination.
+
+- Verify actual font usage in the exported PDF, not just font declarations in PowerPoint. On the validated Windows host, PowerPoint SaveAs PDF substituted Calibri even for the unchanged approved master; Adobe PDFMaker preserved Abar and matches the supplied reference export route. If an exporter substitutes fonts, use a verified available exporter and repeat the visual check. Never mark font acceptance passed from successful export alone.

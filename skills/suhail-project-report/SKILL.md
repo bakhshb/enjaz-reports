@@ -30,6 +30,8 @@ Only four, in this canonical spelling: `مكتملة` · `على المخطط` �
 
 The source often writes `مكتمل` and `لم يبدأ` — map them. **A project whose newest-week status cell is blank counts as `على المخطط`** (the source frequently fills the narrative column but leaves the status empty). Report how many rows this affected so the user can correct the source if needed.
 
+If a nonblank newest-week status is not in the mapping, stop and name the value and source row. Do not use the blank-cell default for an unknown value. The project, sector, start-date, and end-date columns must be present; stop with their names if a required column is missing.
+
 ## Python runtime and automatic bootstrap
 
 When installing or updating this skill locally, first run `uv --version`.
