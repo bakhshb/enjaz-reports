@@ -1,0 +1,284 @@
+{
+  "base_commit": "0a56fcb",
+  "branch": "unify-report-workflows",
+  "status": "accepted on synthetic data",
+  "tests": {
+    "full_suite": 63,
+    "final_weekly_focused": 14,
+    "installed_smoke": 8,
+    "skills_validated": 2
+  },
+  "unchanged_extracted_helpers": 38,
+  "templates_unchanged": {
+    "skills/monday-meeting-report/assets/monday-meeting-master.pptx": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255",
+    "skills/monday-meeting-report/assets/monday-meeting-reference.pdf": "a1c1b10073bf4837fc6569e6a405f91330964adb3603fc90ef30ed4bfeb59018",
+    "skills/weekly-consolidated-report/assets/weekly-report-master.pptx": "3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5",
+    "skills/weekly-consolidated-report/assets/weekly-report-reference.pdf": "7379f6077f534966a77e10d25e65af963eb858feed36e5ee32264ca74d6d08e7"
+  },
+  "installed_files": 26,
+  "reports": [
+    {
+      "scenario": "normal",
+      "report": "monday",
+      "pages": 14,
+      "pptx_sha256": "e87de2db058d9205402d6cedf3a02b2bbedf7c0b9e86104d8ebccd9782469b79",
+      "pdf_sha256": "02bb3762311b5c8c30bb4396f91ce2ca0c3cf61e9a90ba5a8057e57c532eced3",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "4f0208d44244af0f31523d55ed4e79938650c71e31e77016e89d25b576a76028",
+        "tasks.xlsx": "759df92be176efe483441bf3bed9850926b740841acac630540cfa9bb89897b1",
+        "topics.xlsx": "80e74406c248ed42f0ed12972b288dcfae11d879d96e022704cc233e751155eb",
+        "transactions.xlsx": "bc00072a0b23eab72a66c70fda2a33523673ea286f00fab64411c8e690304710"
+      }
+    },
+    {
+      "scenario": "normal",
+      "report": "weekly",
+      "pages": 8,
+      "pptx_sha256": "61d9a9060aeb1fa519ecd1bd2ea94bfa8bd73b4336eba6b897bcf2fde064261b",
+      "pdf_sha256": "777e5ad35c40d01e43b50b71f386e2e04ae2a4c2afc41f0a975096ac47a7ef57",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "4f0208d44244af0f31523d55ed4e79938650c71e31e77016e89d25b576a76028",
+        "tasks.xlsx": "759df92be176efe483441bf3bed9850926b740841acac630540cfa9bb89897b1",
+        "topics.xlsx": "80e74406c248ed42f0ed12972b288dcfae11d879d96e022704cc233e751155eb",
+        "transactions.xlsx": "bc00072a0b23eab72a66c70fda2a33523673ea286f00fab64411c8e690304710"
+      }
+    },
+    {
+      "scenario": "empty",
+      "report": "monday",
+      "pages": 12,
+      "pptx_sha256": "a3832af8bdab2cabad6b9d2f806443f9c8e62ae578869f01a0af1497fec66041",
+      "pdf_sha256": "26c96026f4d9fe3746d333ccab1f7674aa24c9e134de58caca8fc5117b7071ae",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "60c45d7842de8ef1d2e2566d105962865fd82006ed225b2f3af570789afd35f2",
+        "tasks.xlsx": "e7a0d736192e8a09ead8fab6d2e7e58d4c5885716b1f4e558d42725de4e3ee25",
+        "topics.xlsx": "9f5328850602d28fdf894370b879fde608436568b059e76fc2017c2f094effca",
+        "transactions.xlsx": "58efede5a9b3df7a81e50b10665cf472d240f98f4a1079adc32219e8cfcfd73c"
+      }
+    },
+    {
+      "scenario": "empty",
+      "report": "weekly",
+      "pages": 6,
+      "pptx_sha256": "d4d0c89cd1460f515cbc8a520bac10627f3ade6dfc22d1c6386d906fac49d13d",
+      "pdf_sha256": "546b557b0edc96d92eb1e218e5bc06243ed34c5813ba1b42d843a2ba6bfd917d",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "60c45d7842de8ef1d2e2566d105962865fd82006ed225b2f3af570789afd35f2",
+        "tasks.xlsx": "e7a0d736192e8a09ead8fab6d2e7e58d4c5885716b1f4e558d42725de4e3ee25",
+        "topics.xlsx": "9f5328850602d28fdf894370b879fde608436568b059e76fc2017c2f094effca",
+        "transactions.xlsx": "58efede5a9b3df7a81e50b10665cf472d240f98f4a1079adc32219e8cfcfd73c"
+      }
+    },
+    {
+      "scenario": "new",
+      "report": "monday",
+      "pages": 14,
+      "pptx_sha256": "edddc892f5792115507ab10edb31afdfd3cd90edc2dc8c6a43c0832904a6ab8e",
+      "pdf_sha256": "bc8b54a8b0774a99b18be6c66176e18fffee12a49a8e355cdeed63980bb453ba",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "d39408d50df23cd6e5ec820accb58b49724fb8ef56231a1c783e5f0a18daff71",
+        "tasks.xlsx": "b9d642a3b91681fd6f3f63b5bae84348eddda895c9484f60543a79f9a2627349",
+        "topics.xlsx": "073756609bf74ea86aefcc764dcefb8a1ce2fe448054e15bc11039b919326350",
+        "transactions.xlsx": "788ddace7bfc29fa95a6b9b19f1bf7d63ff562cc70df8de9704848e35202fd4b"
+      }
+    },
+    {
+      "scenario": "new",
+      "report": "weekly",
+      "pages": 8,
+      "pptx_sha256": "b381774f64554c87bc57b5a3b97ceb614c73202bf427e191ea4bf4b3772a3f7e",
+      "pdf_sha256": "efd39e145a31b38e97c6776e98c8d93a84159c4c9444776f6ea0c0e27bc604e0",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "d39408d50df23cd6e5ec820accb58b49724fb8ef56231a1c783e5f0a18daff71",
+        "tasks.xlsx": "b9d642a3b91681fd6f3f63b5bae84348eddda895c9484f60543a79f9a2627349",
+        "topics.xlsx": "073756609bf74ea86aefcc764dcefb8a1ce2fe448054e15bc11039b919326350",
+        "transactions.xlsx": "788ddace7bfc29fa95a6b9b19f1bf7d63ff562cc70df8de9704848e35202fd4b"
+      }
+    },
+    {
+      "scenario": "overflow",
+      "report": "monday",
+      "pages": 27,
+      "pptx_sha256": "4ea9c76124691cc8a5d3ff6ddd8f4befcbe6f99d6aa9b693949be161c9ffe045",
+      "pdf_sha256": "dac3da7b63c78b5785d801635073c2c4b85c67dae911efd0499361c124c33b88",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "48762b6ad12e25f8c7905cfb4c0801dbe7573857e356260757e4dfc02fa9a761",
+        "tasks.xlsx": "c1e614a61ef54b72434662d28740ffa31c20627360315cb1606220870395c16a",
+        "topics.xlsx": "d70716a9e26b85ab159f3fe7c131ec886a944c246a6824c7826684fca4c64eb8",
+        "transactions.xlsx": "0ff0038ad16ff905d6463070dd30769fa5b41508bbfdaab2fb56a7cf1b4b3a71"
+      }
+    },
+    {
+      "scenario": "overflow",
+      "report": "weekly",
+      "pages": 20,
+      "pptx_sha256": "876f34946c99975389bac45557ba86f44d9b9587f6b8faf17c4365c3f4be67f8",
+      "pdf_sha256": "45da59a6d74df68f03179adc913b2001c6c68da699192ff0ae254cf1cd6ed2e1",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "48762b6ad12e25f8c7905cfb4c0801dbe7573857e356260757e4dfc02fa9a761",
+        "tasks.xlsx": "c1e614a61ef54b72434662d28740ffa31c20627360315cb1606220870395c16a",
+        "topics.xlsx": "d70716a9e26b85ab159f3fe7c131ec886a944c246a6824c7826684fca4c64eb8",
+        "transactions.xlsx": "0ff0038ad16ff905d6463070dd30769fa5b41508bbfdaab2fb56a7cf1b4b3a71"
+      }
+    },
+    {
+      "scenario": "edge",
+      "report": "monday",
+      "pages": 15,
+      "pptx_sha256": "b2aee94a400323ba914324a363ce9122fc157a49c269fbeac49348ebcf7ea804",
+      "pdf_sha256": "4e50d547defe8337b8413464b07e180ae2f122fc39408e42c549e501cb81af2c",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "dd546908f085be4ba1460d294d8d5eb1ca232777a4c1ba7765479feaf39c2936",
+        "tasks.xlsx": "2dc1f377973b00925687e612b79a56b043dec18c58bbd90fa27251e593d1b8aa",
+        "topics.xlsx": "5ce23028b3b21c4efc5d00d2063919bb3064c841c386c75e1f07a37a49886dd3",
+        "transactions.xlsx": "ca6b1b0ed2a86647472dbff3d7ecc9831cc815b48ca0032a43d1dade56fa1212"
+      }
+    },
+    {
+      "scenario": "edge",
+      "report": "weekly",
+      "pages": 8,
+      "pptx_sha256": "21d17074750035abe57bd7b91c7bdf94bb61114f6124e1be92a16cb08e096163",
+      "pdf_sha256": "0c0631a36d6bc03d52c59849aa24a88d2c90d8b135c07241c6a4a34690425078",
+      "programmatic": "passed",
+      "native_open": "passed",
+      "font_check": "passed",
+      "visual_review": "passed",
+      "source_hashes": {
+        "projects.xlsx": "dd546908f085be4ba1460d294d8d5eb1ca232777a4c1ba7765479feaf39c2936",
+        "tasks.xlsx": "2dc1f377973b00925687e612b79a56b043dec18c58bbd90fa27251e593d1b8aa",
+        "topics.xlsx": "5ce23028b3b21c4efc5d00d2063919bb3064c841c386c75e1f07a37a49886dd3",
+        "transactions.xlsx": "ca6b1b0ed2a86647472dbff3d7ecc9831cc815b48ca0032a43d1dade56fa1212"
+      }
+    }
+  ],
+  "total_pages": 132,
+  "timing": [
+    {
+      "report": "monday",
+      "scenario": "normal",
+      "before_seconds": [
+        4.430166600039229,
+        3.865433699917048,
+        3.3656293000094593
+      ],
+      "after_seconds": [
+        3.3322939998470247,
+        3.206757799955085,
+        3.309728999854997
+      ],
+      "before_median": 3.865433699917048,
+      "after_median": 3.309728999854997,
+      "change_percent": -14.376257444901375,
+      "within_10_percent": true
+    },
+    {
+      "report": "weekly",
+      "scenario": "normal",
+      "before_seconds": [
+        3.0122014000080526,
+        2.4894943998660892,
+        2.5666243999730796
+      ],
+      "after_seconds": [
+        2.7489846001844853,
+        2.6300057999324054,
+        2.6602773999329656
+      ],
+      "before_median": 2.5666243999730796,
+      "after_median": 2.6602773999329656,
+      "change_percent": 3.6488782683149257,
+      "within_10_percent": true
+    },
+    {
+      "report": "monday",
+      "scenario": "overflow",
+      "before_seconds": [
+        5.448659399989992,
+        5.24706820002757,
+        5.159767899895087
+      ],
+      "after_seconds": [
+        5.803557300008833,
+        5.185824100160971,
+        5.206511999946088
+      ],
+      "before_median": 5.24706820002757,
+      "after_median": 5.206511999946088,
+      "change_percent": -0.7729306831054661,
+      "within_10_percent": true
+    },
+    {
+      "report": "weekly",
+      "scenario": "overflow",
+      "before_seconds": [
+        4.2711090999655426,
+        4.202875399962068,
+        4.120489900000393
+      ],
+      "after_seconds": [
+        4.107792700175196,
+        4.124540500110015,
+        4.105878299800679
+      ],
+      "before_median": 4.202875399962068,
+      "after_median": 4.107792700175196,
+      "change_percent": -2.2623249737008577,
+      "within_10_percent": true
+    }
+  ],
+  "rendering": {
+    "exporter": "Adobe PDFMaker",
+    "initial_10_exports_seconds": 135.7072293,
+    "corrected_5_exports_seconds": 25.6675167,
+    "review": "All 72 dynamic pages plus 60 static pages (12 unique identical renderings) inspected. Long notes, notes fonts, status colors and footer clearance checked."
+  },
+  "limitations": [
+    "Synthetic inputs only; current ministry production workbooks were not provided.",
+    "Every future report still requires its own render and visual review.",
+    "Timing compares Monday builder and prior weekly synthetic population harness with current supported generators on the same inputs; it excludes agent reading time and visual review."
+  ],
+  "resolved_issues": [
+    "Weekly approved missing status colors now applied with weekly role-specific typography.",
+    "Suspended-task template header التحديث correctly receives independent task notes.",
+    "Trailing copied paragraphs removed without changing source text.",
+    "Native row-height correction resolves observed table overlap; actual footer artwork sets the usable page boundary."
+  ],
+  "failed_or_blocked_criteria": []
+}
