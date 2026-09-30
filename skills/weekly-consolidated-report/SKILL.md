@@ -3,9 +3,11 @@ name: weekly-consolidated-report
 description: Populate the approved Ministry of Hajj and Umrah weekly consolidated PowerPoint report from the final tasks, Suhail projects, and transactions Excel summaries. Use for التقرير الأسبوعي الموحد or تعبئة تقرير الإنجاز الأسبوعي from these three outputs, preserving the supplied template exactly. Does not build the upstream Excel summaries or split the report by sector.
 ---
 
-# Populate the Weekly Consolidated Report
+# Weekly Consolidated Report
 
-Use the outputs of the three upstream skills to create an updated version of the approved PowerPoint template. Excel is the final source of truth for data, and PowerPoint is the only source of truth for design. The bundled PowerPoint and PDF are the current template and its visual reference; their example slide count and records are not runtime requirements.
+## Purpose and authority
+
+Create the report from current final Excel inputs and this skill's approved master. Excel controls content; the master controls design. Read [business rules](references/business-rules.md) before generation and [acceptance checks](references/acceptance.md) before validation. Preserve this report's own mappings, ordering, omissions, pagination, and status rules. Sample records and slide counts are not runtime requirements.
 
 ## Inputs and output
 
@@ -16,182 +18,44 @@ Use the outputs of the three upstream skills to create an updated version of the
 - At runtime, use the new Excel files attached to the request. Restore the approved PowerPoint template from the assets attached to this skill; the user should not need to attach the template again. Ask for the template only if the skill assets are unavailable or fail integrity verification. Never substitute sample values.
 - Primary output: `تقرير الإنجاز الأسبوعي بتاريخ الإنشاء.pptx`, saved as a new file. Create a matching PDF only when requested. Never modify the inputs or overwrite the original template.
 
-## Execution
 
-- Use `assets/weekly-report-master.pptx` as the approved template. Before editing a working copy, verify its size (9545257 bytes) and SHA-256 (`3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5`). Never fall back to a previous template. Populate a copy directly from the three final Excel outputs. Follow the written rules in this skill; do not depend on a fixed report-building script.
-- Prefer `uv` for Python tooling. Reuse an existing installation; when needed, use Astral's official user-scoped standalone installer as documented in the upstream skills. Do not install it with `pip` or modify the host Python environment. If package resolution is unavailable but a compatible Python already has the required packages, use that interpreter and record the fallback.
-- Render the populated deck and make layout decisions from the rendered slides, not from fixed coordinates, estimated row counts, or the number of characters in a cell.
-- Stop only when installation or rendering is blocked by permissions or runtime policy, and state the exact blocker.
+Verify the bundled master size `9545257` bytes and SHA-256 `3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5` before use. Never fall back to an earlier master.
 
-Upstream skills in this workflow:
+## Business rules
 
-[task-details](../task-details/SKILL.md)
+Apply every rule in [the report-specific reference](references/business-rules.md). Do not infer content, change source workbooks, or modify the original master. Preserve the report's section order, dates, blank cells, and current status meaning. Template samples are never weekly data.
 
-[suhail-project-report](../suhail-project-report/SKILL.md)
+## Generate and validate
 
-[delayed-transactions-summary](../delayed-transactions-summary/SKILL.md)
+1. Check required workbooks, sheets, headers, and the approved master. Report only the missing or conflicting input that needs resolution.
+2. Generate into a new candidate path:
 
-Downstream skill, used only when the user requests a split-by-sector report:
+```bash
+uv run scripts/build_report.py --tasks "<tasks.xlsx>" --suhail "<suhail.xlsx>" --transactions "<transactions.xlsx>" --output "<candidate.pptx>"
+```
 
-[weekly-report-by-sector](../weekly-report-by-sector/SKILL.md)
+3. The builder includes read-only programmatic validation. Its initial placement is provisional: render before accepting page breaks, table gaps, or footer clearance. Follow the existing continuous-flow rules in the business reference; move complete records and render affected slides again. After any correction, rerun validation. Do not repeat it for unchanged bytes.
 
-Template-preservation rules are fully defined in this skill and do not require an additional generic skill.
+```bash
+uv run scripts/validate_report.py --report "<candidate.pptx>" --tasks "<tasks.xlsx>" --suhail "<suhail.xlsx>" --transactions "<transactions.xlsx>"
+```
 
-The rules in this specialized skill are authoritative for this report. Do not import reordering or redesign rules from sector-report skills.
+The candidate is saved only after programmatic checks pass. Failed builds preserve existing outputs and inputs; output paths cannot alias an input or master. A programmatic pass is not visual acceptance.
 
-## Authoritative rules
+## Visual review
 
-1. Transfer data, statuses, and dates from the final Excel outputs. Do not recalculate lateness from dates, and do not change a project status because its progress description appears to imply another status.
-2. Transfer text from the final Excel output exactly as provided. Do not proofread, summarize, rewrite, remove details, or alter numbers, dates, or identifiers. Do not convert the word `مرفق` into a guessed document name, and do not automatically add `الوثيقة الداعمة`.
-3. Normalize `مكتمل` and `مكتملة` to `مكتملة` in the report. Keep the other source categories unchanged in meaning: `على المخطط`, `متأخر/متأخرة`, and `معلق/معلقة`. `لم تبدأ` remains valid for Suhail projects only. Do not display or chart `لم تبدأ` for transactions. Never convert one category into another. If a new or ambiguous category appears, ask only about that category.
-4. Sector names must come from Excel exactly as supplied. Do not rely on outdated labels from the template and do not merge two different agencies by assumption. Charts and tables driven by the same source must use consistent source naming.
-5. The cover date is the report creation date in the runtime timezone, not the template date and not a project's latest update date. Format it exactly like the template and do not add a time. Never use the report creation date to fill missing project update dates.
-6. Blank task notes or updates in Excel must remain blank in the report; remove any previous-week text from both summary and detail locations. Do not fill any other missing field from the template or by inference. Preserve incomplete source text such as `XXX` exactly as-is and mention the missing source content in the delivery note.
-7. A table with no records must not appear in the report. Column headers, section titles, and the phrase `لا يوجد` are not records. Any table with actual records must be included in full, even if the current template version has no matching table.
-8. Never change the design: slide size, masters, layouts, fonts, font sizes or weights, alignment and RTL behavior, margins, z-order, template colors and borders, charts, logos, or backgrounds. Move whole tables vertically and duplicate the appropriate slide pattern only as required by pagination. Retain each delayed-table title strip's color from the newly approved template, including continuation slides; do not impose an older red override.
-9. Paginate tables before they touch the footer. Split records across copies of the appropriate slide while preserving widths, fonts, column widths, row styling, and record order. Do not shrink fonts, compress text, stretch rows, overlap tables, or place a table over the footer. Summary indicators and charts stay on the first summary slide; table overflow may use a continuation slide that preserves the same section navigation and footer without repeating indicators or charts. Page numbering and internal links must be updated after insertion or removal of slides, and the thank-you slide must remain last.
-10. Preserve the section order of the template and the record order from the final Excel output within each section. Do not reapply sorting or deduplication policies from upstream skills. `#` is display numbering within a section; do not treat it as a global identifier and do not automatically remove records that have similar names.
-11. Summary indicators and charts remain present even when a true status count is zero. Text-based numeric indicators must display `0` when the true value is zero, but chart series data must not write `0` into the embedded worksheet cell: leave that cell blank and transfer only non-zero numeric values into chart data. Do not remove an entire category or sector if it has values in another series. The empty-table rule does not remove `ملخص المعاملات` or a legitimate zero indicator.
+Render the validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.
 
-## Data and object discovery
+When a Windows PowerPoint render reveals overlapping tables or premature page breaks, `scripts/measure_layout.ps1 -Report <candidate.pptx> -Tasks <tasks.xlsx> -Suhail <suhail.xlsx> -Transactions <transactions.xlsx>` reads actual row heights without modifying the deck. Rerun the same builder with `--measurements <candidate.layout.json>` to repaginate complete records using those heights, then render again. Measurements are bound to the exact input/template hashes. They support the visual decision; they do not establish visual acceptance. Other environments may correct the candidate with available template-preserving tools and rerun validation.
 
-The slide numbers and cell ranges below document the inspected template and sample; they are not weekly constants. Detect each table's end from the next section heading and column headers, ignoring blank rows. Parse sections from their headings even when row counts or positions change. Do not assume named Excel Tables exist; the samples use formatted ranges without formulas or attachment links.
+## Failure handling
 
-Identify each slide's role from its section heading, objects, and column headers, then use the slide number plus object name/ID as verification. Some navigation labels come from the layout or master. The chart together with the transaction indicator names is sufficient to identify `ملخص المعاملات`; do not require a transaction-number table in the summary.
+Stop the affected report when inputs conflict, a required pattern/style is unapproved, a complete record cannot fit with the approved design, or faithful rendering is unavailable. Report the exact blocker and the condition needed to pass. Preserve the previous accepted report. Never mark a blocked or unperformed check as passed.
 
-When matching summary records to details, use source/section, sector, and task or project name. Internal matching keys may normalize whitespace, directional characters, and diacritics without changing the displayed text. Preserve every repeated source project. If matching is ambiguous or summary and detail data conflict, name the conflict and ask instead of choosing the first match or modifying Excel.
+## Runtime and installation
 
-## Task mapping
-
-`ملخص المهام`:
-
-- B2 `إجمالي المهام` → slide 2, TextBox 10, ID 11.
-- B3 `مكتملة` → TextBox 13, ID 14.
-- B4 `على المخطط` → TextBox 15, ID 16.
-- B5 `متأخرة` → TextBox 6, ID 7.
-- B6 `معلقة` → TextBox 5, ID 6.
-- Sample A9:E17 → Chart 23, ID 24, `chart1.xml`. A=`القطاع`, B=`مكتملة`, C=`على المخطط`, D=`متأخر`, E=`معلق`.
-- The updated slide 2 contains four approved four-column table patterns: `المهام المكتملة` (ID 10), `المهام المتأخرة` (ID 23), `المهام المعلقة` (ID 8), and `طلبات الدعم` (ID 25). Identify each by its title and headers rather than relying on its ID or sample position.
-- Read each matching section from `ملخص المهام` independently, in Excel record order. The first three use `# | المهمة | القطاع | ملاحظات`; `طلبات الدعم` uses `# | المهمة | القطاع | طلب الدعم` and comes only from its own section. Copy all four values exactly. Do not derive support requests from task status or derive notes from detail rows when the summary cell is blank.
-- If a section has no numbered records, remove its entire PowerPoint table, including title and headers. Ignore `لا يوجد` and template example records. If populated tables do not fit, continue them on summary-table pages with the same approved title/header style; do not duplicate KPI cards or the chart.
-
-Task details:
-
-- The current task-detail patterns start on slide 6 and have six columns: `# | المهمة | القطاع | تاريخ الإنجاز المخطط | الحالة | ملاحظات`. Read every `مهام مصدر (...)` section from Excel and create as many pages as its records need; the template source names and slide count are examples.
-- The Excel detail sheet also contains `الجهات ذات العلاقة`. The user intentionally removed it from the PowerPoint template. Omit that field from the deck; do not append it to `ملاحظات` or add a seventh column.
-- New Excel sections are added after the existing sections using a copy of the appropriate detail slide. Empty sections must not be shown as tables.
-
-## Suhail project mapping
-
-`ملخص مشاريع سهيل`:
-
-- A3 `الإجمالي` → slide 3, TextBox 9, ID 10.
-- B3 `مكتملة` → TextBox 11, ID 12.
-- C3 `على المخطط` → TextBox 13, ID 14. The template value `16` is split across text runs; replace the complete displayed value while preserving the object's formatting.
-- D3 `متأخرة` → TextBox 7, ID 8.
-- E3 `لم تبدأ` → TextBox 6, ID 7.
-- A6:E15 → Chart 20, ID 21, `chart2.xml`. A=`القطاع`, B=`مكتملة`, C=`على المخطط`, D=`متأخر`, E=`لم تبدأ`.
-- The updated slide 3 contains three approved four-column table patterns: `أبرز التحديثات` (ID 4), `المشاريع المتأخرة` (ID 23), and `التحديات` (ID 2). Identify them by title and headers.
-- Read each matching section from `ملخص مشاريع سهيل` independently. Updates use `# | المشروع | القطاع | التحديث`; delayed projects use `# | المشروع | القطاع | ملاحظات`; challenges use `# | المشروع | القطاع | التحدي`. Preserve the Excel text and record order, including blank notes. Do not infer new entries from project details.
-- Remove an entire table with its title and headers when its Excel section has no numbered records. `لا يوجد` is not a record. Continue populated tables on summary-table pages when necessary, without repeating indicators or the chart. The template does not contain a completed-project summary table; completed projects remain in the KPI, chart, and details.
-
-Suhail project details:
-
-- The current six-column Suhail detail patterns begin on slide 8 and continue through slide 10. These are design examples, not a sector whitelist or a fixed number of pages. Read every titled sector section in `تفاصيل مشاريع سهيل` and build enough pages for all its records, retaining source order and the approved title/header pattern.
-- Column order for every Suhail detail table: A=`#`, B=`اسم المشروع`, C=`تاريخ البداية`, D=`تاريخ النهاية`, E=`الحالة`, F=`ما تم حتى تاريخه`. In column F, when the cell begins with a standalone update-date line such as `تاريخ التحديث 15 سبتمبر 2026` or the same phrase using another valid day-month-year value, format that update-date line only in bold. Keep the remaining text in the cell in the existing regular style. Do not change, rewrite, infer, or add the date text; apply bold only when the line already exists in the source content.
-- The sector is taken from the section heading above the table, not from a non-existent detail column.
-- PowerPoint table placement differs from the sector order in Excel; match by sector name. Add new sectors using an existing detail pattern. A sector that only has a zero-valued statistical row must not generate a detail table.
-
-## Transaction mapping
-
-Transaction worksheet:
-
-- B2 `الإجمالي` → slide 4, TextBox 23, ID 24.
-- B3 `مكتملة` → TextBox 28, ID 29.
-- B4 `على المخطط` → TextBox 30, ID 31.
-- B5 `متأخرة` → TextBox 25, ID 26.
-- القالب المعتمد الحالي لا يحتوي مؤشرًا مرئيًا لحالة معاملات `لم تبدأ`. لا تُنشئ هذا المؤشر ولا تُعده إلى الشريحة، ولا تقرأ B6 حتى لو كان موجودًا في ملف Excel قديم.
-- Read the sector table as A:D only → Chart 4, ID 5, `chart3.xml`. A=`القطاع`, B=`مكتملة`, C=`على المخطط`, D=`متأخر`. إذا بقيت سلسلة legacy باسم `لم تبدأ` داخل chart XML أو الـembedded workbook/cache رغم عدم ظهورها في الشريحة، احذفها أثناء التحديث والتحقق. يجب أن تنتهي بيانات المعاملات بثلاث سلاسل فقط: `مكتملة`, `على المخطط`, `متأخر`.
-- The updated slide 4 already includes a five-column `المعاملات المتأخرة` table pattern (ID 4), below its indicators and chart. Read numbered transaction records from the matching Excel section. Populate the template's displayed column order: `تاريخ الإنجاز المخطط له | الجهة الوارد منها المعاملة | تاريخ إنشاء المعاملة | موضوع المعاملة | رقم المعاملة`. The Excel `القطاع` field has no destination column in this table, so omit it from the consolidated PowerPoint table while retaining it in Excel. Remove the table with its title and headers when the section is empty. Keep the template's approved table color and styling on continuations.
-- A subsequent split-by-sector run cannot recover the omitted transaction sector from the PowerPoint alone. When delayed transactions exist, that workflow must also receive the transactions Excel or an explicit sector mapping; never infer a sector from the transaction text.
-- Preserve `رقم المعاملة` as text; do not append `.00` and do not remove leading zeros. Preserve dates and their calendar exactly as supplied by Excel. Do not apply any new deduplication to the consolidated transaction output.
-
-## Shared elements and chart updates
-
-- Cover, slide 1: TextBox 18, ID 19 inside Group 1 contains the report creation date. The title `تقرير الإنجاز الأسبوعي` is fixed and must not be renamed.
-- Slide 5 is a fixed divider. Its two links must point to the first task-detail slide and the first project-detail slide. In the current approved template these are slide 6 for task details and slide 8 for Suhail project details. Update the links when continuation slides are inserted.
-- Slide 11 is the fixed thank-you slide in the current approved template and must remain the final slide after all insertions.
-- Update page numbers as text only while preserving their position and formatting; do not modify the master to redesign numbering.
-
-The three charts are native editable PowerPoint charts. Each chart has an Excel workbook embedded inside the PowerPoint file, and the chart must depend only on that embedded workbook with no link to an external Excel file. When updating stacked bar chart data, keep the required sector/category rows and transfer only non-zero numeric values; when a status value is zero, leave the corresponding cell blank in the embedded workbook instead of writing `0`. Embedded workbook mapping:
-
-- chart1.xml: ppt/embeddings/Microsoft_Excel_Worksheet.xlsx، Sheet1!A1:E9 في القالب.
-- chart2.xml: ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx، Sheet1!A1:E10.
-- chart3.xml: ppt/embeddings/Microsoft_Excel_Worksheet2.xlsx، use A1:D9 after removing the transaction `لم تبدأ` series.
-
-Verify each chart's actual relationship to its embedded workbook instead of assuming a filename when the template version changes. The chart relationship must be internal and point only under `ppt/embeddings`; chart or embedded-workbook relationships must not contain any external Target to the source Excel file. Update the embedded workbook, series references and ranges, category-name caches, numeric caches, and point indexes in chart XML consistently, leaving zero-value cells blank in both the workbook and chart cache. Never replace a chart with an image or place an image over it. Sector order in the template may differ from Excel; preserve the existing display order for matching sectors, refresh their names from the source, and add new sectors without losing them. A blank status-count cell in the sector table means zero; a blank required summary indicator means missing source data. إذا زاد عدد القطاعات، يبقى الرسم داخل شريحة الملخص نفسها ولا تنشئ نسخة أو شريحة استمرار للملخص؛ حدّث بيانات الرسم داخل نفس العنصر مع الحفاظ على أبعاده وتصميم الشريحة.
-
-Build a status-style map from the approved template before populating any detail table, keyed by the normalized status text rather than by row position or the copied table's existing fill. Apply the mapped status-cell formatting again after inserting every record so copied row formatting cannot override the true status. Use these approved template fills wherever those statuses appear: `مكتملة` = light blue `#DCE6F2`, `على المخطط` = light green `#EBF1DE`, and `معلق/معلقة` = light gray `#F2F2F2`. Preserve the corresponding template font, border, alignment, and margins. Never infer a status color from the destination row, alternating-row formatting, table position, or the previous week's value. For `متأخر/متأخرة` or any new status without a verified template exemplar, identify the exact approved status style before changing the design; do not invent a color. During validation, equal normalized statuses must have identical cell formatting throughout the report.
-
-## Table flow and overflow handling
-
-Duplicate the closest complete table style based on column count and table purpose; never copy Excel formatting into PowerPoint. Titles, headers, and row text may be updated. Remove copied tables or stale data that are not needed.
-
-Lay out tables from top to bottom as one continuous visual flow:
-
-- Render the slide before deciding where a table ends or where the next table begins. PowerPoint text wrapping and displayed row height are authoritative; calculated frame dimensions are not.
-- Place each next table immediately below the visible bottom edge of the previous table, leaving only a very small clear gap. The gap should read as separation between two tables, not as an empty section of the page.
-- On any slide containing two or more consecutive tables, compare every inter-table gap in the full-size rendered slide. All gaps on that slide must appear visually equal and very small. A slide fails validation if one pair has a larger gap while another pair touches or overlaps.
-- Never overlap table frames to manufacture a small gap. Text wrapping can make the visible table extend beyond its nominal frame, so position the next table from the rendered bottom edge of the preceding table.
-- Use the available page height fully. The last table should end just above the visible footer elements, with only the small clearance needed to avoid touching the footer line, logo, or page number.
-- Do not split a table while there is visible room for the next complete row. Move a row to a continuation slide only after rendering confirms that the entire row cannot fit above the footer.
-- Preserve the exact source order across page boundaries. Do not move a record to another slide merely to balance whitespace, equalize page fill, or improve visual symmetry. Pagination may move only the next complete record when it cannot fit above the footer after rendering.
-- Never split one record across slides. A continuation table repeats its title strip and column headers, then starts with the next complete record.
-- After a continuation table, place the following table directly beneath it with the same small visual gap. If its title, header, and at least one complete record cannot fit, move that whole table to the next slide.
-- For summary slides, keep indicators and charts only on the first slide. If summary tables genuinely overflow, use a continuation slide containing only the continued and subsequent tables.
-- For task and Suhail detail slides, pack consecutive tables into the remaining visible space. Remove a detail slide that becomes empty.
-- Preserve fonts, column widths, cell margins, colors, borders, and row styling. A row may become taller when its exact source text requires it; never shrink the font or compress the row to force it onto the slide.
-- After every table move or split, render the affected slide and the following slide at full size. Correct excessive gaps, premature splits, footer clearance, clipping, and overlap before delivery.
-- Do not use a fixed gap measurement, fixed footer coordinate, fixed character-count estimate, or fixed number of records per slide as a substitute for visual inspection.
-- Do not repeat records or count continuation rows twice. If one complete record cannot fit on an otherwise empty continuation slide with the approved style, stop and ask about that specific record.
-
-## Acceptance checks before delivery
-
-- `إجمالي المهام = مكتملة + على المخطط + متأخر + معلق`; each status total across sectors must equal the summary, and the sum of all task-detail sections must equal the total.
-- `إجمالي مشاريع سهيل = مكتملة + على المخطط + متأخر + لم تبدأ`; sector totals and the number of project-detail records must match the summary.
-- `إجمالي المعاملات = مكتملة + على المخطط + متأخر`; sector totals must match the summary, and the number of records in the delayed-transactions table must match the `متأخرة` indicator. `لم تبدأ` must not appear in transaction indicators, chart data, or acceptance arithmetic.
-- Verify that completed and delayed summary tables contain the corresponding detail records, that `المعلقة` comes from task details, and that `طلبات الدعم` comes from its own source table. Never auto-fix source conflicts; report the conflicting cells.
-- Every required source record must appear once in its destination table, except for intentional appearances in both summary and details. No empty table may remain, and no stale update text may remain where the source field is blank.
-- Verify every detail-table status cell against the status-style map after all row copies, splits, and slide moves. The same normalized status must never appear with different fills, and `مكتملة` must not retain the green `على المخطط` fill.
-- On every slide containing multiple tables, inspect all visible inter-table gaps together at full size. They must be consistently small; no pair may touch, overlap, or leave a noticeably larger blank band than the other pairs.
-- All displayed numbers, including chart data labels, must match their source. Embedded workbook data and chart caches must be consistent.
-- Open the generated file and recheck PowerPoint integrity and relationships. It must open directly without `Repair`, `Found a problem with content`, or any repair prompt, and it must contain no external or missing Excel links. Verify that `Edit Data` for every chart uses the workbook embedded inside PowerPoint. Render the slides and compare them visually against the PDF/template for fonts, sizes, positions, RTL behavior, clipping, overlaps, and table boundaries. A summary continuation slide is valid only when it contains overflow table records and does not repeat the summary indicators or chart; no blank continuation slide may remain.
-- Verify that the template fonts are actually available, including `Abar Mid` and `Abar Mid SemiBold`. If the runtime substitutes fonts or cannot edit the template while preserving formatting, explain the specific limitation before producing a differently formatted report.
-- Do not claim that the report was tested in PowerPoint or visually validated unless those checks were actually performed. Creating or updating this skill alone is not a full population test.
-
-## Reference validation example
-
-The current template is a design/reference snapshot only; never use its displayed values as weekly defaults. For this template snapshot, the visible summary values are:
-
-- Tasks: 12 total, 2 `مكتملة`, 10 `على المخطط`, 0 `متأخر`, 0 `معلق`.
-- Suhail: 20 total, 4 `مكتملة`, 16 `على المخطط`, 0 `متأخر`, 0 `لم تبدأ`.
-- Transactions: 589 total, 334 `مكتملة`, 255 `على المخطط`, 0 `متأخر`; `لم تبدأ` is not a valid displayed transaction status.
-
-These values are for validating template mapping only. Runtime Excel remains the sole source of weekly data, and the PDF must never be used as a data source.
+Prefer `uv run` using the declared dependencies. Reuse an existing installation. If resolution is unavailable and an existing compatible Python satisfies the dependencies, use it and record the fallback; do not modify host Python. If installing uv is necessary, use Astral's official user-scoped installer, not pip. Both report folders require the sibling `skills/report_common/` directory, installed together from this repository. Runtime scripts must not import test fixtures or the other report's generator.
 
 ## Delivery
 
-سلّم رابط PowerPoint الجديد، وPDF إن طُلب، مع ملاحظة قصيرة فقط عند وجود بيانات ناقصة أو عائق تحقق. لا تضف تحليلًا أو توصيات أو تعليقات تنفيذ داخل الشرائح. لا تشغّل تقسيم القطاعات أو تُنشئ جدولة أو تُرسل التقرير للآخرين ضمن هذه المهارة.
-
-## الأصول المرجعية المرفقة
-
-- قالب PowerPoint الكامل المعتمد: `assets/weekly-report-master.pptx`؛ الحجم `9545257` بايت، SHA-256: `3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5`. تحقّق منه قبل الاستخدام ولا تعدّل الأصل.
-- المرجع البصري فقط: `assets/weekly-report-reference.pdf`، وليس مصدر بيانات.
-
-## Updated template acceptance
-
-- Use the user-approved current master and matching PDF reference. Preserve Abar typography when populating empty cells and duplicating rows or slides. Verify the generated PowerPoint and exported PDF, especially transaction bodies and ملاحظات columns.
-- Omit a sector from charts only when every plotted status is blank or zero. Retain any sector with a positive count in any plotted status. Apply this to chart caches and embedded workbook categories, without changing source workbooks, totals, or detail records. For entirely empty data, show no named sector or bar and retain zero KPI indicators.
-- Acceptance requires normal, empty, new-sector and overflow cases to reconcile with source records, open without PowerPoint repair, and pass final visual inspection for Abar, readable text, no clipping, no overlap and correct pagination.
-
-- Verify actual font usage in the exported PDF, not just font declarations in PowerPoint. On the validated Windows host, PowerPoint SaveAs PDF substituted Calibri even for the unchanged approved master; Adobe PDFMaker preserved Abar and matches the supplied reference export route. If an exporter substitutes fonts, use a verified available exporter and repeat the visual check. Never mark font acceptance passed from successful export alone.
+Deliver the editable PPTX bytes that passed data checks and final visual review, using an accessible file link. Deliver PDF only when requested. Keep QA evidence outside the slides: exact output/input/template hashes, performed checks, renderer, and any limitation. Any edit invalidates affected checks. Do not split sectors, schedule runs, or send reports to others unless requested.
