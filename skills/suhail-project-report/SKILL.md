@@ -74,7 +74,7 @@ Six sections in this order:
 3. **ثالثا: المشاريع المكتملة** — `# | المشروع | القطاع`.
 4. **رابعا: المشاريع المتأخرة** — `# | المشروع | القطاع | ملاحظات`, with each delayed project's note copied from the main projects sheet. Blank notes stay blank; shows `لا يوجد` when empty.
 5. **خامسا: أبرز التحديثات** — taken from the `أبرز التحديثات` sheet: `# | المشروع | القطاع | التحديث`.
-6. **سادسا: التحديات** — `# | المشروع | القطاع | التحدي`. Take nonblank challenges from the `التحديات` sheet when present, one row per challenge. Otherwise use the `التحدي` or `التحديات` column in the main projects sheet. Preserve source order and show `لا يوجد` when no challenges are present. If the source has neither a challenges sheet nor a challenge column, report this rather than inventing entries.
+6. **سادسا: التحديات** — `# | المشروع | القطاع | التحدي`. Always retain the title, headers, and one formatted empty entry row for manual completion. Leave all cells, including numbering, blank. Do not inspect, import, infer, or generate challenges from any source sheet or column. Do not write `لا يوجد` or warn about missing challenges.
 
 Fixed sector order for section 2:
 
@@ -111,3 +111,7 @@ A sector in the data that matches nothing in the fixed lists is appended at the 
 
 Ministry palette, already in the script: green `038060` (headers, على المخطط), dark blue `164767` (section titles, مكتملة), gold `D7A562`, `CFA76C` for متأخر, grey `8C8C8C` for لم تبدأ.
 
+
+## Manual-entry acceptance
+
+The challenges table stays empty whether source challenges are present or absent. Title, headers, borders, RTL and Abar formatting remain available for manual entry. All project details, latest-week selection, counts and status rules remain unchanged.

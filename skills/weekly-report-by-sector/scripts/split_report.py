@@ -375,7 +375,7 @@ def read_data(prs, role):
             if len(rows[1]) != 6: continue
             for r in rows[2:]:
                 if r[0].strip(): tasks.append({'text': r[1], 'sector': r[2],
-                                               'status': norm_status(r[4]),
+                                               'planned_date': r[3], 'status': norm_status(r[4]),
                                                'note': r[5] if len(r) > 5 else ''})
     for i in role['proj_details']:
         for sh, rows in find_tables(slides[i], ['اسم المشروع']):
@@ -667,6 +667,15 @@ def build(master, outdir, aliases, transactions=None, only=None):
     task_templates = {st: titled_frame(role['task_summaries'], TASK_TITLE[st])
                       for st in TASK_ORDER}
     task_fallback = next((v for v in task_templates.values() if v is not None), None)
+    # On-plan tasks use the approved detail layout, including planned date.
+    task_detail_shapes = [sh for i in role['task_details']
+                          for sh, rows in find_tables(sl[i], ['المهمة', 'الحالة'])
+                          if len(rows[1]) == 6]
+    if any(t['status'] == 'على المخطط' for t in tasks):
+        if not task_detail_shapes:
+            raise ValueError('No task detail pattern for on-plan planned dates')
+        task_templates['على المخطط'] = deepcopy(task_detail_shapes[0]._element)
+        rescale(gf_tbl(task_templates['على المخطط']), CW)
     TMPL_SUPPORT = titled_frame(role['task_summaries'], 'طلبات الدعم')
     TMPL_UPD = titled_frame(role['project_summaries'], 'أبرز التحديثات')
     TMPL_CHALLENGE = titled_frame(role['project_summaries'], 'التحديات')
@@ -717,11 +726,14 @@ def build(master, outdir, aliases, transactions=None, only=None):
                 rows = []
                 for i, t in enumerate(sel):
                     values = {'#': str(i+1), 'المهمة': t['text'], 'القطاع': sec,
-                              'ملاحظات': t['note'].strip(), 'التحديث': t['note'].strip()}
-                    rows.append([values.get(norm(h), '') for h in headers])
+                              'ملاحظات': t['note'].strip(), 'التحديث': t['note'].strip(),
+                              'تاريخ الإنجاز المخطط': t['planned_date'], 'الحالة': t['status']}
+                    values = {field_key(k): v for k, v in values.items()}
+                    rows.append([values.get(field_key(h), '') for h in headers])
                 s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), tmpl,
                                    TASK_TITLE[st], rows, ['ctr' if h == '#' else 'r' for h in headers],
-                                   'tbl_' + st, est_table, accent=ACCENT[st], headers=headers)
+                                   'tbl_' + st, est_table, accent=ACCENT[st], headers=headers,
+                                   status_col=4 if st == 'على المخطط' else None)
             if d['support']:
                 if TMPL_SUPPORT is None: raise ValueError('No support table to clone')
                 headers = [cell_text_el(tc) for tc in gf_tbl(TMPL_SUPPORT).findall(q('tr'))[1].findall(q('tc'))]

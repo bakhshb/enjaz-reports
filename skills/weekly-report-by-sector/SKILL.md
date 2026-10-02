@@ -287,3 +287,9 @@ with, and the footer check reads the safety margin as well as the content.
 - Acceptance requires normal, empty, new-sector and overflow cases to reconcile with source records, open without PowerPoint repair, and pass final visual inspection for Abar, readable text, no clipping, no overlap and correct pagination.
 
 - Verify actual font usage in the exported PDF, not just font declarations in PowerPoint. On the validated Windows host, PowerPoint SaveAs PDF substituted Calibri even for the unchanged approved master; Adobe PDFMaker preserved Abar and matches the supplied reference export route. If an exporter substitutes fonts, use a verified available exporter and repeat the visual check. Never mark font acceptance passed from successful export alone.
+
+## Planned dates for on-plan tasks
+
+For `المهام على المخطط` only, clone the master's task-detail table and retain its six-column order: `# | المهمة | القطاع | تاريخ الإنجاز المخطط | الحالة | ملاحظات`. Copy the planned date from that task's detail row exactly, including blank dates. Retain detail typography, column proportions, and status styling; fit the existing content width and paginate rather than shrink text. Completed, delayed and suspended task tables keep their existing summary layout without this added date.
+
+Acceptance: only on-plan task tables gain the date; every date matches the master detail row and appears between sector and status. Preserve task order, numbering, counts and notes. The output must later pass source reconciliation and final visual review for clipping, wrapping and footer clearance.

@@ -39,6 +39,7 @@ TASK_FIELDS=('المهمة','القطاع','ملاحظات')
 PROJECT_FIELDS=('اسم المشروع','تاريخ البداية','تاريخ النهاية','الحالة','ما تم حتى تاريخه')
 FIELDS={**{t:TASK_FIELDS for t in splitter.TASK_TITLE.values()},
         **{t:PROJECT_FIELDS for t in splitter.PROJ_TITLE.values()},
+        'المهام على المخطط':('المهمة','القطاع','تاريخ الإنجاز المخطط','الحالة','ملاحظات'),
         'طلبات الدعم':('المهمة','القطاع','طلب الدعم'),
         'أبرز التحديثات':('المشروع','القطاع','التحديث'),
         'التحديات':('المشروع','القطاع','التحدي'),
@@ -55,7 +56,8 @@ def expected_records(master,transactions=None,aliases=None,only=None):
     result=defaultdict(lambda:defaultdict(list))
     for item in tasks:
         sector=canonical(item['sector']); title=splitter.TASK_TITLE[item['status']]
-        result[sector][title].append(tuple(map(record_text,(item['text'],sector,item['note']))))
+        values = (item['text'], sector, item['planned_date'], item['status'], item['note']) if item['status']=='على المخطط' else (item['text'], sector, item['note'])
+        result[sector][title].append(tuple(map(record_text,values)))
     for item in projects:
         sector=canonical(item['sector']); title=splitter.PROJ_TITLE[item['status']]
         result[sector][title].append(tuple(map(record_text,(item['name'],item['start'],item['end'],item['status'],item['note']))))

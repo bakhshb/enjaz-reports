@@ -1,0 +1,184 @@
+{
+  "date": "2026-10-02",
+  "timezone": "Asia/Riyadh",
+  "base": "02b7d303678cd5d07ca5761d1e62af84cfc49943",
+  "scope": "Synthetic acceptance for the four requested skill changes; no current ministry production workbooks were supplied.",
+  "acceptance": {
+    "task_support_manual": "passed: no source support sheet required; populated and malformed support sheets ignored; title, headers and blank formatted entry row retained",
+    "suhail_challenges_manual": "passed: absent, populated and malformed challenge sources ignored; blank formatted entry row retained",
+    "sector_on_plan_dates": "passed: date copied only to on-plan task tables, using approved six-column detail layout and order; wrong dates rejected",
+    "consolidated_suhail_rich_text": "passed: leading date label/date bold, remaining prose regular; two or more explicitly marked items become native bullets; paragraphs and single items stay plain; text/order preserved",
+    "manual_entries_downstream": "passed: simulated user-entered support/challenge rows survive source reconciliation in normal and overflow chains",
+    "visual": "passed: five decks / 51 pages reviewed as native PowerPoint PNGs (38 dynamic + 13 static pages), plus both manual-entry Excel tables exported with native Excel; final PDF spot checks performed",
+    "pdf_fonts": "passed: all readable Arabic text uses Abar in the five Adobe PDFMaker exports; page counts match PPTX",
+    "installed": "passed: 13 changed skill files hash-matched; 4 report tests and 16 upstream tests pass against installed scripts",
+    "skill_metadata": "passed: quick_validate for all four skills",
+    "template_assets": "passed: existing assets unchanged"
+  },
+  "test_runs": {
+    "regression_before_final_bullet_indent": {
+      "tests": 70,
+      "seconds": 274.183,
+      "result": "passed",
+      "log_sha256": "dc98daf3fde0d92ca837f88313b102a88b32d3564b3b99f5525d13c140c13495"
+    },
+    "final_requested_changes": {
+      "tests": 4,
+      "seconds": 33.491,
+      "result": "passed",
+      "log_sha256": "19b5460dbd8d2861c184bb74ab772a1252cbdb4cc1fa97afee33a29397270a37"
+    },
+    "final_weekly_production": {
+      "tests": 14,
+      "seconds": 80.999,
+      "result": "passed",
+      "log_sha256": "25a92b0072e464199514f9e4d600f68e60ae4ccdc2693ad5917550b026cba917"
+    },
+    "installed_requested_changes": {
+      "tests": 4,
+      "seconds": 49.729,
+      "result": "passed",
+      "log_sha256": "97900a3480a6a60248e1844613066a79e03537486f64ffc3665e5ce333126caa"
+    },
+    "installed_upstream": {
+      "tests": 16,
+      "seconds": 15.354,
+      "result": "passed",
+      "log_sha256": "5047c4b10cfe4ae60c58469c6959410753d7ad65a17b0e13cc45e9a3efdd876d"
+    }
+  },
+  "test_count_note": "Runs overlap. The 70-test regression preceded the final template-derived bullet indent correction; 4 requested-change and 14 weekly-production tests were rerun afterward, followed by installed-copy checks. Do not sum these as distinct tests.",
+  "resolved_during_review": [
+    "Native bullet indentation copied from the approved weekly project pattern.",
+    "Initial dense weekly candidate showed stacked-table overlap; corrected using existing native row measurements and repagination, then rerendered and reconciled."
+  ],
+  "runtime_limitation": "Initial PPTX layout is provisional. Every real generated report still needs its own final render/visual acceptance; native measurement correction may be required for dense data.",
+  "templates": [
+    {
+      "path": "skills/monday-meeting-report/assets/monday-meeting-master.pptx",
+      "sha256": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255",
+      "unchanged": true
+    },
+    {
+      "path": "skills/monday-meeting-report/assets/monday-meeting-reference.pdf",
+      "sha256": "a1c1b10073bf4837fc6569e6a405f91330964adb3603fc90ef30ed4bfeb59018",
+      "unchanged": true
+    },
+    {
+      "path": "skills/weekly-consolidated-report/assets/weekly-report-master.pptx",
+      "sha256": "3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5",
+      "unchanged": true
+    },
+    {
+      "path": "skills/weekly-consolidated-report/assets/weekly-report-reference.pdf",
+      "sha256": "7379f6077f534966a77e10d25e65af963eb858feed36e5ee32264ca74d6d08e7",
+      "unchanged": true
+    }
+  ],
+  "outputs": [
+    {
+      "file": "empty/weekly.pptx",
+      "pages": 6,
+      "pptx_sha256": "eb83a990fb4cefab4e5c64ad7ae5a466ce3b6cb04dea5fd51a520476bdddb5f7",
+      "pdf_sha256": "7dde2c1c4ea0f7e46d88d341d6300674c768c9777f2a4dd78e0e32fe004bce74",
+      "fonts": [
+        "/BUZKBV+AbarMid-Regular",
+        "/NJAJNX+AbarMid-Bold"
+      ]
+    },
+    {
+      "file": "normal/sector.pptx",
+      "pages": 6,
+      "pptx_sha256": "c8e8f58124b4843ee7f3b87bf101f5836ff301c1ebf72634164bd6aff74ce307",
+      "pdf_sha256": "e56a7b427791f2b07bcdd13a175ccc6d0f952a27aec420f2fd3dd5f6ebc1f322",
+      "fonts": [
+        "/GSWUFL+AbarMid-Bold",
+        "/OZTLNV+AbarMid-Regular"
+      ]
+    },
+    {
+      "file": "normal/weekly.pptx",
+      "pages": 8,
+      "pptx_sha256": "df647db16d6b497dc8643bcbde333d60b7b817651b3964058d868cce7f816422",
+      "pdf_sha256": "2b7d6e8f43402095bc136bacb51ae057fd6858503d3a901cf70b5506dcac6957",
+      "fonts": [
+        "/LKYIDB+AbarMid-Regular",
+        "/XUZHPD+AbarMid-Bold"
+      ]
+    },
+    {
+      "file": "overflow/sector.pptx",
+      "pages": 11,
+      "pptx_sha256": "f19303dd030a42173ce8227ca19867445cd5da5cb5239467acbe439bc4a52255",
+      "pdf_sha256": "68946c3d7549dad69945bc8ad7ce8023765726695fcd48d7fefd0ae9fe05e9c6",
+      "fonts": [
+        "/FFLFYN+AbarMid-Regular",
+        "/UWAWAJ+AbarMid-Bold"
+      ]
+    },
+    {
+      "file": "overflow/weekly.pptx",
+      "pages": 20,
+      "pptx_sha256": "aa2094b81510cda90ef6a870dcfadb7d02230441b30e61b038917c82db324cbb",
+      "pdf_sha256": "29e8b86c9c951e7890df71cb1c61d7b2758ce8cbaa8c5ba20fe8a6646e8d88df",
+      "fonts": [
+        "/DORIXR+AbarMid-Bold",
+        "/YRCZFB+AbarMid-Regular"
+      ]
+    }
+  ],
+  "installed_files": [
+    {
+      "path": "skills/suhail-project-report/SKILL.md",
+      "sha256": "2a210742cb94c2c3480e5499496265faa023ee43e08fdde5d6f8191c0d8947ea"
+    },
+    {
+      "path": "skills/suhail-project-report/scripts/build_report.py",
+      "sha256": "ada6aa8b55fcffaaf1680b7b32e1eadca9012b046b752c505ea1ae612e259459"
+    },
+    {
+      "path": "skills/task-details/SKILL.md",
+      "sha256": "791c9d49cb2055a9d8d891c63e8b4a6ca8bb3a25fc9600de4d0804a8c852c33b"
+    },
+    {
+      "path": "skills/task-details/scripts/build_report.py",
+      "sha256": "7e3e90bfe509db02fb95990b4cf1e4f9438eaded5719d2b0928eaa8f3c08da4e"
+    },
+    {
+      "path": "skills/weekly-consolidated-report/references/acceptance.md",
+      "sha256": "0f09c696ac1f58a236d5bf6c3eb19be4bc672a4a97ab3d38f3392007484b67c7"
+    },
+    {
+      "path": "skills/weekly-consolidated-report/references/business-rules.md",
+      "sha256": "e532c23d64fcde25ca5d6f0cc2d04bd064a4f2fc174ed7e0d4881ecf45ea5893"
+    },
+    {
+      "path": "skills/weekly-consolidated-report/scripts/build_report.py",
+      "sha256": "5b0e496f79cd8da2768cafda1e6e8d3f75408252c42ef84fbb1c33acbdcad92d"
+    },
+    {
+      "path": "skills/weekly-consolidated-report/scripts/validate_report.py",
+      "sha256": "243ab63b7dce2db7cf0dca1f433e14ffefd9f13c097cc8a3574999bf8ba38e5f"
+    },
+    {
+      "path": "skills/weekly-report-by-sector/SKILL.md",
+      "sha256": "592db6ea0c161020b5f49838df0a72f64f84821428189d0c2e3d8e52dfa11441"
+    },
+    {
+      "path": "skills/weekly-report-by-sector/references/design-rules.md",
+      "sha256": "b4985f9e84f1365409f3f3184880b1ffbf63140af55820a71853c773be57d78d"
+    },
+    {
+      "path": "skills/weekly-report-by-sector/scripts/qa_report.py",
+      "sha256": "384d24f9774c4b771e6e0f5c655293b7762a75a9d47892268b464bafc3a32773"
+    },
+    {
+      "path": "skills/weekly-report-by-sector/scripts/split_report.py",
+      "sha256": "28d92b760c33c77fd5c97d07afd0f7edd4d58d8aaab4e3d7d9e512a0a18cfb67"
+    },
+    {
+      "path": "skills/weekly-consolidated-report/scripts/update_format.py",
+      "sha256": "107fa94697b1aa4d5db1f1253be115e01a8ee23b7f134475e8bd4b6dac4d05fc"
+    }
+  ]
+}

@@ -21,3 +21,10 @@
 - Acceptance requires normal, empty, new-sector and overflow cases to reconcile with source records, open without PowerPoint repair, and pass final visual inspection for Abar, readable text, no clipping, no overlap and correct pagination.
 
 - Verify actual font usage in the exported PDF, not just font declarations in PowerPoint. On the validated Windows host, PowerPoint SaveAs PDF substituted Calibri even for the unchanged approved master; Adobe PDFMaker preserved Abar and matches the supplied reference export route. If an exporter substitutes fonts, use a verified available exporter and repeat the visual check. Never mark font acceptance passed from successful export alone.
+
+## Suhail update rich-text acceptance
+
+- Leading `تاريخ التحديث` and its date are bold; all following prose remains regular, including same-line text and other dates.
+- Two or more explicitly marked source items become native bullets in source order, with no duplicate typed markers. A single item and unmarked paragraphs receive no bullets.
+- Reconcile source wording allowing only conversion of source list markers to native bullets; preserve blank lines and all substantive text.
+- Final visual review must confirm Abar, Arabic direction, readable bullet alignment and no clipping after formatting. These checks remain pending until run on the changed implementation.

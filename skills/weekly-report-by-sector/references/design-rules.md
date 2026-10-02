@@ -76,10 +76,7 @@ match without being sampled by eye.
 Project status tables take the gold-bar title row from the أبرز التحديثات table
 (expanded to six columns) so every table on that slide shares one title style.
 
-The القطاع column in the tasks tables repeats the sector name on every row, since
-that's how the master's table is built. Swapping it for تاريخ الإنجاز المخطط is a
-reasonable change if the user asks — the data is in the master — but don't do it
-unprompted.
+On-plan task tables clone the six-column task-detail pattern: `# | المهمة | القطاع | تاريخ الإنجاز المخطط | الحالة | ملاحظات`. Keep the sector and add its existing planned date in the detail-table order. Other task status tables retain their summary patterns. Preserve detail column proportions when scaling to the content width.
 
 ## Cover
 
