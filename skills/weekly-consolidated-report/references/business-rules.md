@@ -59,7 +59,7 @@ Task details:
 Suhail project details:
 
 - The current six-column Suhail detail patterns begin on slide 8 and continue through slide 10. These are design examples, not a sector whitelist or a fixed number of pages. Read every titled sector section in `تفاصيل مشاريع سهيل` and build enough pages for all its records, retaining source order and the approved title/header pattern.
-- Column order for every Suhail detail table: A=`#`, B=`اسم المشروع`, C=`تاريخ البداية`, D=`تاريخ النهاية`, E=`الحالة`, F=`ما تم حتى تاريخه`. In column F, when the cell begins with a standalone update-date line such as `تاريخ التحديث 15 سبتمبر 2026` or the same phrase using another valid day-month-year value, format that update-date line only in bold. Keep the remaining text in the cell in the existing regular style. Do not change, rewrite, infer, or add the date text; apply bold only when the line already exists in the source content.
+- Column order for every Suhail detail table: A=`#`, B=`اسم المشروع`, C=`تاريخ البداية`, D=`تاريخ النهاية`, E=`الحالة`, F=`ما تم حتى تاريخه`. In column F, when the cell begins with an update-date label and date such as `تاريخ التحديث 15 سبتمبر 2026` or the same phrase using another valid day-month-year value, format only the leading label and date in bold (see Suhail detail update formatting below). Keep the remaining text in the cell in the existing regular style. Do not change, rewrite, infer, or add the date text; apply bold only to the supplied label and date.
 - The sector is taken from the section heading above the table, not from a non-existent detail column.
 - PowerPoint table placement differs from the sector order in Excel; match by sector name. Add new sectors using an existing detail pattern. A sector that only has a zero-valued statistical row must not generate a detail table.
 
@@ -131,3 +131,7 @@ These values are for validating template mapping only. Runtime Excel remains the
 ## Approved shared status colors (user confirmation, 29 September 2026)
 
 The Monday status colors also apply to this weekly report: completed `DCE6F2`, on-plan `EBF1DE`, delayed `F2DCDB`, suspended `F2F2F2`, and not-started `F2F2F2`. The current weekly master has completed/on-plan detail examples. For its missing examples, copy the corresponding weekly task/project base status cell and apply the approved fill. Preserve that weekly cell's font, size, borders, margins, and alignment. This explicit approval resolves the requirement above to identify an approved style before using missing status examples. Do not import Monday typography or change either master. Reject new, unsupported statuses and conflicting template examples.
+
+### Suhail detail update formatting
+
+In `ما تم حتى تاريخه`, bold only the leading `تاريخ التحديث` label and its supplied date, including when regular body text follows on the same line. Keep the rest regular. Never invent a date. Use native PowerPoint bullets only for two or more explicitly marked source items (bullet, dash, or numbered item at the beginning of a line); remove their textual list markers so bullets are not duplicated. Preserve item wording and order. A single item, unmarked prose, line wrapping, and paragraphs remain plain text; do not infer a list from sentence punctuation. Preserve Abar, RTL, font size and cell margins. This applies to project details only.

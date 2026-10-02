@@ -58,10 +58,18 @@ def scenario(root,name):
     # Exercise all approved task/project statuses with independent summary sections.
     for raw,script,output in [('raw-tasks.xlsx',TASKS,'tasks.xlsx'),('raw-projects.xlsx',SUHAIL,'projects.xlsx')]:
         wb=load_workbook(root/raw);ws=wb.active
-        if script==TASKS and count:wb['طلبات الدعم'].append(['مهمة تجريبية 1',ws.cell(2,2).value,'طلب دعم تجريبي'])
-        if script==SUHAIL and count:ws.cell(2,10).value='تحدي تجريبي'
         wb.save(root/raw)
         require(run(script,*(['--input',root/raw,'--output',root/output] if script==TASKS else [root/raw,root/output])))
+    # Simulate the user's manual entries after upstream generation.
+    # The upstream builders themselves must leave these sections blank.
+    if count:
+        for file,sheet,title,text in [('tasks.xlsx','ملخص المهام','طلبات الدعم','طلب دعم تجريبي'),
+                                      ('projects.xlsx','ملخص مشاريع سهيل','سادسا: التحديات','تحدي تجريبي')]:
+            wb=load_workbook(root/file);ws=wb[sheet]
+            row=next(c.row for cells in ws for c in cells if c.value==title)+2
+            record_name='مهمة تجريبية 1' if file=='tasks.xlsx' else 'مشروع تجريبي 1'
+            for col,value in enumerate([1,record_name,'قطاع جديد تجريبي' if name=='new' else 'وكالة شؤون الحج',text],1):ws.cell(row,col,value)
+            wb.save(root/file)
     # Rebuild Monday from the exact final workbooks used by the weekly path.
     require(run(fixtures.MONDAY/'build_report.py','--topics',root/'topics.xlsx','--tasks',root/'tasks.xlsx','--suhail',root/'projects.xlsx','--output',root/'monday.pptx'))
     require(run(fixtures.MONDAY/'report_gate_v2.py','--report',root/'monday.pptx','--topics',root/'topics.xlsx','--tasks',root/'tasks.xlsx','--suhail',root/'projects.xlsx'))

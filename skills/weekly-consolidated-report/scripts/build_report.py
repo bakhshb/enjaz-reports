@@ -16,6 +16,8 @@ from report_common import status_styles
 from report_common.package_tools import reachable_parts
 from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom
 
+from update_format import format_update
+
 def remove(shape):shape._element.getparent().remove(shape._element)
 
 def flow(prs,seed,sections,summary=False,measurements=None):
@@ -106,6 +108,11 @@ def build_candidate(args):
     project_patterns=builder.detail_pattern_slides(prs,'project')
     if not task_patterns or not project_patterns:raise ValueError('Missing weekly detail patterns')
     styles={kind:approved_styles(prs,kind) for kind in ('task','project')}
+    bullet_style=next((deepcopy(p._p.get_or_add_pPr()) for sl in project_patterns
+                       for sh in builder.detail_tables(sl,'project') for row in sh.table.rows
+                       for cell in row.cells for p in cell.text_frame.paragraphs
+                       if p._p.find('./'+qn('a:pPr')+'/'+qn('a:buChar')) is not None),None)
+
     date=dt.datetime.now().astimezone().date()
     builder.set_text(builder.shape_by_id(slides[0],19),f'{date.day} {builder.MONTHS[date.month-1]} {date.year}')
     chart_specs=[]
@@ -146,8 +153,7 @@ def build_candidate(args):
                     status_styles.apply(cell,styles[kind][status])
                     set_cell_exact(cell,status)
                     if kind=='project':
-                        for p in row.cells[5].text_frame.paragraphs:
-                            for run in p.runs:run.font.bold=p.text.startswith('تاريخ التحديث ')
+                        format_update(row.cells[5],bullet_style)
         unused.extend(patterns[1:])
         if not generated[kind]:unused.append(seed)
     for slide in unused:builder.remove_slide(prs,slide)

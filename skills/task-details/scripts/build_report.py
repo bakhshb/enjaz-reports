@@ -56,15 +56,13 @@ def find_col(df, key):
     return None
 
 def pick_sheets(xl):
-    main_sheet = support_sheet = None
     for name in xl.sheet_names:
         df = xl.parse(name, nrows=1)
         cols = [str(c).strip() for c in df.columns]
-        if any(a in cols for a in COL_ALIASES["support_request"]):
-            support_sheet = name
-        elif any(a in cols for a in COL_ALIASES["status"]):
-            main_sheet = name
-    return main_sheet, support_sheet
+        if any(a in cols for a in COL_ALIASES["status"]):
+            return name
+    return None
+
 
 def normalize_status(raw, unmapped):
     s = str(raw).strip()
@@ -75,11 +73,9 @@ def normalize_status(raw, unmapped):
 
 def build(input_path, output_path):
     xl = pd.ExcelFile(input_path)
-    main_name, support_name = pick_sheets(xl)
+    main_name = pick_sheets(xl)
     if main_name is None:
         sys.exit("لم يتم العثور على شيت المهام الرئيسي (يحتاج عمود 'الحالة').")
-    if support_name is None:
-        sys.exit("لم يتم العثور على شيت طلبات الدعم (يحتاج عمود 'طلب الدعم').")
     df = xl.parse(main_name)
 
     c_task = find_col(df, "task")
@@ -143,23 +139,6 @@ def build(input_path, output_path):
         for src in sources
     }
     assert sum(len(v) for v in source_groups.values()) == total
-
-    sup = xl.parse(support_name)
-    c_stask = find_col(sup, "task")
-    c_ssector = find_col(sup, "sector")
-    c_sreq = find_col(sup, "support_request")
-    missing_support = [label for label, column in (
-        ("المهمة", c_stask), ("القطاع", c_ssector), ("طلب الدعم", c_sreq),
-    ) if column is None]
-    if missing_support:
-        sys.exit("أعمدة مفقودة في شيت طلبات الدعم: " + ", ".join(missing_support))
-    sup_records = []
-    for rec in sup.to_dict("records"):
-        sup_records.append({
-            "task": None if pd.isna(rec.get(c_stask)) else rec.get(c_stask),
-            "sector": None if pd.isna(rec.get(c_ssector)) else rec.get(c_ssector),
-            "support_request": None if pd.isna(rec.get(c_sreq)) else rec.get(c_sreq),
-        })
 
     FONT_NAME = "Abar Mid"
     FONT_SIZE = 10
@@ -263,13 +242,12 @@ def build(input_path, output_path):
         r += 1
     r += 1
 
-    style_title(ws1, r, 5, "طلبات الدعم")
+    style_title(ws1, r, 4, "طلبات الدعم")
     r += 1
     style_header_row(ws1, r, ["#", "المهمة", "القطاع", "طلب الدعم"])
     r += 1
-    for i, rec in enumerate(sup_records, start=1):
-        write_row(ws1, r, [i, rec["task"], rec["sector"], rec["support_request"]], wrap_cols={2, 3, 4}, center_cols={1})
-        r += 1
+    # Manual-entry table: do not inspect or import support requests.
+    write_row(ws1, r, [None, None, None, None], wrap_cols={2, 3, 4}, center_cols={1})
 
     ws2 = wb.create_sheet("تفاصيل المهام")
     ws2.sheet_view.rightToLeft = True

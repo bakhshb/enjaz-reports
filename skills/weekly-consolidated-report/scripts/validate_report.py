@@ -12,6 +12,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers, validation, status_styles
 from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom
 
+from update_format import update_parts, display_text
+
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
        ('إجمالي العاملات','المعاملات',['مكتملة','على المخطط','متأخر'],['B2','B3','B4','B5'],[24,29,31,26])]
@@ -132,9 +134,13 @@ def validate(report,tasks,suhail,transactions,template=MASTER):
                     if status not in allowed:errors.append('Unsupported '+kind+' status: '+status)
                     if status not in styles[kind] or status_styles.signature(cell)!=status_styles.signature(styles[kind][status]):errors.append('Status style differs: '+status)
                     if kind=='project':
-                        for p in row.cells[5].text_frame.paragraphs:
+                        # Expected emphasis is limited to the leading label/date span.
+                        for pi,p in enumerate(row.cells[5].text_frame.paragraphs):
+                            offset=0
+                            date_end=update_parts(p.text)[0][1] if pi==0 else 0
                             for run in p.runs:
-                                if run.text.strip() and bool(run.font.bold)!=p.text.startswith('تاريخ التحديث '):errors.append('Suhail update-date emphasis differs')
+                                if run.text and (bool(run.font.bold)!=(offset<date_end) or offset<date_end<offset+len(run.text)):errors.append('Suhail update-date emphasis differs')
+                                offset+=len(run.text)
             elif 'رقم المعاملة' in headers:
                 pattern=transaction_pattern
                 keys=[field_key(h) for h in headers]
@@ -148,7 +154,23 @@ def validate(report,tasks,suhail,transactions,template=MASTER):
             else:errors.append('Unexpected table: '+title);continue
             check_table_style(table,pattern,errors)
     for kind,sections in expected_sections.items():
-        compare(kind,[[section,*detail_row(row[:6])] for section,rows in sections for row in rows],actual[kind],errors)
+        expected=[]
+        for section,records in sections:
+            for record in records:
+                values=detail_row(record[:6])
+                if kind=='project':values[5]=display_text(values[5])
+                expected.append([section,*values])
+        compare(kind,expected,actual[kind],errors)
+        if kind=='project':
+            source_updates=[record[5] for _,records in sections for record in records]
+            output_cells=[row.cells[5] for sl in final.slides for sh in helpers.detail_tables(sl,'project') for row in list(sh.table.rows)[2:]]
+            for source,cell in zip(source_updates,output_cells):
+                parts=update_parts(exact(source))
+                paragraphs=cell.text_frame.paragraphs
+                if len(parts)!=len(paragraphs):errors.append('Suhail update paragraph count differs');continue
+                for (_,_,bullet),p in zip(parts,paragraphs):
+                    actual_bullet=p._p.find('./'+qn('a:pPr')+'/'+qn('a:buChar'))
+                    if (actual_bullet is not None)!=bullet:errors.append('Suhail update list formatting differs')
     for title,records in {**ts,**ps}.items():compare(title,records,summaries[title],errors)
     compare('transactions',[[row[i] for i in (0,1,3,4,5)] for row in xd],trans,errors)
     # Summary records remain independently sourced; match identities without inventing notes.

@@ -135,55 +135,60 @@ class UpstreamIntegrityTests(unittest.TestCase):
             self.assertIn("تاريخ النهاية", result.stderr + result.stdout)
             self.assertFalse(output.exists())
 
-    def test_tasks_require_support_sheet(self):
+    def assert_blank_manual_table(self, output, title, headers):
+        wb = load_workbook(output)
+        ws = wb["ملخص المهام" if title == "طلبات الدعم" else "ملخص مشاريع سهيل"]
+        row = next(c.row for cells in ws for c in cells if c.value == title)
+        self.assertEqual([ws.cell(row+1, i).value for i in range(1,5)], headers)
+        self.assertEqual([ws.cell(row+2, i).value for i in range(1,5)], [None]*4)
+        for i in range(1,5):
+            cell=ws.cell(row+2,i)
+            self.assertEqual(cell.font.name, "Abar Mid")
+            self.assertEqual(cell.font.sz, 10)
+            self.assertEqual(cell.border.bottom.style, "thin")
+        self.assertTrue(ws.sheet_view.rightToLeft)
+        return wb
+
+    def test_tasks_manual_support_without_source_sheet(self):
         with tempfile.TemporaryDirectory() as td:
-            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
+            source, output = Path(td)/"source.xlsx", Path(td)/"out.xlsx"
             task_source(source, support=False)
             result = run(TASKS, "--input", source, "--output", output)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("طلبات الدعم", result.stderr + result.stdout)
-            self.assertFalse(output.exists())
+            self.assertEqual(result.returncode, 0, result.stderr+result.stdout)
+            self.assertNotIn("طلبات الدعم", result.stderr+result.stdout)
+            wb=self.assert_blank_manual_table(output, "طلبات الدعم", ["#","المهمة","القطاع","طلب الدعم"])
+            self.assertEqual(wb.sheetnames, ["ملخص المهام","تفاصيل المهام"])
+            self.assertEqual(wb["ملخص المهام"]["B2"].value,1)
 
-    def test_tasks_require_support_columns(self):
-        with tempfile.TemporaryDirectory() as td:
-            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
-            task_source(source, support_headers=["المهمة", "طلب الدعم"])
-            result = run(TASKS, "--input", source, "--output", output)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("القطاع", result.stderr + result.stdout)
-            self.assertFalse(output.exists())
+    def test_tasks_ignore_populated_or_malformed_support_sheets(self):
+        for headers in (["المهمة","القطاع","طلب الدعم"],["المهمة","طلب الدعم"],["المهمة","القطاع"]):
+            with self.subTest(headers=headers), tempfile.TemporaryDirectory() as td:
+                source, output=Path(td)/"source.xlsx",Path(td)/"out.xlsx"
+                task_source(source,support_headers=headers)
+                result=run(TASKS,"--input",source,"--output",output)
+                self.assertEqual(result.returncode,0,result.stderr+result.stdout)
+                wb=self.assert_blank_manual_table(output,"طلبات الدعم",["#","المهمة","القطاع","طلب الدعم"])
+                self.assertNotIn("طلب محدد",[c.value for ws in wb for row in ws for c in row])
 
-    def test_tasks_preserve_support_request(self):
-        with tempfile.TemporaryDirectory() as td:
-            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
-            task_source(source)
-            result = run(TASKS, "--input", source, "--output", output)
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            values = [c.value for row in load_workbook(output, data_only=True)["ملخص المهام"] for c in row]
-            self.assertIn("طلب محدد", values)
-
-    def test_tasks_accept_empty_support_with_required_headers(self):
-        with tempfile.TemporaryDirectory() as td:
-            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
-            task_source(source)
-            wb = load_workbook(source)
-            wb["طلبات الدعم"].delete_rows(2)
-            wb.save(source)
-            result = run(TASKS, "--input", source, "--output", output)
-            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-            wb = load_workbook(output, data_only=True)
-            self.assertEqual(wb.sheetnames, ["ملخص المهام", "تفاصيل المهام"])
-            self.assertEqual(wb["ملخص المهام"]["B2"].value, 1)
-
-    def test_tasks_reject_missing_request_header_without_overwriting_output(self):
-        with tempfile.TemporaryDirectory() as td:
-            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
-            task_source(source, support_headers=["المهمة", "القطاع"])
-            output.write_bytes(b"previous report")
-            result = run(TASKS, "--input", source, "--output", output)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("طلب الدعم", result.stderr + result.stdout)
-            self.assertEqual(output.read_bytes(), b"previous report")
+    def test_suhail_challenges_always_manual_even_with_source_records(self):
+        for kind in ("absent","column","sheet","malformed"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as td:
+                source,output=Path(td)/"source.xlsx",Path(td)/"out.xlsx"
+                suhail_source(source,"متأخر")
+                wb=load_workbook(source)
+                if kind=="column":wb.active.cell(2,10,"تحدي من المصدر")
+                if kind in ("sheet","malformed"):
+                    ws=wb.create_sheet("التحديات")
+                    ws.append(["المشروع","القطاع","التحدي"] if kind=="sheet" else ["التحدي"])
+                    ws.append(["مشروع تجريبي","وكالة شؤون الحج","تحدي من المصدر"])
+                if kind=="absent":wb.active.delete_cols(10)
+                wb.save(source)
+                result=run(SUHAIL,source,output)
+                self.assertEqual(result.returncode,0,result.stderr+result.stdout)
+                self.assertNotIn("challenge",result.stderr.lower())
+                wb=self.assert_blank_manual_table(output,"سادسا: التحديات",["#","المشروع","القطاع","التحدي"])
+                self.assertNotIn("تحدي من المصدر",[c.value for ws in wb for row in ws for c in row])
+                self.assertEqual(wb["تفاصيل مشاريع سهيل"]["E3"].value,"متأخر")
 
     def test_transactions_accept_valid_empty_sector(self):
         with tempfile.TemporaryDirectory() as td:

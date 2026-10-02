@@ -1,6 +1,6 @@
 ---
 name: task-details
-description: "Consolidate a raw 'حالة المهام الاستراتيجية' (strategic tasks status) Excel export — a tasks sheet plus a طلبات الدعم (support requests) sheet — into one clean two-sheet Arabic workbook: 'ملخص المهام' (overall counts, per-sector breakdown, completed-tasks table, delayed-tasks table, suspended-tasks table, support-requests table) and 'تفاصيل المهام' (every task grouped into its own section by المصدر / source). Use this skill whenever the user uploads a tasks/متابعة المهام Excel file and asks for a ملخص المهام, تفاصيل المهام, تصنيف المهام حسب القطاع or حسب المصدر, or a consolidated tasks status report — even if they re-describe the layout from scratch instead of naming this skill by name."
+description: "Consolidate a raw 'حالة المهام الاستراتيجية' (strategic tasks status) Excel export — a tasks sheet, with a blank manual-entry support-requests table in the output — into one clean two-sheet Arabic workbook: 'ملخص المهام' (overall counts, per-sector breakdown, completed-tasks table, delayed-tasks table, suspended-tasks table, support-requests table) and 'تفاصيل المهام' (every task grouped into its own section by المصدر / source). Use this skill whenever the user uploads a tasks/متابعة المهام Excel file and asks for a ملخص المهام, تفاصيل المهام, تصنيف المهام حسب القطاع or حسب المصدر, or a consolidated tasks status report — even if they re-describe the layout from scratch instead of naming this skill by name."
 ---
 
 # Task Details — ملخص وتفاصيل المهام الاستراتيجية
@@ -17,7 +17,7 @@ defect, not a bonus.
 
 ## Source file shape
 
-Two sheets in the upload:
+Only the main tasks sheet is required in the upload:
 
 - **Main tasks sheet** (name varies — detect it by the presence of a الحالة
     
@@ -31,17 +31,7 @@ Two sheets in the upload:
     
     الدعم, …) are **not** part of any requested table — leave them out entirely.
     
-- **طلبات الدعم sheet** (detect by a طلب الدعم column): المهمة, القطاع, طلب
-    
-    الدعم, one row per support request.
-    
-
-`scripts/build_report.py` auto-detects both sheets and the relevant columns by
-
-alias, so it tolerates minor renames between exports. If it can't find a
-
-required column it stops and names the missing one rather than guessing.
-The support-requests sheet and its `المهمة`, `القطاع`, and `طلب الدعم` columns are required even when the sheet contains no request rows. Stop if the sheet or one of these headers is absent; do not silently create an empty support table from missing input.
+`scripts/build_report.py` detects the main tasks sheet and its required columns by alias. Missing task columns remain errors. Do not search for, require, validate, or import a support-requests sheet: طلبات الدعم is a manual-entry output table, even if support data exists in the source. Do not report “لا توجد طلبات دعم”.
 
 ## التدقيق الإملائي قبل إنشاء ملف Excel
 
@@ -129,12 +119,7 @@ with white bold text spanning the full table width, and a light-gray
 5. **المهام المعلقة** — `# | المهمة | القطاع | ملاحظات`, filtered to معلق.
     Carry each task's الملاحظات from the source; keep an empty note blank.
     Render the title and header even when there are no suspended tasks.
-6. **طلبات الدعم** — `# | المهمة | القطاع | طلب الدعم`, one row per record in
-    
-    the طلبات الدعم sheet, values carried over as-is (blank stays blank, never
-    
-    guessed).
-    
+6. **طلبات الدعم** — `# | المهمة | القطاع | طلب الدعم`. Always render the title, headers, and one formatted empty entry row. Leave all four cells blank, including numbering; the user fills this table manually. Never generate or copy support requests.
 
 ### Sheet 2 — "تفاصيل المهام"
 
@@ -292,3 +277,7 @@ caveats (statuses that had to be flagged, an empty مكتملة/متأخر secti
 
 workbook itself carries no analysis, so the reply shouldn't smuggle any in.
 
+
+## Manual-entry acceptance
+
+A tasks-only input produces the normal two sheets and a formatted, empty support table. Existing source support rows must not populate it. No missing-support warning or fabricated request is permitted. Preserve all task counts, status rules, dates, and ordering.
