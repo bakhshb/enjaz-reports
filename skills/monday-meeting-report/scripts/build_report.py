@@ -19,6 +19,8 @@ from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from report_common.pptx_helpers import (val, set_text, clear_cell_bullets, set_cell_text, shape_by_id, recursive_text, slide_texts, resize_table, _body_base_height, fill_titled_table, estimate_lines, row_units, slide_index, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, first_table, find_slide_with_text, find_header, read_block, detail_sections, summary_records, task_data, suhail_data, read_sector_counts)
 
+import monday_layout as layout
+
 
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
 MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
@@ -98,40 +100,15 @@ def paginate_rows(rows, shape, fixed_rows=2, font_pt=11, capacity_units=None):
 
 
 
-def fill_summary_tables(prs,source_slide,sections,titles,section_title):
-    """Populate only nonempty template tables, flowing records onto extra pages."""
+def fill_summary_tables(prs,source_slide,sections,titles,section_title,measurements):
     patterns={table_title(sh):sh for sh in tables(source_slide) if table_title(sh) in titles}
-    if set(patterns)!=set(titles):raise ValueError(f'{section_title}: incomplete table patterns')
-    start_top=min(sh.top for sh in patterns.values())
-    bottom=prs.slide_height-int(.9*914400)
-    gap=int(.12*914400)
-    pages=[[]]; used=start_top
+    start=min(sh.top for sh in patterns.values())
+    plans=[]
     for title in titles:
-        source_rows=sections[title]
-        if not source_rows:continue
-        # All new summary tables use four columns, displayed right-to-left.
-        rows=[tuple(reversed(row)) for row in source_rows]
-        shape=patterns[title]; table=shape.table
-        base=_body_base_height(table,2)
-        fixed=sum((table.rows[i].height or 0) for i in range(2))
-        chunk=[]; weights=[]
-        for row in rows:
-            weight=row_units(row,table,11)
-            row_h=base*weight
-            if fixed+row_h>bottom-start_top:
-                raise ValueError(f'{title}: one record is too tall for a summary continuation page')
-            next_top=used+(gap if pages[-1] else 0)
-            if next_top+fixed+row_h>bottom:
-                if chunk:
-                    pages[-1].append((title,chunk,weights,table_top))
-                    chunk=[];weights=[]
-                pages.append([]);used=start_top;next_top=used
-            if not chunk:
-                table_top=next_top
-                used=table_top+fixed
-            chunk.append(row);weights.append(weight);used+=row_h
-        if chunk:pages[-1].append((title,chunk,weights,table_top))
-    # Clone before editing the seed page; cloned pages retain its approved table styles.
+        if sections[title]:
+            header,heights=measurements['summary:'+title]
+            plans.append((title,sections[title],header,heights))
+    pages=layout.pack(plans,start,prs.slide_height-int(55*12700))
     def keep(sh):
         if getattr(sh,'has_table',False):return table_title(sh) in titles
         if getattr(sh,'has_text_frame',False) and sh.text.strip()==section_title:return True
@@ -142,9 +119,10 @@ def fill_summary_tables(prs,source_slide,sections,titles,section_title):
     for page_idx,(sl,items) in enumerate(zip(targets,pages)):
         by_title={table_title(sh):sh for sh in tables(sl) if table_title(sh) in titles}
         used_titles=set()
-        for title,chunk,weights,top in items:
-            sh=by_title[title];sh.top=top
-            fill_titled_table(sh,chunk,weights=weights)
+        for title,chunk,header,heights,top in items:
+            sh=by_title[title]
+            layout.populate(sh,chunk)
+            layout.size_shape(sh,header,heights,top)
             used_titles.add(title)
         for title,sh in by_title.items():
             if title not in used_titles:sh.element.getparent().remove(sh.element)
@@ -244,42 +222,36 @@ def patch_charts(pptx,task_rows,suhail_rows):
         shutil.copy2(out,pptx)
 
 
-def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=None,approved_styles=None):
-    approved=approved_styles if approved_styles is not None else status_styles.examples()
+def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=None,approved_styles=None,measurements=None,bullets=None):
     pattern=max(pattern_slides,key=lambda sl:max(len(sh.table.rows) for sh in detail_tables(sl,kind)))
     pattern_shape=max(detail_tables(pattern,kind),key=lambda sh:len(sh.table.rows))
-    cols=6
-    pages=[]
-    for section,rows in sections:
-        if not rows:
-            continue
-        if kind=='task':rows=[row[:6] for row in rows]  # User-approved omission of related agencies.
-        for chunk,weights in paginate_rows(rows,pattern_shape,2,11):
-            pages.append((section,chunk,weights))
-    if not pages:
-        return [],list(pattern_slides)
-    # Allocate all generated slide parts before deleting any seed slides. This
-    # keeps OOXML part names unique and avoids duplicate slide*.xml entries.
-    targets=[pattern]; last=pattern
-    for _ in range(1,len(pages)):
-        last=clone_slide(prs,pattern,after=last); targets.append(last)
-    for sl,(section,chunk,weights) in zip(targets,pages):
-        sh=detail_tables(sl,kind)[0]
-        title=f'{title_prefix} ({section})' if title_prefix else section
-        fill_titled_table(sh,chunk,title=title,weights=weights)
-        for row in list(sh.table.rows)[2:]:
-            cell=row.cells[4];text=cell.text;status=status_styles.canonical(text)
-            if status not in approved:
-                raise ValueError('Missing approved template status style: '+status)
-            allowed=status_styles.TASK_STATUSES if kind=='task' else status_styles.PROJECT_STATUSES
-            if status not in allowed:raise ValueError('Unsupported '+kind+' status: '+status)
-            status_styles.apply(cell,approved[status])
-            set_cell_text(cell,text)
-    unused=[sl for sl in pattern_slides if sl.part is not pattern.part]
-    return targets,unused
+    plans=[];labels={}
+    for i,(section,rows) in enumerate(sections):
+        if not rows:continue
+        key=f'{kind}:{i}'
+        labels[key]=f'{title_prefix} ({section})' if title_prefix else section
+        header,heights=measurements[key]
+        plans.append((key,[row[:6] for row in rows],header,heights))
+    if not plans:return [],list(pattern_slides)
+    pages=layout.pack(plans,pattern_shape.top,prs.slide_height-int(55*12700))
+    targets=[pattern];last=pattern
+    seed=copy.deepcopy(pattern_shape.element)
+    for _ in pages[1:]:
+        last=clone_slide(prs,pattern,after=last);targets.append(last)
+    for sl,items in zip(targets,pages):
+        for sh in detail_tables(sl,kind):sh.element.getparent().remove(sh.element)
+        for key,chunk,header,heights,top in items:
+            element=copy.deepcopy(seed)
+            element.nvGraphicFramePr.cNvPr.set('id',str(sl.shapes._next_shape_id))
+            sl.shapes._spTree.insert_element_before(element,'p:extLst')
+            sh=sl.shapes[-1]
+            layout.populate(sh,chunk,labels[key],kind,approved_styles,bullets)
+            layout.size_shape(sh,header,heights,top)
+    return targets,[sl for sl in pattern_slides if sl.part is not pattern.part]
+
 
 def parse_args(argv=None):
-    ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template')
+    ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template'); ap.add_argument('--layout-engine',choices=['auto','native','estimate'],default=os.environ.get('MONDAY_LAYOUT_ENGINE','auto'))
     return ap.parse_args(argv)
 
 
@@ -300,6 +272,18 @@ def build_candidate(a):
     suhail_summary=find_slide_with_text(prs,'ملخص مشاريع سهيل')
     task_patterns=detail_pattern_slides(prs,'task'); suhail_patterns=detail_pattern_slides(prs,'suhail')
 
+    bullets=layout.bullet_example(prs)
+    specs=[]
+    for slide,sections,titles in [(task_summary,task_summaries,TASK_SUMMARY_TITLES),(suhail_summary,suhail_summaries,SUHAIL_SUMMARY_TITLES)]:
+        patterns={table_title(sh):sh for sh in tables(slide)}
+        specs.extend(('summary:'+title,patterns[title],sections[title],None,None) for title in titles)
+    for kind,patterns,sections,prefix in [('task',task_patterns,tdetails,'تفاصيل المهام'),('suhail',suhail_patterns,sdetails,None)]:
+        shape=max((sh for sl in patterns for sh in detail_tables(sl,kind)),key=lambda sh:len(sh.table.rows))
+        for i,(section,rows) in enumerate(sections):
+            title=f'{prefix} ({section})' if prefix else section
+            specs.append((f'{kind}:{i}',shape,[row[:6] for row in rows],title,kind))
+    measurements=layout.measure(specs,template,approved,bullets,getattr(a,'layout_engine','auto'))
+
     # Cover + agenda. Agenda automatically adds continuation pages when needed.
     set_text(shape_by_id(prs.slides[0],4),f'{dt.datetime.now().astimezone().date().day} {MONTHS[dt.datetime.now().astimezone().date().month-1]} {dt.datetime.now().astimezone().date().year}')
     agenda_pages=paginate_rows(agenda,agenda_shape,1,14)
@@ -311,20 +295,20 @@ def build_candidate(a):
     # Task summary can expand down the left side; when that area fills, create a
     # clean continuation page containing only the approved heading/table pattern.
     for sid,x in zip([21,23,25,19,18],tk):set_text(shape_by_id(task_summary,sid),x)
-    fill_summary_tables(prs,task_summary,task_summaries,TASK_SUMMARY_TITLES,'ملخص المهام')
+    fill_summary_tables(prs,task_summary,task_summaries,TASK_SUMMARY_TITLES,'ملخص المهام',measurements)
 
     # Task details are data-driven. The master contributes one approved detail
     # pattern; every source and overflow page is generated from it.
-    task_generated,task_unused=build_dynamic_detail_section(prs,task_patterns,tdetails,'task','تفاصيل المهام',approved_styles=approved)
+    task_generated,task_unused=build_dynamic_detail_section(prs,task_patterns,tdetails,'task','تفاصيل المهام',approved_styles=approved,measurements=measurements,bullets=bullets)
 
     # Suhail summary and updates.
     for sid,x in zip([5,8,11,17,13],sk):set_text(shape_by_id(suhail_summary,sid),x)
     set_text(shape_by_id(suhail_summary,14),'لم تبدأ')
-    fill_summary_tables(prs,suhail_summary,suhail_summaries,SUHAIL_SUMMARY_TITLES,'ملخص مشاريع سهيل')
+    fill_summary_tables(prs,suhail_summary,suhail_summaries,SUHAIL_SUMMARY_TITLES,'ملخص مشاريع سهيل',measurements)
 
     # Suhail details are also data-driven: new sectors and any amount of projects
     # simply create more pages from the approved six-column detail pattern.
-    suhail_generated,suhail_unused=build_dynamic_detail_section(prs,suhail_patterns,sdetails,'suhail',None,approved_styles=approved)
+    suhail_generated,suhail_unused=build_dynamic_detail_section(prs,suhail_patterns,sdetails,'suhail',None,approved_styles=approved,measurements=measurements,bullets=bullets)
 
     # Only after every dynamic page has been allocated do we remove the unused
     # seed-pattern slides from the master.

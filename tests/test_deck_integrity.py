@@ -170,7 +170,12 @@ class ScenarioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             result,deck=build_scenario(Path(td),'overflow',32,24)
             self.assertEqual(result.returncode,0,result.stderr+result.stdout)
-            self.assertGreater(len(Presentation(deck).slides),len(Presentation(MONDAY.parent/'assets/monday-meeting-master.pptx').slides))
+            prs=Presentation(deck)
+            for marker in ['المهمة','اسم المشروع']:
+                pages=[sl for sl in prs.slides if any(sh.has_table and len(sh.table.columns)==6 and sh.table.cell(1,1).text==marker for sh in sl.shapes)]
+                self.assertGreater(len(pages),1)
+            agenda_pages=[sl for sl in prs.slides if any(sh.has_table and sh.table.cell(0,0).text=='م' for sh in sl.shapes)]
+            self.assertGreater(len(agenda_pages),1)
 
 
 class MondayGateTests(unittest.TestCase):

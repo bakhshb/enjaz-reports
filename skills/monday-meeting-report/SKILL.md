@@ -52,6 +52,8 @@ Apply every rule in [the report-specific reference](references/business-rules.md
 uv run scripts/build_report.py --topics "<topics.xlsx>" --tasks "<tasks.xlsx>" --suhail "<suhail.xlsx>" --output "<candidate.pptx>"
 ```
 
+On Windows, the builder measures a disposable populated copy in native PowerPoint before pagination. It does not alter the master or inputs. A native measurement failure stops publication. On other hosts, the conservative content estimate requires visual verification; `--layout-engine estimate` explicitly selects that fallback and `--layout-engine native` requires PowerPoint. `MONDAY_LAYOUT_ENGINE` can select the same engine in automated tests. No measurement cache is reused.
+
 3. The builder includes the programmatic gate, including typography normalization. Do not repeat the gate for unchanged bytes. After a layout correction, rerun the gate once and render its resulting bytes.
 
 ```bash

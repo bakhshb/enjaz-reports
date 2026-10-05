@@ -20,9 +20,12 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import monday_status_styles as status_styles
 from pptx.util import Pt
+from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from report_common.validation import (norm, sha, header_row, read_tasks, read_suhail, package, source_metrics, formula_values, cached_values, chart_metrics)
 
+from report_common.update_format import update_parts, display_text
+from report_common.pptx_helpers import suhail_data, val
 
 AGENDA_HEADERS=["م","جدول الأعمال","المسؤول","المدة الزمنية (بالدقيقة)"]
 TASK_HEADERS=["#","المهمة","القطاع","تاريخ الإنجاز المخطط","الحالة","ملاحظات"]
@@ -136,6 +139,13 @@ def collect(prs,errors,template=status_styles.MASTER):
         for sh in sl.shapes:
             if not getattr(sh,"has_table",False):continue
             t=sh.table; rr=rows(t); cols=len(t.columns)
+            for row in t.rows:
+                seen_extension=False
+                for child in row._tr:
+                    if child.tag==qn("a:extLst"):seen_extension=True
+                    elif child.tag==qn("a:tc") and seen_extension:errors.append("Invalid table row XML order")
+            if t._tbl.tblPr.get("rtl") not in ("1","true"):errors.append(f"slide {si} table is not RTL")
+            if sh.top+sum(r.height for r in t.rows)>prs.slide_height-int(50*12700):errors.append(f"slide {si} table crosses footer clearance")
             if cols==4 and rr and rr[0]==AGENDA_HEADERS:
                 ag.extend(tuple(x) for x in rr[1:] if any(x))
             elif cols==6 and len(rr)>=2 and rr[1][:2]==["#","المهمة"]:
@@ -154,6 +164,8 @@ def collect(prs,errors,template=status_styles.MASTER):
             elif cols==4 and rr:
                 title=next((x for x in rr[0] if x in SUMMARY_HEADERS),None)
                 if title:
+                    if t._tbl.tblPr.get("rtl") in ("1","true"):
+                        rr=[rr[0],*[list(reversed(row)) for row in rr[1:]]]
                     if len(rr)<2 or rr[1]!=SUMMARY_HEADERS[title]:errors.append(f"slide {si} {title} headers missing/corrupt")
                     for x in rr[2:]:
                         if x and isnum(x[-1]):summaries[title].append(tuple(x))
@@ -173,6 +185,35 @@ def collect(prs,errors,template=status_styles.MASTER):
     if len(suh_seq)!=len(set(suh_seq)):
         errors.append(f"Suhail sector continuation is non-contiguous: {suh_seq!r}")
     return ag,task,suh,summaries
+
+def verify_update_format(prs, expected, errors):
+    actual=[]
+    for slide in prs.slides:
+        shapes=[sh for sh in slide.shapes if sh.has_table]
+        for i,a in enumerate(shapes):
+            for b in shapes[i+1:]:
+                if min(a.left+a.width,b.left+b.width)>max(a.left,b.left) and min(a.top+a.height,b.top+b.height)>max(a.top,b.top):
+                    errors.append('Dynamic tables overlap')
+        for sh in shapes:
+            if len(sh.table.columns)==6 and sh.table.cell(1,1).text.strip()=='اسم المشروع':
+                actual.extend(row.cells[5] for row in list(sh.table.rows)[2:])
+    if len(actual)!=len(expected):return
+    for cell,record in zip(actual,expected):
+        parts=update_parts(record[-1],paragraph_items=True)
+        paragraphs=cell.text_frame.paragraphs
+        if len(parts)!=len(paragraphs):
+            errors.append('Suhail update paragraph count differs');continue
+        for p,(value,bold_end,bullet) in zip(paragraphs,parts):
+            if p.text!=value:errors.append('Suhail update text differs')
+            props=p._p.get_or_add_pPr()
+            if (props.find(qn('a:buChar')) is not None)!=bullet:errors.append('Suhail update bullets differ')
+            if props.get('rtl')!='1':errors.append('Suhail update paragraph is not RTL')
+            offset=0
+            for run in p.runs:
+                for char in run.text:
+                    if bool(run.font.bold)!=(offset<bold_end):errors.append('Suhail update date/body bold differs');break
+                    offset+=1
+
 
 def cmp(label,exp,act,errors):
     ce=collections.Counter(canon_record(x) for x in exp); ca=collections.Counter(canon_record(x) for x in act)
@@ -246,7 +287,11 @@ def main(argv=None):
         try:prs2=Presentation(str(tmp)); ag,task,suh,summaries=collect(prs2,errors,a.template)
         except Exception as e:errors.append(f"PowerPoint reopen failed: {e}");ag=task=suh=[];summaries={}
         if ag!=exp_ag:errors.append(f"agenda mismatch: expected={exp_ag!r}; actual={ag!r}")
-        cmp("task details",exp_task,task,errors); cmp("Suhail details",exp_suh,suh,errors)
+        cmp("task details",exp_task,task,errors)
+        raw_suh=[(section,*row) for section,records in suhail_data(a.suhail)[3] for row in records]
+        rendered_suh=[(*row[:-1],display_text(val(raw[-1]),paragraph_items=True)) for row,raw in zip(exp_suh,raw_suh)]
+        cmp("Suhail details",rendered_suh,suh,errors)
+        if prs2 is not None:verify_update_format(prs2,[(val(r[-1]),) for r in raw_suh],errors)
         for title,expected in exp_summaries.items():cmp(title,expected,summaries.get(title,[]),errors)
         if prs2 is not None:verify_metrics(tmp,prs2,a.tasks,a.suhail,errors)
         print("REPORT_SHA256",sha(tmp)); print("TOPICS_SHA256",sha(a.topics)); print("TASKS_SHA256",sha(a.tasks)); print("SUHAIL_SHA256",sha(a.suhail))
