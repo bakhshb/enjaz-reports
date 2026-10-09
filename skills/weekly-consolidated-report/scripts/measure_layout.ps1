@@ -19,6 +19,7 @@ try {
  foreach($slide in $doc.Slides) {
   foreach($shape in @($slide.Shapes | Where-Object {$_.HasTable -eq -1})) {
    $table=$shape.Table
+   foreach($row in $table.Rows){foreach($cell in $row.Cells){if($cell.Shape.TextFrame.TextRange.Text.Trim() -and $cell.Shape.TextFrame.TextRange.Font.Size -ne 11){throw 'Generate an 11 pt candidate before measuring'}}}
    $title=$table.Cell(1,1).Shape.TextFrame.TextRange.Text.Trim()
    if(-not $tables.ContainsKey($title)) {
     $tables[$title]=@{header=@([double]$table.Rows.Item(1).Height,[double]$table.Rows.Item(2).Height);body=@()}
@@ -32,5 +33,5 @@ try {
 }
 if($hashes.report -ne (Get-FileHash -LiteralPath $Report).Hash){throw 'Measuring changed the source presentation'}
 $output=[IO.Path]::ChangeExtension($Report,'.layout.json')
-@{hashes=$hashes;tables=$tables;visualAcceptance='pending'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $output -Encoding utf8
+@{typography='11pt-column-alignment-v1';hashes=$hashes;tables=$tables;visualAcceptance='pending'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $output -Encoding utf8
 Write-Output $output

@@ -55,7 +55,7 @@ For example, 20 projects may naturally produce three or more Suhail-detail pages
 ## Text and formatting rules
 
 - Preserve slide size, backgrounds, logos, masters, layout, colors, borders, alignment, RTL behavior, column widths, and approved fonts.
-- Agenda tables use `Abar Mid` 14 pt.
+- Agenda tables use `Abar Mid` 11 pt.
 - Other dynamic tables use `Abar Mid` 11 pt; preserve `Abar Mid SemiBold` where the approved pattern uses it.
 - Do not summarize, rewrite, proofread, infer, or recalculate source content.
 - Blank source cells clear old template content; never carry previous-week text forward.
@@ -68,3 +68,7 @@ For example, 20 projects may naturally produce three or more Suhail-detail pages
 ## Summary layout
 
 Apply content-based row sizing and continuous packing to both summary sections too. A nonempty table does not automatically require a new slide. Preserve the first-page KPI/chart area and approved table width; only the summary tables continue. Short rows must not inherit the height of a tall master example.
+
+## Table column alignment
+
+Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.

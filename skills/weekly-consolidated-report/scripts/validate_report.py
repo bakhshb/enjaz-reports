@@ -13,6 +13,7 @@ from report_common import pptx_helpers as helpers, validation, status_styles
 from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom
 
 from update_format import update_parts, display_text
+from report_common.table_typography import set_table_sizes, TABLE_PT, check_table_typography
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
@@ -47,6 +48,7 @@ def check_table_style(table,pattern,errors):
             if not fonts:fonts={font_signature(run) for p in base.text_frame.paragraphs for run in p.runs}
             for p in cell.text_frame.paragraphs:
                 for run in p.runs:
+                    if run.text.strip() and (run.font.size is None or run.font.size.pt!=TABLE_PT):errors.append('Table font size must be 11 pt')
                     if run.text.strip() and font_signature(run) not in fonts:errors.append('Table font differs from weekly template: '+run.text[:25])
 
 def check_navigation(prs,errors):
@@ -77,7 +79,8 @@ def check_navigation(prs,errors):
 
 def validate(report,tasks,suhail,transactions,template=MASTER):
     errors=[];validation.package(report,errors)
-    final=Presentation(report);master=Presentation(template)
+    final=Presentation(report);master=Presentation(template);set_table_sizes(master)
+    check_table_typography(final,errors)
     if (final.slide_width,final.slide_height)!=(master.slide_width,master.slide_height):errors.append('Slide dimensions changed')
     tk,tc,ts,td=helpers.task_data(tasks);pk,pc,ps,pd=helpers.suhail_data(suhail);xk,xc,xd=transaction_data(transactions)
     styles={kind:approved_styles(master,kind) for kind in ('task','project')}

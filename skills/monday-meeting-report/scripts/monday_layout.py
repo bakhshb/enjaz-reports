@@ -12,6 +12,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Pt
 from report_common.pptx_helpers import fill_titled_table, remove_slide, set_cell_text
 from report_common.update_format import format_update
+from report_common.table_typography import apply_table
 
 
 def rtl_table(table):
@@ -93,6 +94,8 @@ def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
                     if run.font.name not in ('Abar Mid', 'Abar Mid SemiBold'):
                         run.font.name = 'Abar Mid'
                     run.font.size = Pt(11)
+
+    apply_table(shape.table)
 
 
 def measure(specs, template, styles, bullets, engine='auto'):
