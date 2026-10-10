@@ -293,3 +293,17 @@ with, and the footer check reads the safety margin as well as the content.
 For `المهام على المخطط` only, clone the master's task-detail table and retain its six-column order: `# | المهمة | القطاع | تاريخ الإنجاز المخطط | الحالة | ملاحظات`. Copy the planned date from that task's detail row exactly, including blank dates. Retain detail typography, column proportions, and status styling; fit the existing content width and paginate rather than shrink text. Completed, delayed and suspended task tables keep their existing summary layout without this added date.
 
 Acceptance: only on-plan task tables gain the date; every date matches the master detail row and appears between sector and status. Preserve task order, numbering, counts and notes. The output must later pass source reconciliation and final visual review for clipping, wrapping and footer clearance.
+
+## Approved table typography
+
+Apply to every summary/detail/status table, including patterns cloned from the bundled master or a supplied 10 pt report. All table text must be **11 pt**: titles, column headers, body, status, notes and empty-cell defaults. This is the explicit exception to preserving the source's font size/alignment.
+
+Apply horizontal alignment to the column headers and body paragraphs:
+
+- Center القطاع, تاريخ الإنجاز المخطط / تاريخ الانجاز المخطط, تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع.
+- Right-align المهمة, المشروع / اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه.
+- Preserve merged title alignment, numbering and unspecified columns, vertical alignment, RTL, Abar, bold emphasis, bullets and colors.
+
+The splitter applies the shared `report_common/table_typography.py` rules before refinement, and QA rejects a different font size or specified column alignment. Install this skill with the sibling `skills/report_common/` directory. Measure/refine and repaginate at 11 pt; never shrink text to fit.
+
+Acceptance: test a 10 pt source with incorrect alignment and a current 11 pt source; both must produce 11 pt tables with the above alignment, reconcile all source records/counts/statuses/planned dates, and pass native visual review for clipping/overlap/footer clearance. Deliberately changing an output to 10 pt or right-aligning a centered column must fail QA. Templates and source workbooks remain unchanged.
