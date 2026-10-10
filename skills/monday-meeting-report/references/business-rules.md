@@ -59,13 +59,15 @@ For example, 20 projects may naturally produce three or more Suhail-detail pages
 - Other dynamic tables use `Abar Mid` 11 pt; preserve `Abar Mid SemiBold` where the approved pattern uses it.
 - Do not summarize, rewrite, proofread, infer, or recalculate source content.
 - Blank source cells clear old template content; never carry previous-week text forward.
-- Remove inherited bullets from ordinary dynamic cells. Apply the Suhail detail exception below.
+- Remove inherited bullets from ordinary dynamic cells. Apply the Suhail update exception below in summaries and details.
 - In `ما تم حتى تاريخه`, put the existing `تاريخ التحديث` and its day/month/year date on the first content line in bold. Body text is not bold. Ignore leading/trailing empty paragraphs. Two or more nonempty source paragraphs after this line are separate update points: render native bullets using the approved master bullet paragraph. A single sentence/paragraph stays unbulleted. Do not split prose by punctuation or visual wrapping, invent a date, or rewrite source wording.
 - All tables must explicitly use RTL, with `#` at the right. When converting a summary pattern stored left-to-right, reverse its underlying columns and merged groups as well as enabling RTL, so visible column order and approved widths remain unchanged.
 - The cover date is the runtime creation date in the runtime timezone, formatted like `27 سبتمبر 2026`.
 
 
 ## Summary layout
+
+The Suhail date/bullet rule above also applies to `التحديث` in `أبرز التحديثات` and `ملاحظات` in `المشاريع المتأخرة`. Format these cells before measuring row heights, using each summary's own source text. Do not copy detail notes into summaries or apply this rule to task notes/challenges. Validation must reject lost date emphasis or incorrect bullets in both summary and detail cells. Install this skill together with the current sibling `report_common` scripts; updating repository instructions alone does not update an older installed generator.
 
 Apply content-based row sizing and continuous packing to both summary sections too. A nonempty table does not automatically require a new slide. Preserve the first-page KPI/chart area and approved table width; only the summary tables continue. Short rows must not inherit the height of a tall master example.
 

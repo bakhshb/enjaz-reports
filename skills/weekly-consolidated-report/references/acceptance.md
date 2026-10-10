@@ -25,8 +25,8 @@
 ## Suhail update rich-text acceptance
 
 - Leading `تاريخ التحديث` and its date are bold; all following prose remains regular, including same-line text and other dates.
-- Two or more explicitly marked source items become native bullets in source order, with no duplicate typed markers. A single item and unmarked paragraphs receive no bullets.
-- Reconcile source wording allowing only conversion of source list markers to native bullets; preserve blank lines and all substantive text.
+- Two or more source paragraphs after the date become native bullets in source order, including unmarked items like the supplied 08 October report. Explicit lists also qualify, without duplicate typed markers. A single paragraph/item receives no bullets.
+- Reconcile source wording allowing only conversion of source list markers to native bullets; preserve all substantive text; leading/trailing empty paragraphs may be trimmed.
 - Final visual review must confirm Abar, Arabic direction, readable bullet alignment and no clipping after formatting. These checks remain pending until run on the changed implementation.
 
 ## Table font size acceptance
@@ -36,3 +36,7 @@ Every visible table run must be 11 pt, including title/header rows, blank-cell d
 ## Table column alignment
 
 Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.
+
+## Suhail summaries and details regression
+
+Generate both report types with a dated multi-item update and a dated single paragraph in Suhail summary and detail cells. Confirm the supplied date label/date alone are bold, body text is regular, multiple source list items have native RTL bullets without duplicate markers, and prose has none. Remove bold or a bullet from a summary output deliberately: the delivery gate must reject it. Reconcile each summary against its own input. Render final bytes in PowerPoint and inspect summary and detail cells at 11 pt for clipping, overlaps and readable Arabic. Repeat the build using the installed skills and verify installed code hashes match the tested repository files.

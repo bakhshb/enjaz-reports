@@ -101,7 +101,7 @@ def paginate_rows(rows, shape, fixed_rows=2, font_pt=11, capacity_units=None):
 
 
 
-def fill_summary_tables(prs,source_slide,sections,titles,section_title,measurements):
+def fill_summary_tables(prs,source_slide,sections,titles,section_title,measurements,bullets=None):
     patterns={table_title(sh):sh for sh in tables(source_slide) if table_title(sh) in titles}
     start=min(sh.top for sh in patterns.values())
     plans=[]
@@ -122,7 +122,7 @@ def fill_summary_tables(prs,source_slide,sections,titles,section_title,measureme
         used_titles=set()
         for title,chunk,header,heights,top in items:
             sh=by_title[title]
-            layout.populate(sh,chunk)
+            layout.populate(sh,chunk,bullets=bullets)
             layout.size_shape(sh,header,heights,top)
             used_titles.add(title)
         for title,sh in by_title.items():
@@ -305,7 +305,7 @@ def build_candidate(a):
     # Suhail summary and updates.
     for sid,x in zip([5,8,11,17,13],sk):set_text(shape_by_id(suhail_summary,sid),x)
     set_text(shape_by_id(suhail_summary,14),'لم تبدأ')
-    fill_summary_tables(prs,suhail_summary,suhail_summaries,SUHAIL_SUMMARY_TITLES,'ملخص مشاريع سهيل',measurements)
+    fill_summary_tables(prs,suhail_summary,suhail_summaries,SUHAIL_SUMMARY_TITLES,'ملخص مشاريع سهيل',measurements,bullets)
 
     # Suhail details are also data-driven: new sectors and any amount of projects
     # simply create more pages from the approved six-column detail pattern.

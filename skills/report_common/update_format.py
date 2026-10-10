@@ -7,6 +7,42 @@ from pptx.oxml.ns import qn
 DATE = re.compile(r'^(\s*تاريخ التحديث\s*[:：]?\s*(?:\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}|\d{1,2}\s+[^\W\d_]+(?:\s+[^\W\d_]+)?\s+\d{4})(?:\s*[هـم])?)(?=\s|$|[،؛:])')
 MARKER = re.compile(r'^\s*(?:[•●▪◦*-]|\d+[.)\-]|[٠-٩]+[.)\-])\s+')
 
+SUMMARY_UPDATE_TITLES = {'أبرز التحديثات', 'المشاريع المتأخرة'}
+
+def update_column(table):
+    """Only Suhail update columns, never task notes or manual challenges."""
+    headers = [c.text.strip() for c in table.rows[1].cells]
+    if 'ما تم حتى تاريخه' in headers:
+        return headers.index('ما تم حتى تاريخه')
+    title = next((c.text.strip() for c in table.rows[0].cells if c.text.strip()), '')
+    if title in SUMMARY_UPDATE_TITLES:
+        return next((i for i, h in enumerate(headers) if h in {'التحديث', 'ملاحظات'}), None)
+    return None
+
+def format_table_updates(table, bullet_style, paragraph_items=False):
+    column = update_column(table)
+    if column is not None:
+        for row in list(table.rows)[2:]:
+            format_update(row.cells[column], bullet_style, paragraph_items)
+
+def check_update(cell, source, errors, paragraph_items=False):
+    parts = update_parts(source, paragraph_items)
+    paragraphs = cell.text_frame.paragraphs
+    if len(parts) != len(paragraphs):
+        errors.append('Suhail update paragraph count differs'); return
+    for p, (value, bold_end, bullet) in zip(paragraphs, parts):
+        if p.text != value: errors.append('Suhail update text differs')
+        props = p._p.get_or_add_pPr()
+        if (props.find(qn('a:buChar')) is not None) != bullet:
+            errors.append('Suhail update bullets differ')
+        if props.get('rtl') != '1': errors.append('Suhail update paragraph is not RTL')
+        offset = 0
+        for run in p.runs:
+            for char in run.text:
+                if bool(run.font.bold) != (offset < bold_end):
+                    errors.append('Suhail update date/body bold differs')
+                offset += 1
+
 def update_parts(text, paragraph_items=False):
     lines = text.replace('\r\n', '\n').replace('\v', '\n').split('\n')
     # Weekly uses explicit markers; Monday uses source update paragraphs.

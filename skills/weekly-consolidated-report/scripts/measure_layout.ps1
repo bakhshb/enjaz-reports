@@ -33,5 +33,5 @@ try {
 }
 if($hashes.report -ne (Get-FileHash -LiteralPath $Report).Hash){throw 'Measuring changed the source presentation'}
 $output=[IO.Path]::ChangeExtension($Report,'.layout.json')
-@{typography='11pt-column-alignment-v1';hashes=$hashes;tables=$tables;visualAcceptance='pending'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $output -Encoding utf8
+@{typography='11pt-suhail-paragraph-updates-v3';hashes=$hashes;tables=$tables;visualAcceptance='pending'} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $output -Encoding utf8
 Write-Output $output

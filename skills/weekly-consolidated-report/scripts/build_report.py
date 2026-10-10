@@ -18,10 +18,11 @@ from report_common.package_tools import reachable_parts
 from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom
 
 from update_format import format_update
+from report_common.update_format import format_table_updates
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
-def flow(prs,seed,sections,summary=False,measurements=None):
+def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     """Initial placement only; final visual acceptance must confirm pagination."""
     patterns={builder.table_title(sh):sh for sh in builder.tables(seed)}
     top=min(sh.top for sh in patterns.values())
@@ -58,6 +59,8 @@ def flow(prs,seed,sections,summary=False,measurements=None):
             builder.fill_titled_table(sh,chunk,title=title,weights=weights)
             for row,values in zip(list(sh.table.rows)[2:],chunk):
                 for cell,value in zip(row.cells,values):set_cell_exact(cell,value)
+            if summary:
+                format_table_updates(sh.table,bullet_style,paragraph_items=True)
             if fixed_heights:
                 for row,height in zip(sh.table.rows,fixed_heights+heights):row.height=height
                 sh.height=sum(row.height for row in sh.table.rows)
@@ -100,7 +103,7 @@ def build_candidate(args):
         measured=json.loads(Path(args.measurements).read_text(encoding='utf-8-sig'))
         for key,path in [('tasks',tasks),('suhail',projects),('transactions',transactions),('template',template)]:
             if hashlib.sha256(path.read_bytes()).hexdigest().lower()!=measured['hashes'][key].lower():raise ValueError('Layout measurements are stale: '+key)
-        if measured.get('typography')!='11pt-column-alignment-v1':raise ValueError('Layout measurements are stale: regenerate for 11 pt and approved column alignment')
+        if measured.get('typography')!='11pt-suhail-paragraph-updates-v3':raise ValueError('Layout measurements are stale: regenerate for Suhail summary update formatting')
         measurements=measured['tables']
     tk,tc,ts,td=builder.task_data(tasks);pk,pc,ps,pd=builder.suhail_data(projects);xk,xc,xd=transaction_data(transactions)
     prs=Presentation(template);set_table_sizes(prs);slides=list(prs.slides)
@@ -133,7 +136,7 @@ def build_candidate(args):
             headers=[c.text.strip() for c in pattern.table.rows[1].cells]
             columns=summary_columns(title,headers,sl==summary[0])
             seq.append((title,[[row[i] for i in columns] for row in records],pattern))
-        flow(prs,sl,seq,True,measurements)
+        flow(prs,sl,seq,True,measurements,bullet_style)
     tframe=next(sh for sh in builder.tables(summary[2]))
     headings=[field_key(c.text) for c in tframe.table.rows[1].cells]
     xheaders=[field_key(s) for s in ['رقم المعاملة','موضوع المعاملة','القطاع','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط']]

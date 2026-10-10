@@ -69,13 +69,13 @@ class RequestedReportChangesTests(unittest.TestCase):
             self.assertEqual(len(cells),4)
             self.assertEqual(cells[0].text,'تاريخ التحديث 2 أكتوبر 2026 نص بعد التاريخ\nتجهيز المتطلبات\nالتنسيق مع الجهات')
             expected_bold=['تاريخ التحديث 2 أكتوبر 2026','تاريخ التحديث: 02/10/2026','تاريخ التحديث ٢ أكتوبر ٢٠٢٦','']
-            for cell,bold,bullet_count in zip(cells,expected_bold,[2,0,0,2]):
+            for cell,bold,bullet_count in zip(cells,expected_bold,[2,2,0,2]):
                 bold_text=''.join(r.text for p in cell.text_frame.paragraphs for r in p.runs if r.font.bold)
                 self.assertEqual(bold_text,bold)
                 bullets=[p for p in cell.text_frame.paragraphs if p._p.find('./'+qn('a:pPr')+'/'+qn('a:buChar')) is not None]
                 self.assertEqual(len(bullets),bullet_count)
                 self.assertTrue(all(p._p.get_or_add_pPr().get('rtl')=='1' for p in cell.text_frame.paragraphs))
-            self.assertEqual(cells[1].text,values[1]);self.assertEqual(cells[2].text,values[2])
+            self.assertEqual(cells[1].text,values[1]);self.assertEqual(cells[2].text,values[2].replace('- نقطة','نقطة'))
 
     def test_rich_text_corruption_is_rejected(self):
         with tempfile.TemporaryDirectory() as td:

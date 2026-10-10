@@ -13,6 +13,7 @@ from report_common import pptx_helpers as helpers, validation, status_styles
 from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom
 
 from update_format import update_parts, display_text
+from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
 from report_common.table_typography import set_table_sizes, TABLE_PT, check_table_typography
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
@@ -174,7 +175,14 @@ def validate(report,tasks,suhail,transactions,template=MASTER):
                 for (_,_,bullet),p in zip(parts,paragraphs):
                     actual_bullet=p._p.find('./'+qn('a:pPr')+'/'+qn('a:buChar'))
                     if (actual_bullet is not None)!=bullet:errors.append('Suhail update list formatting differs')
-    for title,records in {**ts,**ps}.items():compare(title,records,summaries[title],errors)
+    for title,records in {**ts,**ps}.items():
+        if title in SUMMARY_UPDATE_TITLES:
+            cells=[row.cells[update_column(sh.table)] for sl in final.slides for sh in helpers.tables(sl)
+                   if helpers.table_title(sh)==title for row in list(sh.table.rows)[2:]]
+            if len(cells)!=len(records):errors.append('Suhail summary update count differs')
+            for cell,row in zip(cells,records):check_update(cell,exact(row[3]),errors,paragraph_items=True)
+            records=[[*row[:3],display_text(exact(row[3]))] for row in records]
+        compare(title,records,summaries[title],errors)
     compare('transactions',[[row[i] for i in (0,1,3,4,5)] for row in xd],trans,errors)
     # Summary records remain independently sourced; match identities without inventing notes.
     for title,status in [('المهام المكتملة','مكتملة'),('المهام المتأخرة','متأخر'),('المهام المعلقة','معلق'),('المشاريع المتأخرة','متأخر')]:
