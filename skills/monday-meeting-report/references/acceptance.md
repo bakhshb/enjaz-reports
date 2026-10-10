@@ -45,3 +45,11 @@ Do not deliver if the render shows clipped text, overlaps, broken Arabic glyphs,
 - The first Suhail update content line has bold `تاريخ التحديث` plus its date; body text is regular. Multiple source update paragraphs use native RTL bullets; a single paragraph has none. Leading/trailing blank paragraphs do not create excess height. Data comparison allows only this specified whitespace/list-marker normalization.
 - Regressions cover consecutive tables, overflow with repeated headers, an oversized record that stops safely, RTL merged-cell/schema preservation, a single paragraph, multiple points, and deliberate removal of bold/bullets. Run the existing data, status, output-protection and weekly report checks after shared formatter changes.
 - Final acceptance includes native rendering of the exact gated bytes, readable Abar at approved sizes, no blank tables, clipping or overlap, and actual font inspection in the QA PDF. Record input provenance: when only PPTX inputs were supplied, reconstructed regression workbooks are not independently verified original Excel exports.
+
+## Table font size acceptance
+
+Every visible table run must be 11 pt, including title/header rows, blank-cell defaults, statuses, notes and the Monday agenda. Verify generated PPTX content, not only the template or instructions. The weekly read-only gate rejects a 10 pt run; the Monday gate normalizes ordinary cells and validates status cells against 11 pt approved styles. Preserve other formatting and recheck rendered row heights, clipping and pagination at 11 pt. Previous 10 pt layout measurements must be regenerated.
+
+## Table column alignment
+
+Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.

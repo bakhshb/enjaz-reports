@@ -39,6 +39,12 @@ Never redesign these patterns. Clone and reuse them when more space is required.
 
 Primary output: a new editable `MM_YYYY-MM-DD.pptx`. Generate a delivery PDF only if requested; a QA render remains mandatory.
 
+## Table typography
+
+All table text is **11 pt**, including table titles, headers, data, status cells and notes (and the Monday agenda). Apply this explicit size even when the master stores 10 or 14 pt. Preserve Abar, bold emphasis, RTL, fills and column widths. Adjust row heights and pagination when needed; never reduce the font to make a table fit.
+
+Apply the per-column horizontal alignment in the business rules to **summary and detail tables**, including headers: sector/dates/status centered; task/project names, notes, updates, support text and challenges right-aligned.
+
 ## Business rules
 
 Apply every rule in [the report-specific reference](references/business-rules.md). Do not infer content, change source workbooks, or modify the original master. Preserve the report's section order, dates, blank cells, and current status meaning. Template samples are never weekly data.

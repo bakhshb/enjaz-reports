@@ -13,6 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as builder
 from report_common import status_styles
+from report_common.table_typography import set_table_sizes
 from report_common.package_tools import reachable_parts
 from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom
 
@@ -99,9 +100,10 @@ def build_candidate(args):
         measured=json.loads(Path(args.measurements).read_text(encoding='utf-8-sig'))
         for key,path in [('tasks',tasks),('suhail',projects),('transactions',transactions),('template',template)]:
             if hashlib.sha256(path.read_bytes()).hexdigest().lower()!=measured['hashes'][key].lower():raise ValueError('Layout measurements are stale: '+key)
+        if measured.get('typography')!='11pt-column-alignment-v1':raise ValueError('Layout measurements are stale: regenerate for 11 pt and approved column alignment')
         measurements=measured['tables']
     tk,tc,ts,td=builder.task_data(tasks);pk,pc,ps,pd=builder.suhail_data(projects);xk,xc,xd=transaction_data(transactions)
-    prs=Presentation(template);slides=list(prs.slides)
+    prs=Presentation(template);set_table_sizes(prs);slides=list(prs.slides)
     # Discover roles first; IDs are checked within the identified summary role.
     summary=[builder.find_slide_with_text(prs,label) for label in ('إجمالي المهام','إجمالي مشاريع سهيل','إجمالي العاملات')]
     task_patterns=builder.detail_pattern_slides(prs,'task')
@@ -172,6 +174,7 @@ def build_candidate(args):
         for sh in sl.shapes:
             if sh._element.find('.//'+qn('a:fld')) is not None and getattr(sh,'has_text_frame',False):
                 for t in sh._element.findall('.//'+qn('a:t')):t.text=str(i)
+    set_table_sizes(prs)
     deck=Path(args.output);prs.save(deck)
     with tempfile.TemporaryDirectory() as td:
         with zipfile.ZipFile(deck) as z:z.extractall(td)

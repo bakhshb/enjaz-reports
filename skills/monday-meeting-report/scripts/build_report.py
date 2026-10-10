@@ -20,6 +20,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from report_common.pptx_helpers import (val, set_text, clear_cell_bullets, set_cell_text, shape_by_id, recursive_text, slide_texts, resize_table, _body_base_height, fill_titled_table, estimate_lines, row_units, slide_index, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, first_table, find_slide_with_text, find_header, read_block, detail_sections, summary_records, task_data, suhail_data, read_sector_counts)
 
 import monday_layout as layout
+from report_common.table_typography import set_table_sizes
 
 
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
@@ -262,7 +263,7 @@ def build_candidate(a):
         raise ValueError('Bundled Monday meeting template checksum mismatch')
 
     agenda=agenda_rows(a.topics); tk,tchart,task_summaries,tdetails=task_data(a.tasks); sk,schart,suhail_summaries,sdetails=suhail_data(a.suhail)
-    out=Path(a.output); prs=Presentation(template); validate_master_patterns(prs)
+    out=Path(a.output); prs=Presentation(template); set_table_sizes(prs); validate_master_patterns(prs)
     approved=status_styles.examples(template)
 
     # Capture all master patterns before any slide is cloned or removed.
@@ -286,7 +287,7 @@ def build_candidate(a):
 
     # Cover + agenda. Agenda automatically adds continuation pages when needed.
     set_text(shape_by_id(prs.slides[0],4),f'{dt.datetime.now().astimezone().date().day} {MONTHS[dt.datetime.now().astimezone().date().month-1]} {dt.datetime.now().astimezone().date().year}')
-    agenda_pages=paginate_rows(agenda,agenda_shape,1,14)
+    agenda_pages=paginate_rows(agenda,agenda_shape,1,11)
     agenda_targets=[agenda_slide]; last=agenda_slide
     for _ in range(1,len(agenda_pages)):
         last=clone_slide(prs,agenda_slide,after=last); agenda_targets.append(last)
@@ -315,6 +316,7 @@ def build_candidate(a):
     for sl in task_unused+suhail_unused:
         remove_slide(prs,sl)
 
+    set_table_sizes(prs)
     prs.save(out); patch_charts(out,tchart,schart)
 
 

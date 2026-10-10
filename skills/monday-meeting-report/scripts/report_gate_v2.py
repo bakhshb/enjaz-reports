@@ -22,6 +22,7 @@ import monday_status_styles as status_styles
 from pptx.util import Pt
 from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+from report_common.table_typography import check_table_typography
 from report_common.validation import (norm, sha, header_row, read_tasks, read_suhail, package, source_metrics, formula_values, cached_values, chart_metrics)
 
 from report_common.update_format import update_parts, display_text
@@ -40,7 +41,7 @@ SUMMARY_HEADERS={
     "التحديات":["التحدي","القطاع","المشروع","#"],
 }
 FONT="Abar Mid"; ALLOWED={"Abar Mid","Abar Mid SemiBold"}
-AGENDA_PT=14.0; TABLE_PT=11.0
+AGENDA_PT=11.0; TABLE_PT=11.0
 
 
 
@@ -121,6 +122,7 @@ def read_summary(path,sheet,titles):
 
 
 def collect(prs,errors,template=status_styles.MASTER):
+    check_table_typography(prs,errors)
     ag=[]; task=[]; suh=[]; suh_seq=[]; summaries={title:[] for title in SUMMARY_HEADERS}
     approved=status_styles.examples(template)
     for slide in prs.slides:

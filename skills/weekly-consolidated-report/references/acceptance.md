@@ -28,3 +28,11 @@
 - Two or more explicitly marked source items become native bullets in source order, with no duplicate typed markers. A single item and unmarked paragraphs receive no bullets.
 - Reconcile source wording allowing only conversion of source list markers to native bullets; preserve blank lines and all substantive text.
 - Final visual review must confirm Abar, Arabic direction, readable bullet alignment and no clipping after formatting. These checks remain pending until run on the changed implementation.
+
+## Table font size acceptance
+
+Every visible table run must be 11 pt, including title/header rows, blank-cell defaults, statuses, notes and the Monday agenda. Verify generated PPTX content, not only the template or instructions. The weekly read-only gate rejects a 10 pt run; the Monday gate normalizes ordinary cells and validates status cells against 11 pt approved styles. Preserve other formatting and recheck rendered row heights, clipping and pagination at 11 pt. Previous 10 pt layout measurements must be regenerated.
+
+## Table column alignment
+
+Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.
