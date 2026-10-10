@@ -11,7 +11,7 @@ from pptx import Presentation
 from pptx.oxml.ns import qn
 from pptx.util import Pt
 from report_common.pptx_helpers import fill_titled_table, remove_slide, set_cell_text
-from report_common.update_format import format_update
+from report_common.update_format import format_table_updates
 from report_common.table_typography import apply_table
 
 
@@ -84,8 +84,7 @@ def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
             text = cell.text
             status_styles.apply(cell, styles[status])
             set_cell_text(cell, text)
-        if kind == 'suhail':
-            format_update(shape.table.cell(i,5), bullets, paragraph_items=True)
+    format_table_updates(shape.table, bullets, paragraph_items=True)
     for row in shape.table.rows:
         for cell in row.cells:
             for p in cell.text_frame.paragraphs:

@@ -53,3 +53,7 @@ Every visible table run must be 11 pt, including title/header rows, blank-cell d
 ## Table column alignment
 
 Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.
+
+## Suhail summaries and details regression
+
+Generate both report types with a dated multi-item update and a dated single paragraph in Suhail summary and detail cells. Confirm the supplied date label/date alone are bold, body text is regular, multiple source list items have native RTL bullets without duplicate markers, and prose has none. Remove bold or a bullet from a summary output deliberately: the delivery gate must reject it. Reconcile each summary against its own input. Render final bytes in PowerPoint and inspect summary and detail cells at 11 pt for clipping, overlaps and readable Arabic. Repeat the build using the installed skills and verify installed code hashes match the tested repository files.

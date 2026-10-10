@@ -167,7 +167,7 @@ class WeeklyProductionTests(unittest.TestCase):
                 table=tables.setdefault(title,{'header':[22,22],'body':[]})
                 table['body'].extend([95]*(len(sh.table.rows)-2))
         paths={'tasks':self.case/'tasks.xlsx','suhail':self.case/'projects.xlsx','transactions':self.case/'transactions.xlsx','template':weekly.MASTER}
-        evidence={'typography':'11pt-column-alignment-v1','hashes':{key:gate.validation.sha(path) for key,path in paths.items()},'tables':tables}
+        evidence={'typography':'11pt-suhail-paragraph-updates-v3','hashes':{key:gate.validation.sha(path) for key,path in paths.items()},'tables':tables}
         measurements=self.case/'layout.json';measurements.write_text(json.dumps(evidence),encoding='utf-8')
         with contextlib.redirect_stdout(io.StringIO()):weekly.main(self.args()+['--measurements',str(measurements)])
         self.check()

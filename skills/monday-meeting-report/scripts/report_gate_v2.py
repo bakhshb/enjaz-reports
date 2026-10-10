@@ -26,6 +26,7 @@ from report_common.table_typography import check_table_typography
 from report_common.validation import (norm, sha, header_row, read_tasks, read_suhail, package, source_metrics, formula_values, cached_values, chart_metrics)
 
 from report_common.update_format import update_parts, display_text
+from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
 from report_common.pptx_helpers import suhail_data, val
 
 AGENDA_HEADERS=["م","جدول الأعمال","المسؤول","المدة الزمنية (بالدقيقة)"]
@@ -294,7 +295,17 @@ def main(argv=None):
         rendered_suh=[(*row[:-1],display_text(val(raw[-1]),paragraph_items=True)) for row,raw in zip(exp_suh,raw_suh)]
         cmp("Suhail details",rendered_suh,suh,errors)
         if prs2 is not None:verify_update_format(prs2,[(val(r[-1]),) for r in raw_suh],errors)
-        for title,expected in exp_summaries.items():cmp(title,expected,summaries.get(title,[]),errors)
+        raw_summaries=suhail_data(a.suhail)[2]
+        for title,expected in exp_summaries.items():
+            if title in SUMMARY_UPDATE_TITLES:
+                source=raw_summaries[title]
+                expected=[(display_text(val(row[3]),paragraph_items=True),*reversed(row[:3])) for row in source]
+                cells=[row.cells[update_column(sh.table)] for sl in prs2.slides for sh in sl.shapes
+                       if sh.has_table and any(c.text.strip()==title for c in sh.table.rows[0].cells)
+                       for row in list(sh.table.rows)[2:]] if prs2 is not None else []
+                if len(cells)!=len(source):errors.append('Suhail summary update count differs')
+                for cell,row in zip(cells,source):check_update(cell,val(row[3]),errors,paragraph_items=True)
+            cmp(title,expected,summaries.get(title,[]),errors)
         if prs2 is not None:verify_metrics(tmp,prs2,a.tasks,a.suhail,errors)
         print("REPORT_SHA256",sha(tmp)); print("TOPICS_SHA256",sha(a.topics)); print("TASKS_SHA256",sha(a.tasks)); print("SUHAIL_SHA256",sha(a.suhail))
         if errors:
