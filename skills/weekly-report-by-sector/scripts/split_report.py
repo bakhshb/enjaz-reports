@@ -19,6 +19,9 @@ from pptx import Presentation
 from pptx.util import Emu
 from lxml import etree
 
+sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]))
+from report_common.table_typography import set_table_sizes
+
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
 R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -255,13 +258,22 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
     return gf
 
 # ---- first-pass height estimate (refine_positions corrects it later) -----
-CPI, LINE, PAD = 15.5, 0.145, 0.12
+CPI, LINE, PAD = 15.5 * 10 / 11, 14 / 72, 0.12
+def header_height(widths):
+    # Narrow date/status columns need up to three 14 pt lines at 11 pt type.
+    return 0.60 if len(widths)==6 else 0.30
+
+def preserved_row_height(row, widths):
+    # A row copied from a 10 pt source must still fit the approved 11 pt output.
+    values=['\n'.join(''.join(t.text or '' for t in p.iter(q('t'))) for p in tc.iter(q('p'))) for tc in row['tr'].findall(q('tc'))]
+    return max(int(row['tr'].get('h',152400)), int(est_table([values],widths)-(0.28+header_height(widths))*EMU))
+
 def est_rows(rows, widths):
     if rows and isinstance(rows[0], dict):
-        return 0.58 * EMU + sum(int(r['tr'].get('h', 152400)) for r in rows)
+        return (0.28+header_height(widths)) * EMU + sum(preserved_row_height(r,widths) for r in rows)
     return est_table(rows, widths)
 def est_table(rows, widths):
-    h = 0.28 + 0.30
+    h = 0.28 + header_height(widths)
     for r in rows:
         lines = 1
         for txt, w in zip(r, widths):
@@ -273,9 +285,9 @@ def est_table(rows, widths):
 
 def set_estimated_row_heights(gf, rows, widths, frame_height):
     """Keep editable PowerPoint row geometry consistent before PDF refinement."""
-    heights = [int(0.28 * EMU), int(0.30 * EMU)]
+    heights = [int(0.28 * EMU), int(header_height(widths) * EMU)]
     if rows and isinstance(rows[0], dict):
-        heights.extend(int(row['tr'].get('h', 152400)) for row in rows)
+        heights.extend(preserved_row_height(row,widths) for row in rows)
     else:
         for row in rows:
             lines = 1
@@ -795,6 +807,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
                         accent=ACCENT['متأخرة'])
 
         path = os.path.join(full_dir, 'تقرير الإنجاز الأسبوعي - %s.pptx' % sec)
+        set_table_sizes(prs)
         prs.save(path)
         manifest.append({'sector': sec, 'file': path, 'keep': keep,
                          'edited': [i for i in keep if i in (role['tasks'], role['projects'], role['trans'])

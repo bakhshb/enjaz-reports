@@ -84,7 +84,9 @@ def synthetic_sector_files(root):
     label(sl,sector)
     sl=prs.slides.add_slide(prs.slide_layouts[6])
     table(sl,'المشاريع المكتملة',gate.SUHAIL_HEADERS,[['1','مشروع أول','01/01/1448','01/02/1448','مكتملة','تحديث']])
-    deck=out/'sector.pptx';prs.save(deck)
+    deck=out/'sector.pptx'
+    from report_common.table_typography import set_table_sizes
+    set_table_sizes(prs);prs.save(deck)
     (out/'manifest.json').write_text(json.dumps([{'sector':sector,'out':str(deck),'n':[2,1,0,0,0,0]}],ensure_ascii=False),encoding='utf-8')
     return master,out,deck
 

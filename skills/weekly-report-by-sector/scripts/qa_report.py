@@ -17,6 +17,7 @@ from xml.etree import ElementTree as ET
 from pptx import Presentation
 from pptx.oxml.ns import qn
 import split_report as splitter
+from report_common.table_typography import check_table_typography
 
 SOFFICE = shutil.which('soffice')
 
@@ -137,6 +138,7 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
         source_tables=expected_by_sector.get(it['sector'],{})
         expected = sum(len(records) for records in source_tables.values())
         record_errors=[]
+        check_table_typography(prs,record_errors)
         record_errors.extend(identity_errors(prs,it['sector'],source_tables,master))
         try:
             actual=actual_records(prs)
