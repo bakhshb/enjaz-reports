@@ -139,3 +139,10 @@ In `ما تم حتى تاريخه`, bold only the leading `تاريخ التحد
 ## Table column alignment
 
 Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.
+
+
+## Detail layout artwork and navigation
+
+Keep the approved layout and master artwork on every detail and continuation slide, including the header buttons, ministry logo, footer line and page furniture. Explicitly enable inherited graphics in generated slides. Allocate table IDs above all existing IDs, including group descendants. In the generated copy, link both the text and background of each header button to its current summary or detail-divider destination; the approved template itself remains immutable.
+
+When rendering fails, distinguish missing/hidden package artwork from an exporter-only discrepancy. Record the affected slides and renderer; re-open the same validated bytes and compare the header/footer with the template. Do not claim an intermittent exporter defect is resolved solely because structural checks pass.

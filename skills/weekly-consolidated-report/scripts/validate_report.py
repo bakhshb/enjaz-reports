@@ -15,6 +15,7 @@ from weekly_data import MASTER, approved_styles, transaction_data, field_key, TR
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
 from report_common.table_typography import set_table_sizes, TABLE_PT, check_table_typography
+from weekly_artwork import check_detail_artwork
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
@@ -192,6 +193,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER):
         if identities!=collections.Counter((exact(row[1]),exact(row[2])) for row in summary):errors.append(title+': summary/detail identities disagree')
     if helpers.slide_texts(final.slides[-1])!=helpers.slide_texts(master.slides[-1]):errors.append('Closing slide changed or not last')
     check_navigation(final,errors)
+    check_detail_artwork(final,master,errors)
     if errors:raise ValueError('\n'.join(dict.fromkeys(errors)))
     return {'programmatic':'passed','visual':'pending','slides':len(final.slides),'report_sha256':validation.sha(report)}
 

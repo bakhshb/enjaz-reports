@@ -40,3 +40,12 @@ Apply to both summaries and details, to column headers and every body paragraph.
 ## Suhail summaries and details regression
 
 Generate both report types with a dated multi-item update and a dated single paragraph in Suhail summary and detail cells. Confirm the supplied date label/date alone are bold, body text is regular, multiple source list items have native RTL bullets without duplicate markers, and prose has none. Remove bold or a bullet from a summary output deliberately: the delivery gate must reject it. Reconcile each summary against its own input. Render final bytes in PowerPoint and inspect summary and detail cells at 11 pt for clipping, overlaps and readable Arabic. Repeat the build using the installed skills and verify installed code hashes match the tested repository files.
+
+
+## Detail artwork acceptance
+
+- Normal, empty, new-sector and overflow builds must pass data checks. Every generated detail/continuation slide must retain the approved layout/master artwork and visible inherited graphics.
+- All four header buttons (text and background) must target their correct current sections, including transactions.
+- Reject deliberately hidden slide/layout graphics, deleted logo/footer/button, wrong layout, missing/wrong navigation links, moved artwork and table IDs colliding with grouped shapes. Validation must not repair the damaged input.
+- Open the output in native PowerPoint without repair. Compare header/footer regions on every detail/continuation page against an unchanged-master export, including two consecutive exports of identical PPTX bytes. Inspect content/layout separately; artwork checks do not replace font, table and source reconciliation checks.
+- Preserve input/template hashes; verify that the installed generator and validator match the tested repository files.
