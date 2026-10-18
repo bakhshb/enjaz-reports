@@ -19,11 +19,13 @@ from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approv
 
 from update_format import format_update
 from report_common.update_format import format_table_updates
+from weekly_artwork import next_shape_id, prepare_navigation
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
 def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     """Initial placement only; final visual acceptance must confirm pagination."""
+    seed._element.set('showMasterSp','1')
     patterns={builder.table_title(sh):sh for sh in builder.tables(seed)}
     top=min(sh.top for sh in patterns.values())
     bottom=content_bottom(prs,seed)
@@ -51,7 +53,7 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
             nonlocal y,chunk,weights,heights
             element=deepcopy(pattern._element)
             identity=element.find('.//'+qn('p:cNvPr'))
-            identity.set('id',str(max((s.shape_id for s in current.shapes),default=0)+1))
+            identity.set('id',str(next_shape_id(current)))
             for node in list(element.iter()):
                 if node.tag.rsplit('}',1)[-1] in ('creationId','custDataLst'):node.getparent().remove(node)
             current.shapes._spTree.insert_element_before(element,'p:extLst')
@@ -177,6 +179,7 @@ def build_candidate(args):
         for sh in sl.shapes:
             if sh._element.find('.//'+qn('a:fld')) is not None and getattr(sh,'has_text_frame',False):
                 for t in sh._element.findall('.//'+qn('a:t')):t.text=str(i)
+    prepare_navigation(prs)
     set_table_sizes(prs)
     deck=Path(args.output);prs.save(deck)
     with tempfile.TemporaryDirectory() as td:

@@ -48,6 +48,8 @@ uv run scripts/validate_report.py --report "<candidate.pptx>" --tasks "<tasks.xl
 
 The candidate is saved only after programmatic checks pass. Failed builds preserve existing outputs and inputs; output paths cannot alias an input or master. A programmatic pass is not visual acceptance.
 
+The gate also verifies inherited detail-layout artwork against the approved master, visible master graphics, unique shape IDs including grouped children, and all four header buttons' destinations. Keep `scripts/weekly_artwork.py` with the installed generator and validator. A missing logo, footer, button, or layout link is a blocking failure; do not bypass the gate to deliver.
+
 ## Visual review
 
 Render the validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.

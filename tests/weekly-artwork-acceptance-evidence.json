@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-15",
+  "scope": "Weekly consolidated detail artwork, continuation IDs and inherited navigation. Synthetic data only.",
+  "unit_integration": {
+    "command": "python -m unittest test_weekly_artwork test_weekly_production test_suhail_summary_updates",
+    "passed": 19,
+    "deliberate_artwork_corruption_cases": 10
+  },
+  "scenarios": {
+    "normal": {
+      "programmatic": "passed",
+      "pptx_sha256": "b74adf42239cfb8f80a6190415a77618b0e68f302a7bab494ddf882176451164"
+    },
+    "empty": {
+      "programmatic": "passed",
+      "pptx_sha256": "78208570180430aa0f3a471b9fd4715ff18c22054022c3700ffc238b8bf96413"
+    },
+    "new": {
+      "programmatic": "passed",
+      "pptx_sha256": "ef4caebf8b182f7ff835d1b4de3ae4ebaf46e737b76bda30cde8c1c490c9388b"
+    },
+    "overflow": {
+      "programmatic": "passed",
+      "pptx_sha256": "039f33ddb57166fa8494a9d82e07e2d594f29ccfd849402f8893108b8c5dc542"
+    }
+  },
+  "skill_definition": "passed",
+  "installed_files_hash_verified": 6,
+  "installed_entrypoint": "passed",
+  "native_powerpoint": {
+    "decks_opened": 6,
+    "pdf_exports_per_deck": 2,
+    "pptx_source_hashes_unchanged": true,
+    "detail_continuation_pages_compared": 16,
+    "png_and_both_pdf_header_footer_mean_pixel_difference": 0,
+    "visual_contact_sheets": "inspected all 16 tested detail/continuation pages"
+  },
+  "master_sha256": "3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5",
+  "limitations": [
+    "The original intermittent export incident was not reproduced during audit. This change fixes confirmed ID collisions, missing navigation and validation gaps; it does not claim to diagnose an unavailable failing report.",
+    "PDF comparison tests inherited artwork against the same native export of the unchanged master. It is not a new PDF font-embedding certification."
+  ],
+  "local_evidence_files": [
+    "native-render.json",
+    "visual-artwork-comparison.json",
+    "installed-hashes.json",
+    "contact-1.png",
+    "contact-2.png"
+  ]
+}
