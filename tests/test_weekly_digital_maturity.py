@@ -65,6 +65,13 @@ class DigitalMaturityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'does not match'):
             digital.load_reviewed(self.review, self.pdf)
 
+    def test_calculation_note_is_required(self):
+        slide = digital.digital_slide(Presentation(digital.MASTER))
+        self.assertIn('آلية الاحتساب', digital.calculation_note(slide).text)
+        digital.helpers.shape_by_id(slide, digital.CALCULATION_NOTE_ID).text = 'ملاحظة ناقصة'
+        with self.assertRaisesRegex(ValueError, 'calculation note'):
+            digital.calculation_note(slide)
+
     def test_capacity_and_conflicting_note_rejected(self):
         self.data['challenges'] *= 3
         with self.assertRaisesRegex(ValueError, 'exceed'):
