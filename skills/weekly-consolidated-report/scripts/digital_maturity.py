@@ -9,6 +9,7 @@ import json
 import re
 import sys
 from collections import defaultdict
+from copy import deepcopy
 from pathlib import Path
 
 import pdfplumber
@@ -20,13 +21,20 @@ from pptx.util import Pt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_common import pptx_helpers as helpers
-from weekly_data import set_cell_exact
+from weekly_data import content_bottom, set_cell_exact
 
 
 MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
-MASTER_HASH = '95941ea5a75b2fb401edf74c2ed8639be874f9bcecb5a891c7b934d816c8a6c2'
+MASTER_HASH = 'd4973a581de96f35e5266d062ea198a9681e5e167386e56067fdf9a5714f77e3'
 AXES = ('experience', 'satisfaction', 'complaints', 'tools')
 LABELS = ('تجربة المستخدم', 'رضا المستفيد', 'التعامل مع الشكاوى', 'التقنيات والأدوات')
+DETAIL_CARD_IDS = dict(zip(AXES, (6, 8, 10, 12)))
+DETAIL_CARD_BOXES = {
+    'experience': (405, 50, 535, 115),
+    'satisfaction': (272, 50, 405, 115),
+    'complaints': (140, 50, 272, 115),
+    'tools': (5, 50, 140, 115),
+}
 COLORS = {
     'experience': (0.898, 0.737, 0.553),
     'satisfaction': (0.220, 0.435, 0.404),
@@ -81,7 +89,7 @@ def _axis_from_fill(color):
 
 
 def extract_pdf(path):
-    """Extract page-one values; callers must review Arabic challenge text visually."""
+    """Extract summary and six detail drafts; every Arabic field needs visual review."""
     path = Path(path)
     with pdfplumber.open(path) as pdf:
         if not pdf.pages:
@@ -140,9 +148,41 @@ def extract_pdf(path):
         date = re.search(r'14\d\d/\d{1,2}/\d{1,2}', top_text)
         if not date:
             raise ValueError('Digital-maturity PDF update date is missing')
+        if len(pdf.pages) != 7:
+            raise ValueError('The approved digital detail master requires exactly seven PDF pages')
+        detail_pages = []
+        for number, detail in enumerate(pdf.pages[1:], 2):
+            if not 530 <= detail.width <= 550 or not 950 <= detail.height <= 975:
+                raise ValueError(f'Digital-maturity PDF page {number} has an unapproved layout')
+            found = detail.find_tables()
+            if len(found) != 1:
+                raise ValueError(f'Expected one detail table on PDF page {number}')
+            raw_table = found[0].extract()
+            if len(raw_table[0]) not in (4, 5) or _rtl(raw_table[0][0]) != 'أساس التقييم':
+                raise ValueError(f'Unexpected detail headers on PDF page {number}')
+            title_lines = (detail.crop((270, 0, 540, 50)).extract_text() or '').splitlines()
+            if len(title_lines) < 2:
+                raise ValueError(f'Digital-maturity detail title is missing on PDF page {number}')
+            draft_rows = [[_rtl(value) for value in row[:4]] for row in raw_table[1:]]
+            draft_rows = [row for row in draft_rows if any(row)]
+            if not draft_rows:
+                raise ValueError(f'Digital-maturity detail table is empty on PDF page {number}')
+            cards = {}
+            for axis, box in DETAIL_CARD_BOXES.items():
+                lines = (detail.crop(box).extract_text() or '').splitlines()
+                if len(lines) < 2:
+                    raise ValueError(f'Digital-maturity detail card is missing on PDF page {number}: {axis}')
+                raw_value = lines[1].strip()
+                cards[axis] = f'{_percent(raw_value):g}%' if '%' in raw_value else _rtl(raw_value)
+            below = detail.crop((0, found[0].bbox[3], detail.width, 900)).extract_text() or ''
+            draft_challenges = [_rtl(line.replace('•', '').strip()) for line in below.splitlines() if '•' in line]
+            detail_pages.append({'page': number, 'title': _rtl(title_lines[1]),
+                                 'cards': cards, 'rows': draft_rows,
+                                 'challenges': draft_challenges})
     return {'source_pdf_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'source_date_hijri': date.group(), 'metrics': metrics,
-            'sectors': sectors, 'challenges': challenges, 'reviewed': False}
+            'sectors': sectors, 'challenges': challenges,
+            'detail_pages': detail_pages, 'reviewed': False}
 
 
 def load_reviewed(path, pdf):
@@ -171,6 +211,28 @@ def load_reviewed(path, pdf):
         raise ValueError('Digital-maturity challenges exceed the approved table')
     if any(not c.get('perspective') or not c.get('text') for c in data['challenges']):
         raise ValueError('Incomplete digital-maturity challenge')
+    pages = data.get('detail_pages', [])
+    if len(pages) != 6 or [page.get('page') for page in pages] != list(range(2, 8)):
+        raise ValueError('Six reviewed digital-maturity detail pages are required in PDF order')
+    for page in pages:
+        if not page.get('title') or set(page.get('cards', {})) != set(AXES):
+            raise ValueError('Digital-maturity detail title or cards are incomplete')
+        for value in page['cards'].values():
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError('Digital-maturity detail card is empty')
+            if '%' in value:
+                _percent(value)
+            elif value not in ('معلق', 'لا ينطبق'):
+                raise ValueError('Unapproved digital-maturity detail status: ' + value)
+        rows = page.get('rows', [])
+        if not rows or any(len(row) != 4 or not isinstance(row[0], str) for row in rows):
+            raise ValueError('Digital-maturity detail rows are incomplete')
+        for row in rows:
+            if not (all(isinstance(cell, str) and cell.strip() for cell in row) or
+                    (row[0].strip() and not any(row[1:]))):
+                raise ValueError('Digital-maturity detail row must be complete or a section heading')
+        if not isinstance(page.get('challenges'), list) or any(not isinstance(c, str) or not c.strip() for c in page['challenges']):
+            raise ValueError('Digital-maturity detail challenges are incomplete')
     return data
 
 
@@ -195,6 +257,101 @@ def digital_slide(prs):
     if len(matches) != 1:
         raise ValueError('Expected one approved digital-maturity slide')
     return matches[0]
+
+
+def detail_slides(prs):
+    """Find the six approved detail pages without relying on slide numbers."""
+    matches = []
+    for slide in prs.slides:
+        if any(sh.has_table and len(sh.table.columns) == 4 and len(sh.table.rows) >= 2
+               and sh.table.cell(1, 0).text == 'أساس التقييم' for sh in slide.shapes):
+            matches.append(slide)
+    if len(matches) != 6:
+        raise ValueError('Expected six approved digital-maturity detail slides')
+    return matches
+
+
+def _detail_table(slide):
+    return next(sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 4
+                and len(sh.table.rows) >= 2 and sh.table.cell(1, 0).text == 'أساس التقييم')
+
+
+def _challenge_table(slide):
+    return next((sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 2
+                 and sh.table.cell(0, 0).text == 'التحديات'), None)
+
+
+def _protect_codes(value):
+    """Keep Latin task IDs readable inside the master's RTL table cells."""
+    return re.sub(r'\b[A-Z]{1,5}-\d{2,3}\b', lambda match: '\u202d' + match.group() + '\u202c', value)
+
+
+def _plain(value):
+    return value.replace('\u202d', '').replace('\u202c', '')
+
+
+def _set_challenge_text(cell, value):
+    set_cell_exact(cell, value)
+    parts = re.split(r'(\b[A-Z]{1,5}-\d{2,3}\b)', value)
+    if len(parts) == 1:
+        return
+    paragraph = cell.text_frame.paragraphs[0]
+    first = paragraph.runs[0]
+    template = deepcopy(first._r.get_or_add_rPr())
+    first.text = parts[0]
+    for index, part in enumerate(parts[1:], 1):
+        run = paragraph.add_run()
+        run.text = part
+        props = deepcopy(template)
+        if index % 2:
+            props.set('rtl', '0')
+            props.set('lang', 'en-US')
+        run._r.insert(0, props)
+
+
+def populate_details(prs, data):
+    for slide, detail in zip(detail_slides(prs), data['detail_pages']):
+        for axis, shape_id in DETAIL_CARD_IDS.items():
+            shape = helpers.shape_by_id(slide, shape_id)
+            paragraphs = shape.text_frame.paragraphs
+            if len(paragraphs) != 2 or len(paragraphs[1].runs) != 1:
+                raise ValueError('Approved digital-maturity card formatting changed')
+            paragraphs[1].runs[0].text = detail['cards'][axis]
+        table = _detail_table(slide)
+        if len(detail['rows']) > len(table.rows)-2:
+            raise ValueError(f'Digital-maturity PDF page {detail["page"]} exceeds its detail table capacity')
+        set_cell_exact(table.cell(0, 0), detail['title'])
+        for index, values in enumerate(detail['rows'], 2):
+            for cell, value in zip(table.rows[index].cells, values):
+                set_cell_exact(cell, _protect_codes(value))
+            if re.fullmatch(r'[A-Z]{1,5}-\d{2,3}', values[3]):
+                code_cell = table.cell(index, 3)
+                code_cell.text_frame.paragraphs[0]._p.get_or_add_pPr().set('rtl', '0')
+        for row in list(table.rows)[2+len(detail['rows']):]:
+            row._tr.getparent().remove(row._tr)
+        challenges = _challenge_table(slide)
+        if challenges is None:
+            if detail['challenges']:
+                raise ValueError(f'Digital-maturity PDF page {detail["page"]} has challenges without an approved destination')
+            continue
+        if not 1 <= len(detail['challenges']) <= len(challenges.rows)-2:
+            raise ValueError(f'Digital-maturity PDF page {detail["page"]} exceeds its challenges capacity')
+        for index, challenge in enumerate(detail['challenges'], 2):
+            set_cell_exact(challenges.cell(index, 0), str(index-1))
+            _set_challenge_text(challenges.cell(index, 1), challenge)
+        for row in list(challenges.rows)[2+len(detail['challenges']):]:
+            row._tr.getparent().remove(row._tr)
+        # Keep the approved 11 pt type while clearing the inherited footer.
+        challenge_shape = next(sh for sh in slide.shapes if sh.has_table and sh.table._tbl is challenges._tbl)
+        excess = challenge_shape.top + challenge_shape.height - content_bottom(prs, slide) + 30000
+        if excess > 0:
+            body = list(challenges.rows)[2:]
+            reduction = (excess + len(body) - 1) // len(body)
+            if any(row.height - reduction < 350000 for row in body):
+                raise ValueError(f'Digital-maturity PDF page {detail["page"]} exceeds its footer clearance')
+            for row in body:
+                row.height -= reduction
+            challenge_shape.height = sum(row.height for row in challenges.rows)
 
 
 def populate(prs, data):
@@ -241,6 +398,7 @@ def populate(prs, data):
             set_cell_exact(cell, value)
     for row in list(table.rows)[2+len(data['challenges']):]:
         row._tr.getparent().remove(row._tr)
+    populate_details(prs, data)
     return slide
 
 
@@ -273,6 +431,21 @@ def check(prs, report_path, data, errors):
     expected_notes = {f'Digital sector note {i}': s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
     if notes != expected_notes:
         errors.append('Digital-maturity sector notes differ from reviewed PDF data')
+    for slide, detail in zip(detail_slides(prs), data['detail_pages']):
+        for axis, shape_id in DETAIL_CARD_IDS.items():
+            actual = helpers.shape_by_id(slide, shape_id).text_frame.paragraphs[1].text
+            if actual != detail['cards'][axis]:
+                errors.append(f'Digital-maturity detail card differs on PDF page {detail["page"]}: {axis}')
+        table = _detail_table(slide)
+        if table.cell(0, 0).text != detail['title']:
+            errors.append(f'Digital-maturity detail title differs on PDF page {detail["page"]}')
+        actual_rows = [[_plain(cell.text) for cell in row.cells] for row in list(table.rows)[2:]]
+        if actual_rows != detail['rows']:
+            errors.append(f'Digital-maturity detail rows differ on PDF page {detail["page"]}')
+        challenges = _challenge_table(slide)
+        actual_challenges = [] if challenges is None else [_plain(row.cells[1].text) for row in list(challenges.rows)[2:]]
+        if actual_challenges != detail['challenges']:
+            errors.append(f'Digital-maturity detail challenges differ on PDF page {detail["page"]}')
 
 
 def main(argv=None):

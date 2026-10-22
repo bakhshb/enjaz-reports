@@ -15,7 +15,7 @@ from weekly_data import MASTER, approved_styles, transaction_data, field_key, TR
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
 from report_common.table_typography import set_table_sizes, TABLE_PT, check_table_typography
-from weekly_artwork import check_detail_artwork
+from weekly_artwork import check_detail_artwork, all_shapes, DIGITAL_DETAIL_LABEL
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
@@ -72,8 +72,25 @@ def check_navigation(prs,errors):
         if targets!=expected:errors.append('Navigation target differs: '+kind)
         if any(i<=divider_index or i>=len(slides)-1 for i,_ in groups[kind]):errors.append('Detail section order changed')
     if groups['task'] and groups['project'] and groups['task'][-1][0]>=groups['project'][0][0]:errors.append('Task/project order changed')
+    digital=[(i,sl) for i,sl in enumerate(slides) if any(sh.has_table and len(sh.table.columns)==4
+             and len(sh.table.rows)>1 and sh.table.cell(1,0).text=='أساس التقييم' for sh in sl.shapes)]
+    if digital:
+        if len(digital)!=6 or [i for i,_ in digital]!=list(range(digital[0][0],digital[0][0]+6)) or digital[-1][0]!=len(slides)-2:
+            errors.append('Digital detail slides are missing or out of order')
+        if groups['project'] and digital[0][0]<=groups['project'][-1][0]:
+            errors.append('Digital details must follow Suhail details')
+        labels=[sh for sh in all_shapes(divider.shapes) if getattr(sh,'has_text_frame',False)
+                and sh.text==DIGITAL_DETAIL_LABEL]
+        if len(labels)!=1:
+            errors.append('Digital detail divider button is missing')
+        else:
+            links=list(labels[0].element.iter(qn('a:hlinkClick')))
+            if len(links)!=1 or divider.part.rels[links[0].get(qn('r:id'))].target_part!=digital[0][1].part:
+                errors.append('Digital detail divider button has the wrong destination')
     for i,sl in enumerate(slides):
         for sh in helpers.tables(sl,4):
+            if len(sh.table.rows)>1 and sh.table.cell(1,0).text=='أساس التقييم':
+                continue
             title=helpers.table_title(sh)
             start,end=(positions[0],positions[1]) if title in helpers.TASK_SUMMARY_TITLES else (positions[1],positions[2])
             if not start<=i<end:errors.append('Summary table outside its section: '+title)
@@ -122,6 +139,11 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     if sum(sh.has_chart for sl in final.slides for sh in sl.shapes)!=(8 if model=='digital' else 3):
         errors.append('Unexpected native chart count')
     patterns={helpers.table_title(sh):sh.table for sl in master.slides for sh in helpers.tables(sl,4)}
+    digital_patterns={}
+    if reviewed is not None:
+        from digital_maturity import detail_slides, _detail_table, _challenge_table
+        digital_patterns={current.part:(_detail_table(pattern),_challenge_table(pattern))
+                          for current,pattern in zip(detail_slides(final),detail_slides(master))}
     task_pattern=helpers.detail_tables(helpers.detail_pattern_slides(master,'task')[0],'task')[0].table
     project_pattern=helpers.detail_tables(helpers.detail_pattern_slides(master,'project')[0],'project')[0].table
     transaction_pattern=next(sh.table for sl in master.slides for sh in helpers.tables(sl,5))
@@ -136,6 +158,11 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
             if model=='digital' and len(headers)==3 and title=='التحديات':
                 pattern=next(x.table for x in helpers.tables(master.slides[4]) if len(x.table.columns)==3)
                 if headers!=[c.text for c in pattern.rows[1].cells]:errors.append('Digital challenge headers changed')
+            elif sl.part in digital_patterns and len(headers) in (2,4):
+                pattern=digital_patterns[sl.part][0 if len(headers)==4 else 1]
+                if pattern is None or headers!=[c.text for c in pattern.rows[1].cells]:
+                    errors.append('Digital detail table headers changed')
+                    continue
             elif len(headers)==6:
                 kind='task' if 'المهمة' in headers else 'project'
                 pattern=task_pattern if kind=='task' else project_pattern

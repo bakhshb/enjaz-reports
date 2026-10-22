@@ -12,6 +12,7 @@ NAVIGATION = {'ملخص المهام': 'إجمالي المهام',
               'ملخص مشاريع سهيل': 'إجمالي مشاريع سهيل',
               'المعاملات': 'إجمالي العاملات', 'التفاصيل': None}
 DIGITAL_NAME = 'التجربة الرقمية'
+DIGITAL_DETAIL_LABEL = 'تفاصيل مؤشر نضج التجربة الرقمية'
 
 def label(text):
     return ' '.join(text.split())
@@ -80,6 +81,23 @@ def prepare_navigation(prs):
                 link.set(qn('r:id'), rid)
                 link.set('action', 'ppaction://hlinksldjump')
                 props.insert(0, link)
+    details = [sl for sl in prs.slides if any(sh.has_table and len(sh.table.columns) == 4
+               and len(sh.table.rows) > 1 and sh.table.cell(1, 0).text == 'أساس التقييم'
+               for sh in sl.shapes)]
+    if details:
+        divider = next(sl for sl in prs.slides if {'تفاصيل المهام', 'تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))
+        labels = [sh for sh in all_shapes(divider.shapes)
+                  if getattr(sh, 'has_text_frame', False) and label(sh.text) == DIGITAL_DETAIL_LABEL]
+        if len(labels) != 1:
+            raise ValueError('Missing/duplicate digital detail divider button')
+        rid = divider.part.relate_to(details[0].part, RT.SLIDE)
+        props = labels[0].element.find('.//' + qn('p:cNvPr'))
+        for old in list(props.findall(qn('a:hlinkClick'))):
+            props.remove(old)
+        link = OxmlElement('a:hlinkClick')
+        link.set(qn('r:id'), rid)
+        link.set('action', 'ppaction://hlinksldjump')
+        props.insert(0, link)
 
 def layer_signature(layer):
     """Compare artwork, geometry and image bytes; links are validated separately."""

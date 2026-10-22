@@ -34,6 +34,20 @@ class DigitalMaturityTests(unittest.TestCase):
             ],
             'challenges': [{'perspective': 'عام', 'text': 'تحد أول'}, {'perspective': 'تجربة المستخدم', 'text': 'تحد ثان'}],
         }
+        master = Presentation(digital.MASTER)
+        self.data['detail_pages'] = []
+        for number, slide in enumerate(digital.detail_slides(master), 2):
+            table = digital._detail_table(slide)
+            challenge_table = digital._challenge_table(slide)
+            self.data['detail_pages'].append({
+                'page': number,
+                'title': table.cell(0, 0).text,
+                'cards': {axis: digital.helpers.shape_by_id(slide, shape_id).text_frame.paragraphs[1].text
+                          for axis, shape_id in digital.DETAIL_CARD_IDS.items()},
+                'rows': [[cell.text for cell in row.cells] for row in list(table.rows)[2:]],
+                'challenges': [] if challenge_table is None else
+                [row.cells[1].text for row in list(challenge_table.rows)[2:]],
+            })
         self.review = self.root / 'review.json'
 
     def load(self):
@@ -59,6 +73,17 @@ class DigitalMaturityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'cannot have percentages'):
             self.load()
 
+    def test_detail_capacity_and_missing_page_rejected(self):
+        last = self.data['detail_pages'][-1]
+        self.data['detail_pages'] = self.data['detail_pages'][:-1]
+        with self.assertRaisesRegex(ValueError, 'Six reviewed'):
+            self.load()
+        self.data['detail_pages'].append(last)
+        self.data['detail_pages'][0]['rows'].append(['جاهزية', '15%', 'مهمة إضافية', 'X-99'])
+        data = self.load()
+        with self.assertRaisesRegex(ValueError, 'exceeds its detail table capacity'):
+            digital.populate(Presentation(digital.MASTER), data)
+
     def test_charts_and_challenges_match_reviewed_data(self):
         data = self.load()
         prs = Presentation(digital.MASTER)
@@ -82,6 +107,21 @@ class DigitalMaturityTests(unittest.TestCase):
         errors = []
         digital.check(Presentation(report), report, data, errors)
         self.assertTrue(any('must display percentages' in error for error in errors))
+
+    def test_page_six_challenges_and_latin_codes(self):
+        self.data['detail_pages'][4]['challenges'] = [
+            'تحد مرتبط بالمهمة W-03', 'تحد ثان مرتبط بالمهمة S-02'
+        ]
+        self.data['detail_pages'][4]['rows'][1][3] = 'W-01'
+        data = self.load()
+        prs = Presentation(digital.MASTER)
+        digital.populate(prs, data)
+        slide = digital.detail_slides(prs)[4]
+        challenges = digital._challenge_table(slide)
+        self.assertEqual([row.cells[1].text for row in list(challenges.rows)[2:]], data['detail_pages'][4]['challenges'])
+        code = digital._detail_table(slide).cell(3, 3)
+        self.assertEqual(digital._plain(code.text), 'W-01')
+        self.assertEqual(code.text_frame.paragraphs[0]._p.get_or_add_pPr().get('rtl'), '0')
 
 
 if __name__ == '__main__':

@@ -14,7 +14,7 @@ Create the report from current final Excel inputs and one of this skill's approv
 When the user sends the Excel files without choosing a model, ask: **«أي نموذج تريد: التقرير الموحد الحالي، أم التقرير الموحد مع نضج التجربة الرقمية؟»** Wait for the choice before generating. If the user already selected one, use it without repeating the question. Do not select a model from the mere presence or absence of a PDF.
 
 - **التقرير الموحد الحالي** (`standard`): the existing master and three Excel inputs, with unchanged business rules.
-- **التقرير الموحد مع نضج التجربة الرقمية** (`digital`): the second bundled master and the same three Excel inputs, plus the current digital-maturity PDF. Its page-one summary fills the added slide; later PDF pages are not copied because the approved master has no destinations for them. Read [digital-maturity mapping](references/digital-maturity.md) only for this model. If the PDF is missing, ask for it before building.
+- **التقرير الموحد مع نضج التجربة الرقمية** (`digital`): the second bundled master and the same three Excel inputs, plus the current digital-maturity PDF. PDF page one fills the summary; pages two through seven fill the six approved detail slides. Read [digital-maturity mapping](references/digital-maturity.md) only for this model. If the PDF is missing, ask for it before building.
 
 ## Inputs and output
 
@@ -29,7 +29,7 @@ When the user sends the Excel files without choosing a model, ask: **«أي نم
 
 Verify the bundled master size `9545257` bytes and SHA-256 `3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5` before use. Never fall back to an earlier master.
 
-For `digital`, verify SHA-256 `95941ea5a75b2fb401edf74c2ed8639be874f9bcecb5a891c7b934d816c8a6c2` for its bundled master. Do not use the current model's master for this choice.
+For `digital`, verify SHA-256 `d4973a581de96f35e5266d062ea198a9681e5e167386e56067fdf9a5714f77e3` for its bundled master. Do not use the current model's master for this choice.
 
 ## Table typography
 
@@ -49,7 +49,7 @@ Apply every rule in [the report-specific reference](references/business-rules.md
 uv run scripts/digital_maturity.py --pdf "<digital.pdf>" --output "<review.json>"
 ```
 
-Compare every extracted card percentage, sector/bar color and value, sector note, and challenge line with the rendered page. Correct PDF text-layer reversal or ligature errors in the review file; never invent missing values. Set `reviewed` to `true` only after the comparison. The builder rejects unreviewed data and a PDF hash mismatch. Keep the review file as QA evidence outside the delivered slides.
+Compare every extracted card percentage, sector/bar color and value, sector note, and challenge line with rendered page one. Review the six detail-page titles, four cards per page, every table row, and every challenge against rendered PDF pages two through seven. Correct PDF text-layer reversal, numbers, codes, or ligature errors in the review file; never invent missing values. Set `reviewed` to `true` only after the full comparison. The builder rejects unreviewed data and a PDF hash mismatch. Keep the review file as QA evidence outside the delivered slides.
 2. Generate into a new candidate path:
 
 ```bash
