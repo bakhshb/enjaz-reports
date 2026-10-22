@@ -29,7 +29,7 @@ When the user sends the Excel files without choosing a model, ask: **«أي نم
 
 Verify the bundled master size `9545257` bytes and SHA-256 `3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5` before use. Never fall back to an earlier master.
 
-For `digital`, verify SHA-256 `d4973a581de96f35e5266d062ea198a9681e5e167386e56067fdf9a5714f77e3` for its bundled master. Do not use the current model's master for this choice.
+For `digital`, verify SHA-256 `f801c57cd1db4a830c7329f0a7a0c74dee6ff46458508449e18166a6482c3b01` for its bundled master. Do not use the current model's master for this choice.
 
 ## Table typography
 

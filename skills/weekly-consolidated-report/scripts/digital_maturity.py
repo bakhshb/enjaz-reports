@@ -25,7 +25,10 @@ from weekly_data import content_bottom, set_cell_exact
 
 
 MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
-MASTER_HASH = 'd4973a581de96f35e5266d062ea198a9681e5e167386e56067fdf9a5714f77e3'
+MASTER_HASH = 'f801c57cd1db4a830c7329f0a7a0c74dee6ff46458508449e18166a6482c3b01'
+CALCULATION_NOTE = ('آلية الاحتساب: 10% للجاهزية وتشمل المتطلبات والاجتماعات والتنسيق، '
+                    'و5% لتحديد التواريخ المستهدفة، والنسبة المتبقية وفق الإنجاز الفعلي لمتطلبات الدليل.')
+CALCULATION_NOTE_ID = 7
 AXES = ('experience', 'satisfaction', 'complaints', 'tools')
 LABELS = ('تجربة المستخدم', 'رضا المستفيد', 'التعامل مع الشكاوى', 'التقنيات والأدوات')
 DETAIL_CARD_IDS = dict(zip(AXES, (6, 8, 10, 12)))
@@ -259,6 +262,13 @@ def digital_slide(prs):
     return matches[0]
 
 
+def calculation_note(slide):
+    note = helpers.shape_by_id(slide, CALCULATION_NOTE_ID)
+    if ' '.join(note.text.split()) != ' '.join(CALCULATION_NOTE.split()):
+        raise ValueError('Approved digital-maturity calculation note is missing or changed')
+    return note
+
+
 def detail_slides(prs):
     """Find the six approved detail pages without relying on slide numbers."""
     matches = []
@@ -356,6 +366,7 @@ def populate_details(prs, data):
 
 def populate(prs, data):
     slide = digital_slide(prs)
+    calculation_note(slide)
     for axis, (chart_id, label_id, track_id, fill_id) in CARDS.items():
         value = data['metrics'][axis]
         _chart(helpers.shape_by_id(slide, chart_id), ['المنجز', 'المتبقي'],
@@ -405,6 +416,10 @@ def populate(prs, data):
 def check(prs, report_path, data, errors):
     from report_common import validation
     slide = digital_slide(prs)
+    try:
+        calculation_note(slide)
+    except ValueError as exc:
+        errors.append(str(exc))
     for axis, (chart_id, label_id, track_id, fill_id) in CARDS.items():
         value = data['metrics'][axis]
         if helpers.shape_by_id(slide, label_id).text != f'{value:g}%':
