@@ -11,6 +11,7 @@ from report_common import pptx_helpers as helpers
 NAVIGATION = {'ملخص المهام': 'إجمالي المهام',
               'ملخص مشاريع سهيل': 'إجمالي مشاريع سهيل',
               'المعاملات': 'إجمالي العاملات', 'التفاصيل': None}
+DIGITAL_NAME = 'التجربة الرقمية'
 
 def label(text):
     return ' '.join(text.split())
@@ -36,17 +37,28 @@ def targets(prs):
         if len(matches) != 1:
             raise ValueError('Cannot identify navigation destination: ' + name)
         result[name] = matches[0].part
+    digital = [sl for sl in prs.slides if sum(sh.has_chart for sh in sl.shapes) == 5]
+    if digital:
+        if len(digital) != 1:
+            raise ValueError('Cannot identify digital-maturity navigation destination')
+        result[DIGITAL_NAME] = digital[0].part
     return result
 
-def buttons(layout):
+def shape_collections(shapes):
+    yield shapes
+    for shape in shapes:
+        if hasattr(shape, 'shapes'):
+            yield from shape_collections(shape.shapes)
+
+def buttons(layout, names=None):
     """Return the label and its matching background, without the full-page fill."""
-    for name in NAVIGATION:
-        matches = [sh for sh in layout.shapes if getattr(sh, 'has_text_frame', False)
-                   and label(sh.text) == name]
+    for name in (names or NAVIGATION):
+        matches = [(sh, siblings) for siblings in shape_collections(layout.shapes)
+                   for sh in siblings if getattr(sh, 'has_text_frame', False) and label(sh.text) == name]
         if len(matches) != 1:
             raise ValueError('Missing/duplicate layout navigation label: ' + name)
-        text = matches[0]
-        backgrounds = [sh for sh in layout.shapes if sh != text and
+        text, siblings = matches[0]
+        backgrounds = [sh for sh in siblings if sh != text and
                        abs(sh.left-text.left) < 12700 and abs(sh.width-text.width) < 12700
                        and sh.top <= text.top and sh.top+sh.height >= text.top+text.height]
         if len(backgrounds) != 1:
@@ -55,9 +67,10 @@ def buttons(layout):
 
 def prepare_navigation(prs):
     destinations = targets(prs)
-    layouts = {sl.slide_layout.part: sl.slide_layout for sl in prs.slides if detail_kind(sl)}
+    layouts = {sl.slide_layout.part: sl.slide_layout for sl in prs.slides
+               if detail_kind(sl) or (DIGITAL_NAME in destinations and sl.part == destinations[DIGITAL_NAME])}
     for layout in layouts.values():
-        for name, shapes in buttons(layout):
+        for name, shapes in buttons(layout, destinations):
             rid = layout.part.relate_to(destinations[name], RT.SLIDE)
             for shape in shapes:
                 props = shape.element.find('.//' + qn('p:cNvPr'))
@@ -87,6 +100,16 @@ def layer_signature(layer):
 def check_detail_artwork(prs, master, errors):
     patterns = {kind: helpers.detail_pattern_slides(master, kind)[0] for kind in ('task', 'project')}
     destinations = targets(prs)
+    if DIGITAL_NAME in destinations:
+        digital = next(sl for sl in prs.slides if sl.part == destinations[DIGITAL_NAME])
+        try:
+            for name, shapes in buttons(digital.slide_layout, destinations):
+                for shape in shapes:
+                    links = list(shape.element.iter(qn('a:hlinkClick')))
+                    if len(links) != 1 or digital.slide_layout.part.rels[links[0].get(qn('r:id'))].target_part != destinations[name]:
+                        errors.append('Digital slide navigation differs: ' + name)
+        except (KeyError, ValueError) as exc:
+            errors.append('Digital slide navigation is invalid: ' + str(exc))
     checked = set()
     for index, slide in enumerate(prs.slides, 1):
         kind = detail_kind(slide)
@@ -109,7 +132,7 @@ def check_detail_artwork(prs, master, errors):
             for actual, reference in ((layout, expected), (layout.slide_master, expected.slide_master)):
                 if layer_signature(actual) != layer_signature(reference):
                     errors.append(prefix + 'layout/master artwork differs from approved template')
-            for name, shapes in buttons(layout):
+            for name, shapes in buttons(layout, destinations):
                 for shape in shapes:
                     links = list(shape.element.iter(qn('a:hlinkClick')))
                     if len(links) != 1:

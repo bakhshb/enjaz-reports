@@ -49,3 +49,11 @@ Generate both report types with a dated multi-item update and a dated single par
 - Reject deliberately hidden slide/layout graphics, deleted logo/footer/button, wrong layout, missing/wrong navigation links, moved artwork and table IDs colliding with grouped shapes. Validation must not repair the damaged input.
 - Open the output in native PowerPoint without repair. Compare header/footer regions on every detail/continuation page against an unchanged-master export, including two consecutive exports of identical PPTX bytes. Inspect content/layout separately; artwork checks do not replace font, table and source reconciliation checks.
 - Preserve input/template hashes; verify that the installed generator and validator match the tested repository files.
+
+## Two-model acceptance
+
+- When only the three Excel files arrive and no model is specified, the agent asks which approved model to use before generating. An explicit choice is honored without asking again. Choosing the current model retains its original master and three-input workflow.
+- Choosing the digital-experience model requires the current PDF. Verify the bundled second-master hash, render PDF page one, inspect the extractor's JSON against that page, correct text-layer errors, and reject unreviewed JSON or a PDF hash mismatch.
+- The digital slide contains the PDF's four independent percentages, sector rows (including blanks and `قيد الدراسة` notes), and challenge text in source order. No numerical or challenge sample from the master remains. Card labels, doughnuts, progress bars, sector data labels, chart caches, embedded workbooks, and challenge cells agree with the reviewed source.
+- The new slide is in the approved position; five header destinations work for the digital model, including grouped buttons. Existing summary/detail reconciliation, typography, status, layout-artwork and visual checks pass for both models. A source with more than five sector rows or four challenge rows stops with a clear capacity error rather than losing data.
+- Open each model's generated PPTX in PowerPoint without repair. Compare the digital slide to page one of the supplied PDF and the approved second master at full size; verify Arabic, 11 pt table text, no clipping or overlap, correct sector-note placement, and intact footer/logo. Final visual acceptance follows the last edit and validation.
