@@ -1,6 +1,6 @@
 # Digital-experience model
 
-Use this reference only after the user chooses **التقرير الموحد مع نضج التجربة الرقمية**. The added summary follows the transactions summary and precedes the detail divider. Six detail slides follow the task and Suhail details. The current model remains separate.
+Use this reference only after the user chooses **التقرير الموحد مع نضج التجربة الرقمية**. The added summary follows the transactions summary and precedes the detail divider. The divider's «تفاصيل مؤشر نضج التجربة الرقمية» button opens six populated indicator-detail slides after the task and Suhail details; the detail data must not appear only in the summary. The current model remains separate.
 
 The current digital-maturity PDF is a required fourth input. Read and visually review **page one**, which contains the four perspective percentages, one sector row per agency/center, and the challenges table. PDF pages **two through seven** supply the six detail slides: each page's title, four perspective cards, table rows and challenges. Never carry sample percentages, rows, or challenge prose from the PowerPoint master into a generated report. The master summary still contains sample values that differ from the supplied PDF; the PDF controls runtime values. Preserve the master's fixed «آلية الاحتساب» note between the four indicators and sector chart, including its wording and emphasis; it explains the calculation method and is not a value to extract from the PDF.
 

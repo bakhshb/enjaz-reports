@@ -25,7 +25,7 @@ from weekly_data import content_bottom, set_cell_exact
 
 
 MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
-MASTER_HASH = 'f801c57cd1db4a830c7329f0a7a0c74dee6ff46458508449e18166a6482c3b01'
+MASTER_HASH = '4212057961c371b3a63b8a5676ebe42582ab4d5db98fff983168f0fe610a689c'
 CALCULATION_NOTE = ('آلية الاحتساب: 10% للجاهزية وتشمل المتطلبات والاجتماعات والتنسيق، '
                     'و5% لتحديد التواريخ المستهدفة، والنسبة المتبقية وفق الإنجاز الفعلي لمتطلبات الدليل.')
 CALCULATION_NOTE_ID = 7
