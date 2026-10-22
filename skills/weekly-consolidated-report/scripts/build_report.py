@@ -23,6 +23,19 @@ from weekly_artwork import next_shape_id, prepare_navigation
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
+def header_heights(pattern):
+    """Resolve auto-height title/header rows from the approved table frame."""
+    rows=list(pattern.table.rows)
+    heights=[row.height or 0 for row in rows[:2]]
+    missing=[index for index,height in enumerate(heights) if not height]
+    if missing:
+        residual=pattern.height-sum(row.height or 0 for row in rows)
+        if residual<=0:raise ValueError('Cannot resolve approved table header heights')
+        share,residue=divmod(residual,len(missing))
+        for index in missing:
+            heights[index]=share+(residue if index==missing[-1] else 0)
+    return heights
+
 def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     """Initial placement only; final visual acceptance must confirm pagination."""
     seed._element.set('showMasterSp','1')
@@ -39,7 +52,8 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     for sh in list(builder.tables(seed)):remove(sh)
     for title,records,pattern in sections:
         if not records:continue
-        fixed=sum(r.height for r in list(pattern.table.rows)[:2])
+        approved_header=header_heights(pattern)
+        fixed=sum(approved_header)
         base=builder._body_base_height(pattern.table,2)
         if measurements is not None and title not in measurements:raise ValueError('Missing layout measurements: '+title)
         measured=(measurements or {}).get(title)
@@ -63,6 +77,8 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
                 for cell,value in zip(row.cells,values):set_cell_exact(cell,value)
             if summary:
                 format_table_updates(sh.table,bullet_style,paragraph_items=True)
+            for row,height in zip(sh.table.rows,approved_header):row.height=height
+            sh.height=sum(row.height for row in sh.table.rows)
             if fixed_heights:
                 for row,height in zip(sh.table.rows,fixed_heights+heights):row.height=height
                 sh.height=sum(row.height for row in sh.table.rows)
@@ -96,8 +112,14 @@ def update_chart(shape,records,statuses):
     return records
 
 def build_candidate(args):
-    template=Path(args.template) if args.template else MASTER
-    if not args.template and hashlib.sha256(template.read_bytes()).hexdigest()!=MASTER_HASH:
+    if args.model=='digital':
+        from digital_maturity import MASTER as DIGITAL_MASTER, MASTER_HASH as DIGITAL_HASH, load_reviewed
+        digital_data=load_reviewed(args.digital_data,args.digital_pdf)
+        bundled=Path(DIGITAL_MASTER);expected_hash=DIGITAL_HASH
+    else:
+        digital_data=None;bundled=MASTER;expected_hash=MASTER_HASH
+    template=Path(args.template) if args.template else bundled
+    if not args.template and hashlib.sha256(template.read_bytes()).hexdigest()!=expected_hash:
         raise ValueError('Bundled weekly template checksum mismatch')
     tasks=Path(args.tasks);projects=Path(args.suhail);transactions=Path(args.transactions)
     measurements=None
@@ -105,10 +127,18 @@ def build_candidate(args):
         measured=json.loads(Path(args.measurements).read_text(encoding='utf-8-sig'))
         for key,path in [('tasks',tasks),('suhail',projects),('transactions',transactions),('template',template)]:
             if hashlib.sha256(path.read_bytes()).hexdigest().lower()!=measured['hashes'][key].lower():raise ValueError('Layout measurements are stale: '+key)
+        if args.model=='digital':
+            for key,path in [('digital_pdf',Path(args.digital_pdf)),('digital_data',Path(args.digital_data))]:
+                if hashlib.sha256(path.read_bytes()).hexdigest().lower()!=measured['hashes'].get(key,'').lower():raise ValueError('Layout measurements are stale: '+key)
+        elif 'digital_pdf' in measured['hashes'] or 'digital_data' in measured['hashes']:
+            raise ValueError('Digital layout measurements cannot be used for the standard model')
         if measured.get('typography')!='11pt-suhail-paragraph-updates-v3':raise ValueError('Layout measurements are stale: regenerate for Suhail summary update formatting')
         measurements=measured['tables']
     tk,tc,ts,td=builder.task_data(tasks);pk,pc,ps,pd=builder.suhail_data(projects);xk,xc,xd=transaction_data(transactions)
     prs=Presentation(template);set_table_sizes(prs);slides=list(prs.slides)
+    if digital_data is not None:
+        from digital_maturity import populate
+        populate(prs,digital_data)
     # Discover roles first; IDs are checked within the identified summary role.
     summary=[builder.find_slide_with_text(prs,label) for label in ('إجمالي المهام','إجمالي مشاريع سهيل','إجمالي العاملات')]
     task_patterns=builder.detail_pattern_slides(prs,'task')
@@ -193,13 +223,25 @@ def parse_args(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('tasks','suhail','transactions','output'):parser.add_argument('--'+name,required=True)
     parser.add_argument('--template',help='Explicitly approved alternative template')
+    parser.add_argument('--model',choices=('standard','digital'),default='standard')
+    parser.add_argument('--digital-pdf',help='Current digital-maturity PDF, required for the digital model')
+    parser.add_argument('--digital-data',help='Visually reviewed JSON extracted from the same PDF')
     parser.add_argument('--measurements',help='Native row heights from a rendered candidate with these exact inputs')
     return parser.parse_args(argv)
 
 def main(argv=None):
     args=parse_args(argv)
+    if args.model=='digital' and not (args.digital_pdf and args.digital_data):
+        raise ValueError('Digital model requires --digital-pdf and --digital-data')
+    if args.model=='standard' and (args.digital_pdf or args.digital_data):
+        raise ValueError('Digital-maturity inputs require --model digital')
     output=Path(args.output).resolve()
-    protected=[Path(args.template) if args.template else MASTER,Path(args.tasks),Path(args.suhail),Path(args.transactions)]
+    if args.model=='digital':
+        from digital_maturity import MASTER as DIGITAL_MASTER
+        bundled=DIGITAL_MASTER
+    else:bundled=MASTER
+    protected=[Path(args.template) if args.template else bundled,Path(args.tasks),Path(args.suhail),Path(args.transactions)]
+    if args.model=='digital':protected.extend((Path(args.digital_pdf),Path(args.digital_data)))
     if args.measurements:protected.append(Path(args.measurements))
     if any(output==p.resolve() or (output.exists() and p.exists() and output.samefile(p)) for p in protected):
         raise ValueError('Output must not overwrite the template or an input workbook')
@@ -208,7 +250,8 @@ def main(argv=None):
     with tempfile.TemporaryDirectory(prefix='.weekly-build-',dir=output.parent) as temporary:
         candidate=copy.copy(args);candidate.output=str(Path(temporary)/'report.pptx')
         build_candidate(candidate)
-        validate(candidate.output,args.tasks,args.suhail,args.transactions,args.template or MASTER)
+        validate(candidate.output,args.tasks,args.suhail,args.transactions,args.template or bundled,
+                 args.model,args.digital_pdf,args.digital_data)
         status_styles.publish(candidate.output,output)
     print(str(output)+': programmatic checks passed; render and visual review required')
     return 0

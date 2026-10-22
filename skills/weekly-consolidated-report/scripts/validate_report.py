@@ -15,7 +15,7 @@ from weekly_data import MASTER, approved_styles, transaction_data, field_key, TR
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
 from report_common.table_typography import set_table_sizes, TABLE_PT, check_table_typography
-from weekly_artwork import check_detail_artwork
+from weekly_artwork import check_detail_artwork, all_shapes, DIGITAL_DETAIL_LABEL
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
@@ -48,6 +48,7 @@ def check_table_style(table,pattern,errors):
             fonts={font_signature(run) for p in base.text_frame.paragraphs for run in p.runs if run.text.strip()}
             # Empty reference cells retain formatting in their first run.
             if not fonts:fonts={font_signature(run) for p in base.text_frame.paragraphs for run in p.runs}
+            if not fonts:fonts={(None,TABLE_PT,None)}
             for p in cell.text_frame.paragraphs:
                 for run in p.runs:
                     if run.text.strip() and (run.font.size is None or run.font.size.pt!=TABLE_PT):errors.append('Table font size must be 11 pt')
@@ -71,15 +72,40 @@ def check_navigation(prs,errors):
         if targets!=expected:errors.append('Navigation target differs: '+kind)
         if any(i<=divider_index or i>=len(slides)-1 for i,_ in groups[kind]):errors.append('Detail section order changed')
     if groups['task'] and groups['project'] and groups['task'][-1][0]>=groups['project'][0][0]:errors.append('Task/project order changed')
+    digital=[(i,sl) for i,sl in enumerate(slides) if any(sh.has_table and len(sh.table.columns)==4
+             and len(sh.table.rows)>1 and sh.table.cell(1,0).text=='أساس التقييم' for sh in sl.shapes)]
+    if digital:
+        if len(digital)!=6 or [i for i,_ in digital]!=list(range(digital[0][0],digital[0][0]+6)) or digital[-1][0]!=len(slides)-2:
+            errors.append('Digital detail slides are missing or out of order')
+        if groups['project'] and digital[0][0]<=groups['project'][-1][0]:
+            errors.append('Digital details must follow Suhail details')
+        labels=[sh for sh in all_shapes(divider.shapes) if getattr(sh,'has_text_frame',False)
+                and sh.text==DIGITAL_DETAIL_LABEL]
+        if len(labels)!=1:
+            errors.append('Digital detail divider button is missing')
+        else:
+            links=list(labels[0].element.iter(qn('a:hlinkClick')))
+            if len(links)!=1 or divider.part.rels[links[0].get(qn('r:id'))].target_part!=digital[0][1].part:
+                errors.append('Digital detail divider button has the wrong destination')
     for i,sl in enumerate(slides):
         for sh in helpers.tables(sl,4):
+            if len(sh.table.rows)>1 and sh.table.cell(1,0).text=='أساس التقييم':
+                continue
             title=helpers.table_title(sh)
             start,end=(positions[0],positions[1]) if title in helpers.TASK_SUMMARY_TITLES else (positions[1],positions[2])
             if not start<=i<end:errors.append('Summary table outside its section: '+title)
         for sh in helpers.tables(sl,5):
             if not positions[2]<=i<divider_index:errors.append('Transactions outside their section')
 
-def validate(report,tasks,suhail,transactions,template=MASTER):
+def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',digital_pdf=None,digital_data=None):
+    if model not in ('standard','digital'):
+        raise ValueError('Unknown weekly report model')
+    if model=='digital':
+        if not digital_pdf or not digital_data:
+            raise ValueError('Digital model requires its PDF and reviewed data')
+        from digital_maturity import load_reviewed, check as check_digital
+        reviewed=load_reviewed(digital_data,digital_pdf)
+    else:reviewed=None
     errors=[];validation.package(report,errors)
     final=Presentation(report);master=Presentation(template);set_table_sizes(master)
     check_table_typography(final,errors)
@@ -110,20 +136,39 @@ def validate(report,tasks,suhail,transactions,template=MASTER):
         order={str(c.label):j for j,c in enumerate(next(sh for sh in original.shapes if sh.has_chart).chart.plots[0].categories)}
         rows=sorted([r for r in rows if any(v for v in r[1:])],key=lambda r:order.get(str(r[0]),len(order)))
         validation.chart_metrics(report,str(charts[0].chart.part.partname).lstrip('/'),rows,statuses,errors)
-    if sum(sh.has_chart for sl in final.slides for sh in sl.shapes)!=3:errors.append('Expected exactly three native charts')
+    if sum(sh.has_chart for sl in final.slides for sh in sl.shapes)!=(8 if model=='digital' else 3):
+        errors.append('Unexpected native chart count')
     patterns={helpers.table_title(sh):sh.table for sl in master.slides for sh in helpers.tables(sl,4)}
+    digital_patterns={}
+    if reviewed is not None:
+        from digital_maturity import detail_slides, _detail_table, _challenge_table
+        digital_patterns={current.part:(_detail_table(pattern),_challenge_table(pattern))
+                          for current,pattern in zip(detail_slides(final),detail_slides(master))}
     task_pattern=helpers.detail_tables(helpers.detail_pattern_slides(master,'task')[0],'task')[0].table
     project_pattern=helpers.detail_tables(helpers.detail_pattern_slides(master,'project')[0],'project')[0].table
     transaction_pattern=next(sh.table for sl in master.slides for sh in helpers.tables(sl,5))
     actual={'task':[],'project':[]};summaries=collections.defaultdict(list);trans=[]
     for sl in final.slides:
+        ordered_tables=sorted(helpers.tables(sl),key=lambda shape: shape.top)
+        if any(first.top+first.height>second.top for first,second in zip(ordered_tables,ordered_tables[1:])):
+            errors.append('Tables overlap on slide '+str(helpers.slide_index(final,sl)+1))
         for sh in helpers.tables(sl):
             table=sh.table
+            if sl.part not in digital_patterns and len(table.rows)>=2 and (table.rows[0].height<=0 or table.rows[1].height<=0):
+                errors.append('Table title/header has unresolved auto height on slide '+str(helpers.slide_index(final,sl)+1))
             if sh.top+sh.height>content_bottom(final,sl):errors.append('Table frame reaches footer artwork; rendered correction required')
             if len(table.rows)<3:errors.append('Empty table retained');continue
             rows=[[c.text for c in row.cells] for row in table.rows]
             title=helpers.table_title(sh);headers=rows[1]
-            if len(headers)==6:
+            if model=='digital' and len(headers)==3 and title=='التحديات':
+                pattern=next(x.table for x in helpers.tables(master.slides[4]) if len(x.table.columns)==3)
+                if headers!=[c.text for c in pattern.rows[1].cells]:errors.append('Digital challenge headers changed')
+            elif sl.part in digital_patterns and len(headers) in (2,4):
+                pattern=digital_patterns[sl.part][0 if len(headers)==4 else 1]
+                if pattern is None or headers!=[c.text for c in pattern.rows[1].cells]:
+                    errors.append('Digital detail table headers changed')
+                    continue
+            elif len(headers)==6:
                 kind='task' if 'المهمة' in headers else 'project'
                 pattern=task_pattern if kind=='task' else project_pattern
                 if headers!=[c.text for c in pattern.rows[1].cells]:errors.append('Detail headers changed')
@@ -192,6 +237,14 @@ def validate(report,tasks,suhail,transactions,template=MASTER):
         summary=ps[title] if project else ts[title]
         if identities!=collections.Counter((exact(row[1]),exact(row[2])) for row in summary):errors.append(title+': summary/detail identities disagree')
     if helpers.slide_texts(final.slides[-1])!=helpers.slide_texts(master.slides[-1]):errors.append('Closing slide changed or not last')
+    if reviewed is not None:
+        from digital_maturity import digital_slide
+        digital_index=list(final.slides).index(digital_slide(final))
+        transaction_index=next(i for i,sl in enumerate(final.slides) if 'إجمالي العاملات' in helpers.slide_texts(sl))
+        divider_index=next(i for i,sl in enumerate(final.slides) if {'تفاصيل المهام','تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))
+        if digital_index <= transaction_index or digital_index != divider_index-1:
+            errors.append('Digital-maturity slide is outside its approved position')
+        check_digital(final,report,reviewed,errors)
     check_navigation(final,errors)
     check_detail_artwork(final,master,errors)
     if errors:raise ValueError('\n'.join(dict.fromkeys(errors)))
@@ -200,8 +253,16 @@ def validate(report,tasks,suhail,transactions,template=MASTER):
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('report','tasks','suhail','transactions'):parser.add_argument('--'+name,required=True)
-    parser.add_argument('--template',default=str(MASTER));args=parser.parse_args(argv)
-    print(validate(args.report,args.tasks,args.suhail,args.transactions,args.template))
+    parser.add_argument('--template',default=str(MASTER))
+    parser.add_argument('--model',choices=('standard','digital'),default='standard')
+    parser.add_argument('--digital-pdf')
+    parser.add_argument('--digital-data')
+    args=parser.parse_args(argv)
+    if args.model=='digital' and args.template==str(MASTER):
+        from digital_maturity import MASTER as DIGITAL_MASTER
+        args.template=str(DIGITAL_MASTER)
+    print(validate(args.report,args.tasks,args.suhail,args.transactions,args.template,
+                   args.model,args.digital_pdf,args.digital_data))
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

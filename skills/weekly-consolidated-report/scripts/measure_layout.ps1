@@ -3,7 +3,9 @@ param(
  [Parameter(Mandatory=$true)][string]$Tasks,
  [Parameter(Mandatory=$true)][string]$Suhail,
  [Parameter(Mandatory=$true)][string]$Transactions,
- [string]$Template=(Join-Path $PSScriptRoot '../assets/weekly-report-master.pptx')
+ [string]$Template=(Join-Path $PSScriptRoot '../assets/weekly-report-master.pptx'),
+ [string]$DigitalPdf,
+ [string]$DigitalData
 )
 # Read native row heights after rendering reveals a layout correction is needed.
 # No changes are made to the presentation, inputs, or template.
@@ -11,6 +13,11 @@ $ErrorActionPreference='Stop'
 $hashes=@{}
 foreach($entry in @{report=$Report;tasks=$Tasks;suhail=$Suhail;transactions=$Transactions;template=$Template}.GetEnumerator()) {
  $hashes[$entry.Key]=(Get-FileHash -LiteralPath $entry.Value -Algorithm SHA256).Hash
+}
+if([bool]$DigitalPdf -ne [bool]$DigitalData){throw 'Provide both digital PDF and reviewed data when measuring the digital model'}
+if($DigitalPdf){
+ $hashes.digital_pdf=(Get-FileHash -LiteralPath $DigitalPdf -Algorithm SHA256).Hash
+ $hashes.digital_data=(Get-FileHash -LiteralPath $DigitalData -Algorithm SHA256).Hash
 }
 $ppt=New-Object -ComObject PowerPoint.Application
 $doc=$null;$tables=@{}

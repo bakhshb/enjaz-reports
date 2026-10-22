@@ -1,13 +1,20 @@
 ---
 name: weekly-consolidated-report
-description: Populate the approved Ministry of Hajj and Umrah weekly consolidated PowerPoint report from the final tasks, Suhail projects, and transactions Excel summaries. Use for التقرير الأسبوعي الموحد or تعبئة تقرير الإنجاز الأسبوعي from these three outputs, preserving the supplied template exactly. Does not build the upstream Excel summaries or split the report by sector.
+description: Populate either approved Ministry of Hajj and Umrah weekly consolidated PowerPoint model from the final tasks, Suhail projects, and transactions Excel summaries. The digital-experience model also uses its current PDF. Ask which model to use when the user has not chosen one. Does not build upstream Excel summaries or split by sector.
 ---
 
 # Weekly Consolidated Report
 
 ## Purpose and authority
 
-Create the report from current final Excel inputs and this skill's approved master. Excel controls content; the master controls design. Read [business rules](references/business-rules.md) before generation and [acceptance checks](references/acceptance.md) before validation. Preserve this report's own mappings, ordering, omissions, pagination, and status rules. Sample records and slide counts are not runtime requirements.
+Create the report from current final Excel inputs and one of this skill's approved masters. Excel controls the existing sections; the optional digital-experience PDF controls its added section; the chosen master controls design. Read [business rules](references/business-rules.md) before generation and [acceptance checks](references/acceptance.md) before validation. Preserve this report's own mappings, ordering, omissions, pagination, and status rules. Sample records and slide counts are not runtime requirements.
+
+## Choose the model
+
+When the user sends the Excel files without choosing a model, ask: **«أي نموذج تريد: التقرير الموحد الحالي، أم التقرير الموحد مع نضج التجربة الرقمية؟»** Wait for the choice before generating. If the user already selected one, use it without repeating the question. Do not select a model from the mere presence or absence of a PDF.
+
+- **التقرير الموحد الحالي** (`standard`): the existing master and three Excel inputs, with unchanged business rules.
+- **التقرير الموحد مع نضج التجربة الرقمية** (`digital`): the second bundled master and the same three Excel inputs, plus the current digital-maturity PDF. PDF page one fills the summary; pages two through seven fill the six approved detail slides. Read [digital-maturity mapping](references/digital-maturity.md) only for this model. If the PDF is missing, ask for it before building.
 
 ## Inputs and output
 
@@ -15,11 +22,14 @@ Create the report from current final Excel inputs and this skill's approved mast
 - ملخص_مشاريع_سهيل.xlsx: ورقتا ملخص مشاريع سهيل وتفاصيل مشاريع سهيل.
 - تقرير_المعاملات_الموحد.xlsx: ورقة المعاملات.
 - قالب PowerPoint المعتمد الحالي: `assets/weekly-report-master.pptx`، مع PDF الموافق مرجعًا بصريًا. هذا القالب هو مصدر التصميم المعتمد الحالي.
+- قالب النموذج الرقمي الإضافي: `assets/weekly-report-digital-master.pptx`. يبقى النموذج الحالي متاحًا دون استبدال.
 - At runtime, use the new Excel files attached to the request. Restore the approved PowerPoint template from the assets attached to this skill; the user should not need to attach the template again. Ask for the template only if the skill assets are unavailable or fail integrity verification. Never substitute sample values.
 - Primary output: `تقرير الإنجاز الأسبوعي بتاريخ الإنشاء.pptx`, saved as a new file. Create a matching PDF only when requested. Never modify the inputs or overwrite the original template.
 
 
 Verify the bundled master size `9545257` bytes and SHA-256 `3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5` before use. Never fall back to an earlier master.
+
+For `digital`, verify SHA-256 `d4973a581de96f35e5266d062ea198a9681e5e167386e56067fdf9a5714f77e3` for its bundled master. Do not use the current model's master for this choice.
 
 ## Table typography
 
@@ -33,12 +43,20 @@ Apply every rule in [the report-specific reference](references/business-rules.md
 
 ## Generate and validate
 
-1. Check required workbooks, sheets, headers, and the approved master. Report only the missing or conflicting input that needs resolution.
+1. Check required workbooks, sheets, headers, and the chosen approved master. For `digital`, render page one of the current PDF and extract a review file:
+
+```bash
+uv run scripts/digital_maturity.py --pdf "<digital.pdf>" --output "<review.json>"
+```
+
+Compare every extracted card percentage, sector/bar color and value, sector note, and challenge line with rendered page one. Review the six detail-page titles, four cards per page, every table row, and every challenge against rendered PDF pages two through seven. Correct PDF text-layer reversal, numbers, codes, or ligature errors in the review file; never invent missing values. Set `reviewed` to `true` only after the full comparison. The builder rejects unreviewed data and a PDF hash mismatch. Keep the review file as QA evidence outside the delivered slides.
 2. Generate into a new candidate path:
 
 ```bash
 uv run scripts/build_report.py --tasks "<tasks.xlsx>" --suhail "<suhail.xlsx>" --transactions "<transactions.xlsx>" --output "<candidate.pptx>"
 ```
+
+For the second model, add `--model digital --digital-pdf "<digital.pdf>" --digital-data "<review.json>"`. The standard command remains valid. Pass the same model, PDF and review-file options to `validate_report.py`.
 
 3. The builder includes read-only programmatic validation. Its initial placement is provisional: render before accepting page breaks, table gaps, or footer clearance. Follow the existing continuous-flow rules in the business reference; move complete records and render affected slides again. After any correction, rerun validation. Do not repeat it for unchanged bytes.
 
@@ -48,13 +66,14 @@ uv run scripts/validate_report.py --report "<candidate.pptx>" --tasks "<tasks.xl
 
 The candidate is saved only after programmatic checks pass. Failed builds preserve existing outputs and inputs; output paths cannot alias an input or master. A programmatic pass is not visual acceptance.
 
-The gate also verifies inherited detail-layout artwork against the approved master, visible master graphics, unique shape IDs including grouped children, and all four header buttons' destinations. Keep `scripts/weekly_artwork.py` with the installed generator and validator. A missing logo, footer, button, or layout link is a blocking failure; do not bypass the gate to deliver.
+The gate also verifies inherited detail-layout artwork against the chosen master, visible master graphics, unique shape IDs including grouped children, and the chosen model's header buttons and destinations. Keep `scripts/weekly_artwork.py` with the installed generator and validator. A missing logo, footer, button, or layout link is a blocking failure; do not bypass the gate to deliver.
 
 ## Visual review
 
 Render the validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.
 
 When a Windows PowerPoint render reveals overlapping tables or premature page breaks, `scripts/measure_layout.ps1 -Report <candidate.pptx> -Tasks <tasks.xlsx> -Suhail <suhail.xlsx> -Transactions <transactions.xlsx>` reads actual row heights without modifying the deck. Rerun the same builder with `--measurements <candidate.layout.json>` to repaginate complete records using those heights, then render again. Measurements are bound to the exact input/template hashes. They support the visual decision; they do not establish visual acceptance. Other environments may correct the candidate with available template-preserving tools and rerun validation.
+For the digital model, also pass `-Template <digital-master.pptx> -DigitalPdf <digital.pdf> -DigitalData <review.json>` so the measurement is tied to its PDF and reviewed values.
 
 ## Failure handling
 
