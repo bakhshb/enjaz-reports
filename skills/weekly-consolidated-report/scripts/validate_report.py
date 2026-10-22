@@ -149,8 +149,13 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     transaction_pattern=next(sh.table for sl in master.slides for sh in helpers.tables(sl,5))
     actual={'task':[],'project':[]};summaries=collections.defaultdict(list);trans=[]
     for sl in final.slides:
+        ordered_tables=sorted(helpers.tables(sl),key=lambda shape: shape.top)
+        if any(first.top+first.height>second.top for first,second in zip(ordered_tables,ordered_tables[1:])):
+            errors.append('Tables overlap on slide '+str(helpers.slide_index(final,sl)+1))
         for sh in helpers.tables(sl):
             table=sh.table
+            if sl.part not in digital_patterns and len(table.rows)>=2 and (table.rows[0].height<=0 or table.rows[1].height<=0):
+                errors.append('Table title/header has unresolved auto height on slide '+str(helpers.slide_index(final,sl)+1))
             if sh.top+sh.height>content_bottom(final,sl):errors.append('Table frame reaches footer artwork; rendered correction required')
             if len(table.rows)<3:errors.append('Empty table retained');continue
             rows=[[c.text for c in row.cells] for row in table.rows]

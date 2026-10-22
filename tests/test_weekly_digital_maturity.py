@@ -11,6 +11,7 @@ from pptx import Presentation
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'skills/weekly-consolidated-report/scripts'))
 import digital_maturity as digital
+import build_report as weekly_build
 
 
 class DigitalMaturityTests(unittest.TestCase):
@@ -122,6 +123,21 @@ class DigitalMaturityTests(unittest.TestCase):
         code = digital._detail_table(slide).cell(3, 3)
         self.assertEqual(digital._plain(code.text), 'W-01')
         self.assertEqual(code.text_frame.paragraphs[0]._p.get_or_add_pPr().get('rtl'), '0')
+
+    def test_summary_tables_include_auto_height_headers_in_spacing(self):
+        prs = Presentation(digital.MASTER)
+        slide = prs.slides[1]
+        patterns = list(weekly_build.builder.tables(slide))
+        sections = [(weekly_build.builder.table_title(pattern),
+                     [['1', 'مهمة تجريبية', 'قطاع تجريبي', 'ملاحظة تجريبية']], pattern)
+                    for pattern in patterns]
+        weekly_build.flow(prs, slide, sections, summary=True)
+        tables = sorted(weekly_build.builder.tables(slide), key=lambda shape: shape.top)
+        self.assertEqual(len(tables), len(patterns))
+        self.assertTrue(all(table.table.rows[0].height > 0 and table.table.rows[1].height > 0
+                            for table in tables))
+        self.assertTrue(all(first.top + first.height < second.top
+                            for first, second in zip(tables, tables[1:])))
 
 
 if __name__ == '__main__':

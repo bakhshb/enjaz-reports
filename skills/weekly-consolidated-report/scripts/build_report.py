@@ -23,6 +23,19 @@ from weekly_artwork import next_shape_id, prepare_navigation
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
+def header_heights(pattern):
+    """Resolve auto-height title/header rows from the approved table frame."""
+    rows=list(pattern.table.rows)
+    heights=[row.height or 0 for row in rows[:2]]
+    missing=[index for index,height in enumerate(heights) if not height]
+    if missing:
+        residual=pattern.height-sum(row.height or 0 for row in rows)
+        if residual<=0:raise ValueError('Cannot resolve approved table header heights')
+        share,residue=divmod(residual,len(missing))
+        for index in missing:
+            heights[index]=share+(residue if index==missing[-1] else 0)
+    return heights
+
 def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     """Initial placement only; final visual acceptance must confirm pagination."""
     seed._element.set('showMasterSp','1')
@@ -39,7 +52,8 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     for sh in list(builder.tables(seed)):remove(sh)
     for title,records,pattern in sections:
         if not records:continue
-        fixed=sum(r.height for r in list(pattern.table.rows)[:2])
+        approved_header=header_heights(pattern)
+        fixed=sum(approved_header)
         base=builder._body_base_height(pattern.table,2)
         if measurements is not None and title not in measurements:raise ValueError('Missing layout measurements: '+title)
         measured=(measurements or {}).get(title)
@@ -63,6 +77,8 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
                 for cell,value in zip(row.cells,values):set_cell_exact(cell,value)
             if summary:
                 format_table_updates(sh.table,bullet_style,paragraph_items=True)
+            for row,height in zip(sh.table.rows,approved_header):row.height=height
+            sh.height=sum(row.height for row in sh.table.rows)
             if fixed_heights:
                 for row,height in zip(sh.table.rows,fixed_heights+heights):row.height=height
                 sh.height=sum(row.height for row in sh.table.rows)
