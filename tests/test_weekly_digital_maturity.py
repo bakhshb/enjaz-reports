@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'skills/weekly-consolidated-report/scripts'))
 import digital_maturity as digital
 import build_report as weekly_build
+from weekly_artwork import prepare_navigation, DIGITAL_DETAIL_LABEL
+from pptx.oxml.ns import qn
 
 
 class DigitalMaturityTests(unittest.TestCase):
@@ -130,6 +132,27 @@ class DigitalMaturityTests(unittest.TestCase):
         code = digital._detail_table(slide).cell(3, 3)
         self.assertEqual(digital._plain(code.text), 'W-01')
         self.assertEqual(code.text_frame.paragraphs[0]._p.get_or_add_pPr().get('rtl'), '0')
+
+    def test_all_indicator_details_appear_in_their_section(self):
+        for number, page in enumerate(self.data['detail_pages'], 2):
+            page['title'] = f'تفاصيل الجهة {number}'
+            page['rows'][1][2] = f'مهمة الصفحة {number}'
+        data = self.load()
+        prs = Presentation(digital.MASTER)
+        digital.populate(prs, data)
+        prepare_navigation(prs)
+        slides = digital.detail_slides(prs)
+        self.assertEqual([list(prs.slides).index(slide) for slide in slides], list(range(11, 17)))
+        for slide, page in zip(slides, data['detail_pages']):
+            table = digital._detail_table(slide)
+            self.assertEqual(table.cell(0, 0).text, page['title'])
+            self.assertEqual(table.cell(3, 2).text, page['rows'][1][2])
+        divider = prs.slides[5]
+        button = next(shape for shape in divider.shapes if getattr(shape, 'has_text_frame', False)
+                      and shape.text == DIGITAL_DETAIL_LABEL)
+        links = list(button.element.iter(qn('a:hlinkClick')))
+        self.assertEqual(len(links), 1)
+        self.assertEqual(divider.part.rels[links[0].get(qn('r:id'))].target_part, slides[0].part)
 
     def test_summary_tables_include_auto_height_headers_in_spacing(self):
         prs = Presentation(digital.MASTER)
