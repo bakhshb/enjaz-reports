@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import warnings
 
 from pptx import Presentation
 from pptx.oxml.ns import qn
@@ -127,15 +128,31 @@ def measure(specs, template, styles, bullets, engine='auto'):
         estimates[key] = ([r.height for r in list(sh.table.rows)[:2]], heights)
     if not native or not estimates:
         return estimates
-    with tempfile.TemporaryDirectory(prefix='monday-layout-') as temporary:
-        path = Path(temporary) / 'probe.pptx'
-        probe.save(path)
-        result = subprocess.run(['powershell.exe','-NoProfile','-File',str(Path(__file__).with_name('measure_rows.ps1')),str(path)], capture_output=True, text=True, timeout=60)
-        if result.returncode:
-            raise RuntimeError('Native PowerPoint row measurement failed: ' + result.stdout + result.stderr)
-        actual = json.loads(path.with_suffix('.json').read_text(encoding='utf-8-sig'))
-    return {key: ([max(int(Pt(v)), estimates[key][0][i]) for i,v in enumerate(values[:2])],
-                  [max(int(Pt(v + 2)), int(Pt(20))) for v in values[2:]]) for key, values in actual.items()}
+    try:
+        with tempfile.TemporaryDirectory(prefix='monday-layout-') as temporary:
+            path = Path(temporary) / 'probe.pptx'
+            probe.save(path)
+            result = subprocess.run(['powershell.exe','-NoProfile','-NonInteractive',
+                                     '-ExecutionPolicy','Bypass','-File',
+                                     str(Path(__file__).with_name('measure_rows.ps1')),str(path)],
+                                    capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=60)
+            if result.returncode:
+                raise ValueError((result.stdout + result.stderr).strip() or f'PowerShell exit {result.returncode}')
+            actual = json.loads(path.with_suffix('.json').read_text(encoding='utf-8-sig'))
+        if not isinstance(actual,dict) or set(actual)!=set(estimates):
+            raise ValueError('PowerPoint measurements do not cover every current table')
+        for key,values in actual.items():
+            if (not isinstance(values,list) or len(values)!=sum(map(len,estimates[key]))
+                    or any(type(v) not in (int,float) or not math.isfinite(v) or v<=0 for v in values)):
+                raise ValueError('Invalid PowerPoint row measurements: '+key)
+        return {key: ([max(int(Pt(v)), estimates[key][0][i]) for i,v in enumerate(values[:2])],
+                      [max(int(Pt(v + 2)), int(Pt(20))) for v in values[2:]]) for key, values in actual.items()}
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError) as exc:
+        message='Native PowerPoint row measurement failed: '+str(exc)
+        if engine=='native':
+            raise RuntimeError(message) from exc
+        warnings.warn(message+'; using conservative estimates. Render and inspect before delivery.', RuntimeWarning)
+        return estimates
 
 
 def pack(sections, start, bottom, gap=int(Pt(9)), continuation=None):
