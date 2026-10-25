@@ -96,6 +96,15 @@ class WeeklyProductionTests(unittest.TestCase):
             for sh in weekly.builder.tables(sl,5):records.extend(c.text for row in list(sh.table.rows)[2:] for c in row.cells)
         self.assertIn('000123',records)
 
+    def test_every_table_is_rtl_and_ltr_corruption_is_rejected(self):
+        prs=Presentation(self.deck)
+        tables=[sh.table for sl in prs.slides for sh in weekly.builder.tables(sl)]
+        self.assertTrue(all(t._tbl.tblPr.get('rtl')=='1' for t in tables))
+        tables[0]._tbl.tblPr.set('rtl','0')
+        prs.save(self.deck);before=self.deck.read_bytes()
+        with self.assertRaisesRegex(ValueError,'Table direction must be RTL'):self.check()
+        self.assertEqual(before,self.deck.read_bytes())
+
     def test_chart_cache_corruption_rejected(self):
         def change(data):
             root=ET.fromstring(data)

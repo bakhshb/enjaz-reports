@@ -13,7 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as builder
 from report_common import status_styles
-from report_common.table_typography import set_table_sizes
+from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
 from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom
 
@@ -211,6 +211,7 @@ def build_candidate(args):
                 for t in sh._element.findall('.//'+qn('a:t')):t.text=str(i)
     prepare_navigation(prs)
     set_table_sizes(prs)
+    set_table_directions(prs)
     deck=Path(args.output);prs.save(deck)
     with tempfile.TemporaryDirectory() as td:
         with zipfile.ZipFile(deck) as z:z.extractall(td)

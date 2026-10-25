@@ -33,6 +33,8 @@ For `digital`, verify SHA-256 `4212057961c371b3a63b8a5676ebe42582ab4d5db98fff983
 
 ## Table typography
 
+Every PowerPoint table must use native right-to-left (RTL) table direction in both models, including support, transactions, digital summary/detail/challenge tables and all continuations. Right-aligned text alone is insufficient. Keep numbering at the right; convert LTR-stored patterns together with their column widths and merged cells so every value stays with its field. Reject output tables without RTL enabled. Latin identifiers may retain LTR text within an RTL table.
+
 All table text is **11 pt**, including table titles, headers, data, status cells and notes (and the Monday agenda). Apply this explicit size even when the master stores 10 or 14 pt. Preserve Abar, bold emphasis, RTL, fills and column widths. Adjust row heights and pagination when needed; never reduce the font to make a table fit.
 
 Apply the per-column horizontal alignment in the business rules to **summary and detail tables**, including headers: sector/dates/status centered; task/project names, notes, updates, support text and challenges right-aligned.
@@ -69,6 +71,8 @@ The candidate is saved only after programmatic checks pass. Failed builds preser
 The gate also verifies inherited detail-layout artwork against the chosen master, visible master graphics, unique shape IDs including grouped children, and the chosen model's header buttons and destinations. Keep `scripts/weekly_artwork.py` with the installed generator and validator. A missing logo, footer, button, or layout link is a blocking failure; do not bypass the gate to deliver.
 
 ## Visual review
+
+For LibreOffice PDF previews, use `uv run ../report_common/render.py --report "<candidate.pptx>" --output "<candidate.pdf>"`. The shared exporter uses a disposable copy with the RTL column order materialized for LibreOffice; the editable PPTX remains unchanged. Inspect every summary, detail, transaction and digital table: numbering must visibly appear on the right. Do not accept the RTL property alone. `tests/check_rendered_pdf.py` checks numbering using actual PDF coordinates, alongside fonts and page counts.
 
 Render the validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.
 

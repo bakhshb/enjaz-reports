@@ -6,7 +6,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Pt
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'skills'))
-from report_common.table_typography import set_table_sizes, all_tables, check_table_typography
+from report_common.table_typography import set_table_sizes, set_table_directions, all_tables, check_table_typography
 
 class TableTypographyTests(unittest.TestCase):
     def test_monday_topics_only_use_14_pt_including_headers_and_defaults(self):
@@ -23,6 +23,7 @@ class TableTypographyTests(unittest.TestCase):
                         self.assertEqual(p.font.size.pt,expected)
                         self.assertTrue(all(r.font.size.pt==expected for r in p.runs))
         self.assertTrue(found)
+        set_table_directions(prs)
         errors=[];check_table_typography(prs,errors,agenda_pt=14)
         self.assertEqual(errors,[])
 
@@ -44,6 +45,7 @@ class TableTypographyTests(unittest.TestCase):
                             self.assertEqual(p.font.size.pt,11)
                             for r in p.runs:self.assertEqual(r.font.size.pt,11)
                             if i and t.cell(1,j).text in expected:self.assertEqual(p.alignment,expected[t.cell(1,j).text])
+            set_table_directions(prs)
             errors=[];check_table_typography(prs,errors);self.assertEqual(errors,[])
 
     def test_gate_rejects_size_and_alignment_corruption(self):

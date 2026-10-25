@@ -4,6 +4,7 @@
 # ///
 """Weekly-source handoff and independent sector identity checks."""
 import contextlib
+from copy import deepcopy
 import io
 import json
 from pathlib import Path
@@ -12,6 +13,7 @@ import tempfile
 import unittest
 import zipfile
 from pptx import Presentation
+from openpyxl import load_workbook
 
 import run_weekly_workflow as workflow
 
@@ -48,6 +50,60 @@ class WeeklyChainTests(unittest.TestCase):
         self.assertTrue(self.check())
         data=qa.actual_records(Presentation(self.deck))
         self.assertEqual(data['المعاملات المتأخرة'][0][0],'000123')
+
+    def test_transaction_table_starts_at_same_height_as_other_sections(self):
+        tops={}
+        for slide in Presentation(self.deck).slides:
+            tables=[sh for sh in slide.shapes if sh.has_table]
+            if tables:
+                titles={workflow.splitter.table_title(workflow.splitter.table_rows(sh)) for sh in tables}
+                section='transactions' if 'المعاملات المتأخرة' in titles else 'tasks' if titles & set(workflow.splitter.TASK_TITLE.values()) else 'projects'
+                tops.setdefault(section,[]).append(min(sh.top for sh in tables))
+        self.assertEqual(set(tops),{'transactions','tasks','projects'})
+        self.assertTrue(all(top==tops['tasks'][0] for values in tops.values() for top in values),tops)
+
+    def test_transaction_position_corruption_rejected(self):
+        prs=Presentation(self.deck)
+        table=next(sh for sl in prs.slides for sh in sl.shapes if sh.has_table
+                   and workflow.splitter.table_title(workflow.splitter.table_rows(sh))=='المعاملات المتأخرة')
+        table.top+=100000;prs.save(self.deck)
+        self.assertFalse(self.check())
+
+    def test_transaction_title_is_bold_and_nonbold_is_rejected(self):
+        prs=Presentation(self.deck)
+        table=next(sh.table for sl in prs.slides for sh in sl.shapes if sh.has_table
+                   and workflow.splitter.table_title(workflow.splitter.table_rows(sh))=='المعاملات المتأخرة')
+        runs=[run for cell in table.rows[0].cells for p in cell.text_frame.paragraphs
+              for run in p.runs if run.text.strip()]
+        self.assertTrue(runs)
+        self.assertTrue(all(run.font.bold for run in runs))
+        for run in runs:run.font.bold=False
+        prs.save(self.deck);self.assertFalse(self.check())
+
+    def test_transaction_continuations_start_at_section_top(self):
+        prs=Presentation(self.master)
+        source=prs.slides[workflow.splitter.locate(prs)['trans']]
+        table=workflow.splitter.find_tables(source,['رقم المعاملة'])[0][0].table
+        row=list(table.rows)[-1]._tr
+        for _ in range(60):table._tbl.append(deepcopy(row))
+        master=self.path/'large-source.pptx';prs.save(master);out=self.path/'large'
+        wb=load_workbook(self.transactions);ws=wb['المعاملات'];rows=list(ws.values)
+        header=next(i for i,r in enumerate(rows) if 'رقم المعاملة' in r)
+        record=next(r for r in rows[header+1:] if r[rows[header].index('رقم المعاملة')])
+        for _ in range(60):ws.append(record)
+        transactions=self.path/'large-transactions.xlsx';wb.save(transactions)
+        workflow.require(run(SECTOR/'split_report.py',master,'--transactions',transactions,'--outdir',out,'--no-refine'))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(qa.check(out,master,transactions))
+        tables=[sh for sl in Presentation(next(out.glob('*.pptx'))).slides for sh in sl.shapes
+                if sh.has_table and workflow.splitter.table_title(workflow.splitter.table_rows(sh))=='المعاملات المتأخرة']
+        self.assertGreater(len(tables),1)
+        self.assertTrue(all(sh.top==workflow.splitter.TOP_Y for sh in tables))
+        for shape in tables:
+            runs=[run for cell in shape.table.rows[0].cells for p in cell.text_frame.paragraphs
+                  for run in p.runs if run.text.strip()]
+            self.assertTrue(runs)
+            self.assertTrue(all(run.font.bold for run in runs))
 
     def test_cover_corruption_rejected(self):
         prs=Presentation(self.deck)

@@ -209,38 +209,21 @@ def build(input_path, output_path):
         r += 1
     r += 1
 
-    style_title(ws1, r, 4, "المهام المكتملة")
-    r += 1
-    style_header_row(ws1, r, ["#", "المهمة", "القطاع", "ملاحظات"])
-    r += 1
-    for i, t in enumerate(completed_tasks, start=1):
-        notes = t.get(c_notes) if c_notes else None
-        notes = None if pd.isna(notes) else notes
-        write_row(ws1, r, [i, t[c_task], t[c_sector], notes], wrap_cols={2, 3, 4}, center_cols={1})
+    for title, tasks in [
+        ("المهام المكتملة", completed_tasks),
+        ("المهام المتأخرة", delayed_tasks),
+        ("المهام المعلقة", suspended_tasks),
+    ]:
+        style_title(ws1, r, 4, title)
         r += 1
-    r += 1
-
-    style_title(ws1, r, 4, "المهام المتأخرة")
-    r += 1
-    style_header_row(ws1, r, ["#", "المهمة", "القطاع", "ملاحظات"])
-    r += 1
-    for i, t in enumerate(delayed_tasks, start=1):
-        notes = t.get(c_notes) if c_notes else None
-        notes = None if pd.isna(notes) else notes
-        write_row(ws1, r, [i, t[c_task], t[c_sector], notes], wrap_cols={2, 3, 4}, center_cols={1})
+        style_header_row(ws1, r, ["#", "المهمة", "القطاع", "ملاحظات"])
         r += 1
-    r += 1
-
-    style_title(ws1, r, 4, "المهام المعلقة")
-    r += 1
-    style_header_row(ws1, r, ["#", "المهمة", "القطاع", "ملاحظات"])
-    r += 1
-    for i, t in enumerate(suspended_tasks, start=1):
-        notes = t.get(c_notes) if c_notes else None
-        notes = None if pd.isna(notes) else notes
-        write_row(ws1, r, [i, t[c_task], t[c_sector], notes], wrap_cols={2, 3, 4}, center_cols={1})
+        for i, t in enumerate(tasks, start=1):
+            notes = t.get(c_notes) if c_notes else None
+            notes = None if pd.isna(notes) else notes
+            write_row(ws1, r, [i, t[c_task], t[c_sector], notes], wrap_cols={2, 3, 4}, center_cols={1})
+            r += 1
         r += 1
-    r += 1
 
     style_title(ws1, r, 4, "طلبات الدعم")
     r += 1

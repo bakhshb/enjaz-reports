@@ -10,7 +10,7 @@ Content checks (the mandatory ones from the brief):
   * no empty table anywhere
   * no other sector's name appears in any deck
 """
-import argparse, glob, hashlib, json, os, posixpath, shutil, subprocess, sys, tempfile, zipfile
+import argparse, glob, hashlib, json, os, posixpath, subprocess, sys, tempfile, zipfile
 from collections import defaultdict
 from pathlib import Path
 from xml.etree import ElementTree as ET
@@ -18,8 +18,7 @@ from pptx import Presentation
 from pptx.oxml.ns import qn
 import split_report as splitter
 from report_common.table_typography import check_table_typography
-
-SOFFICE = shutil.which('soffice')
+from report_common.render import export_pdf
 
 def cell_text(c):
     s = ''
@@ -36,14 +35,15 @@ def record_text(value):
     return str(value or '').replace('\r\n','\n').replace('\v','\n').strip()
 
 
-TASK_FIELDS=('المهمة','القطاع','ملاحظات')
+TASK_FIELDS=('المهمة','ملاحظات')
 PROJECT_FIELDS=('اسم المشروع','تاريخ البداية','تاريخ النهاية','الحالة','ما تم حتى تاريخه')
 FIELDS={**{t:TASK_FIELDS for t in splitter.TASK_TITLE.values()},
         **{t:PROJECT_FIELDS for t in splitter.PROJ_TITLE.values()},
-        'المهام على المخطط':('المهمة','القطاع','تاريخ الإنجاز المخطط','الحالة','ملاحظات'),
-        'طلبات الدعم':('المهمة','القطاع','طلب الدعم'),
-        'أبرز التحديثات':('المشروع','القطاع','التحديث'),
-        'التحديات':('المشروع','القطاع','التحدي'),
+        'المهام على المخطط':('المهمة','تاريخ الإنجاز المخطط','ملاحظات'),
+        'المهام المتأخرة':('المهمة','تاريخ الإنجاز المخطط','ملاحظات'),
+        'طلبات الدعم':('المهمة','طلب الدعم'),
+        'أبرز التحديثات':('المشروع','التحديث'),
+        'التحديات':('المشروع','التحدي'),
         'المعاملات المتأخرة':splitter.TRANS_FIELDS}
 
 
@@ -57,7 +57,7 @@ def expected_records(master,transactions=None,aliases=None,only=None):
     result=defaultdict(lambda:defaultdict(list))
     for item in tasks:
         sector=canonical(item['sector']); title=splitter.TASK_TITLE[item['status']]
-        values = (item['text'], sector, item['planned_date'], item['status'], item['note']) if item['status']=='على المخطط' else (item['text'], sector, item['note'])
+        values = (item['text'], item['planned_date'], item['note']) if item['status'] in ('متأخرة','على المخطط') else (item['text'], item['note'])
         result[sector][title].append(tuple(map(record_text,values)))
     for item in projects:
         sector=canonical(item['sector']); title=splitter.PROJ_TITLE[item['status']]
@@ -65,7 +65,7 @@ def expected_records(master,transactions=None,aliases=None,only=None):
     for items,title,name in [(updates,'أبرز التحديثات','project'),(support,'طلبات الدعم','name'),(challenges,'التحديات','name')]:
         for item in items:
             sector=canonical(item['sector'])
-            result[sector][title].append(tuple(map(record_text,(item[name],sector,item['text']))))
+            result[sector][title].append(tuple(map(record_text,(item[name],item['text']))))
     for item in trans:
         sector=canonical(item['sector']); headers=[splitter.field_key(h) for h in item['head']]
         result[sector]['المعاملات المتأخرة'].append(tuple(record_text(item['row'][headers.index(splitter.field_key(h))]) for h in splitter.TRANS_FIELDS))
@@ -74,6 +74,7 @@ def expected_records(master,transactions=None,aliases=None,only=None):
 
 def actual_records(prs):
     result=defaultdict(list)
+    task_width=None
     for slide in prs.slides:
         for shape in slide.shapes:
             if not shape.has_table:continue
@@ -81,7 +82,23 @@ def actual_records(prs):
             title=splitter.table_title(rr)
             if title not in FIELDS:raise ValueError(f'Unexpected output table: {title}')
             if len(rr)<3:raise ValueError(f'Empty output table: {title}')
+            if title=='المعاملات المتأخرة' and abs(shape.top-splitter.TOP_Y)>2:
+                raise ValueError('Transaction table must start at the common section top')
             headers=[splitter.field_key(h) for h in rr[1]]
+            if 'القطاع' in headers:raise ValueError('Sector column must be omitted from sector report tables')
+            if title=='المهام المعلقة' and 'التحديث' in headers:
+                raise ValueError('Suspended tasks must use the notes header')
+            if title in (*splitter.TASK_TITLE.values(),'طلبات الدعم'):
+                width=shape.table.columns[headers.index('المهمة')].width
+                if task_width is not None and abs(width-task_width)>2:
+                    raise ValueError('Task column widths must match across sector task tables')
+                task_width=width
+            if title in ('المهام المتأخرة','المهام على المخطط') and headers != [splitter.field_key(h) for h in ('#',*FIELDS[title])]:
+                raise ValueError(f'{title}: expected task, planned date and notes without status')
+            if title in ('المهام على المخطط','المعاملات المتأخرة') and any(not run.font.bold
+                    for cell in shape.table.rows[0].cells for p in cell.text_frame.paragraphs
+                    for run in p.runs if run.text.strip()):
+                raise ValueError(f'{title}: table title must be bold')
             for row in rr[2:]:
                 values=[]
                 for field in FIELDS[title]:
@@ -110,7 +127,7 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
     for it in man:
         path = it.get('out') or os.path.join(outdir, 'التقرير الأسبوعي - %s.pptx' % it['sector'])
         prs = Presentation(path)
-        rows, titles, empty, geometry, blob, sector_cells = 0, [], [], [], '', []
+        rows, titles, empty, geometry = 0, [], [], []
         for s in prs.slides:
             for sh in s.shapes:
                 if sh.has_table:
@@ -121,15 +138,6 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
                     body = len(rr) - 2
                     rows += body
                     if body == 0: empty.append(titles[-1])
-                    if len(rr) > 1 and 'القطاع' in rr[1]:
-                        sector_col = rr[1].index('القطاع')
-                        sector_cells.extend(
-                            r[sector_col] for r in rr[2:] if len(r) > sector_col
-                        )
-                    for r in rr:
-                        blob += ' | '.join(r)
-                elif sh.has_text_frame:
-                    blob += sh.text_frame.text + ' | '
         over = []
         for si, sld in enumerate(prs.slides, 1):
             for sh in sld.shapes:
@@ -146,13 +154,10 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
                 if actual.get(title,[])!=source_tables.get(title,[]):
                     record_errors.append(f'{title}: records/status/order differ from master')
         except ValueError as exc:record_errors.append(str(exc))
-        sector_blob = ' | '.join(sector_cells)
-        leaks = sorted(n for n in names - {it['sector']} if n in sector_blob)
-        good = rows == expected and not leaks and not empty and not over and not geometry and not record_errors
+        good = rows == expected and not empty and not over and not geometry and not record_errors
         ok &= good
         print(('OK   ' if good else 'CHECK') +
               ' | %-42s rows=%-3d expected=%-3d tables=%d' % (it['sector'], rows, expected, len(titles)))
-        if leaks: print('        leaked sectors:', leaks)
         if empty: print('        empty tables:', empty)
         if geometry: print('        inconsistent table heights:', geometry)
         if over: print('        table runs into the footer on:', sorted(set(over)))
@@ -202,28 +207,16 @@ def render(outdir, qadir):
     os.makedirs(qadir, exist_ok=True)
     for f in sorted(glob.glob(os.path.join(outdir, '*.pptx'))):
         base = os.path.splitext(os.path.basename(f))[0]
-        shutil.copy(f, 't.pptx')
-        if os.path.exists('t.pdf'): os.remove('t.pdf')
-        if not SOFFICE:
-            raise RuntimeError('soffice is required to render QA previews')
-        pdf_dir = tempfile.mkdtemp(prefix='qa-pdf-')
-        profile_dir = tempfile.mkdtemp(prefix='qa-soffice-')
-        subprocess.run([SOFFICE, '-env:UserInstallation=file://' + profile_dir,
-                        '--headless', '--convert-to', 'pdf',
-                        '--outdir', pdf_dir, 't.pptx'],
-                       capture_output=True, check=True)
-        pdf_path = os.path.join(pdf_dir, 't.pdf')
-        subprocess.run(['pdftoppm', '-jpeg', '-r', '60', pdf_path, 'pg'], check=True)
-        pages = sorted(glob.glob('pg-*.jpg'), key=lambda x: int(x.rsplit('-', 1)[1].split('.')[0]))
-        ims = [Image.open(p) for p in pages]
-        w = sum(i.width for i in ims); h = max(i.height for i in ims)
-        c = Image.new('RGB', (w, h), 'white'); x = 0
-        for i in ims: c.paste(i, (x, 0)); x += i.width
-        c.save(os.path.join(qadir, base + '.jpg'), quality=80)
-        for p in pages: os.remove(p)
-        os.remove('t.pptx')
-        shutil.rmtree(pdf_dir, ignore_errors=True)
-        shutil.rmtree(profile_dir, ignore_errors=True)
+        with tempfile.TemporaryDirectory(prefix='qa-pdf-') as temporary:
+            root = Path(temporary)
+            pdf_path = export_pdf(f, root/'report.pdf')
+            subprocess.run(['pdftoppm', '-jpeg', '-r', '60', str(pdf_path), str(root/'pg')], check=True)
+            pages = sorted(root.glob('pg-*.jpg'), key=lambda p: int(p.stem.rsplit('-', 1)[1]))
+            ims = [Image.open(p) for p in pages]
+            w = sum(i.width for i in ims); h = max(i.height for i in ims)
+            c = Image.new('RGB', (w, h), 'white'); x = 0
+            for i in ims: c.paste(i, (x, 0)); x += i.width; i.close()
+            c.save(os.path.join(qadir, base + '.jpg'), quality=80)
         print('rendered', base)
 
 def validate(outdir, master=None):

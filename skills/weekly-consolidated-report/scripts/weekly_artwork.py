@@ -82,7 +82,7 @@ def prepare_navigation(prs):
                 link.set('action', 'ppaction://hlinksldjump')
                 props.insert(0, link)
     details = [sl for sl in prs.slides if any(sh.has_table and len(sh.table.columns) == 4
-               and len(sh.table.rows) > 1 and sh.table.cell(1, 0).text == 'أساس التقييم'
+               and len(sh.table.rows) > 1 and any(c.text == 'أساس التقييم' for c in sh.table.rows[1].cells)
                for sh in sl.shapes)]
     if details:
         divider = next(sl for sl in prs.slides if {'تفاصيل المهام', 'تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))

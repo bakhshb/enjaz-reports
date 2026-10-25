@@ -52,6 +52,7 @@ def mutate_zip(path,part,change):
 def table(slide,title,headers,records,top=1):
     shape=slide.shapes.add_table(len(records)+2,len(headers),Inches(.3),Inches(top),Inches(8),Inches(.4*(len(records)+2)))
     t=shape.table
+    t._tbl.tblPr.set('rtl','1')
     t.cell(0,0).merge(t.cell(0,len(headers)-1));t.cell(0,0).text=title
     for i,h in enumerate(headers):t.cell(1,i).text=h
     for r,values in enumerate(records,2):
@@ -80,7 +81,7 @@ def synthetic_sector_files(root):
     master=root/'master.pptx';src.save(master)
     out=root/'sectors';out.mkdir()
     prs=Presentation();sl=prs.slides.add_slide(prs.slide_layouts[6])
-    table(sl,'المهام المكتملة',['#','المهمة','القطاع','ملاحظات'],[[r[0],r[1],sector,r[5]] for r in task_rows])
+    table(sl,'المهام المكتملة',['#','المهمة','ملاحظات'],[[r[0],r[1],r[5]] for r in task_rows])
     label(sl,sector)
     sl=prs.slides.add_slide(prs.slide_layouts[6])
     table(sl,'المشاريع المكتملة',gate.SUHAIL_HEADERS,[['1','مشروع أول','01/01/1448','01/02/1448','مكتملة','تحديث']])
@@ -417,7 +418,7 @@ class SectorGateTests(unittest.TestCase):
 
     def test_duplicate_record_with_same_count_fails(self):
         prs=Presentation(self.deck);t=prs.slides[0].shapes[0].table
-        for c in range(1,4):t.cell(3,c).text=t.cell(2,c).text
+        for c in range(1,len(t.columns)):t.cell(3,c).text=t.cell(2,c).text
         prs.save(self.deck);self.assertFalse(self.check())
 
     def test_wrong_status_table_fails(self):
@@ -426,7 +427,7 @@ class SectorGateTests(unittest.TestCase):
 
     def test_swapped_rows_fail(self):
         prs=Presentation(self.deck);t=prs.slides[0].shapes[0].table
-        for c in range(1,4):
+        for c in range(1,len(t.columns)):
             a,b=t.cell(2,c).text,t.cell(3,c).text;t.cell(2,c).text=b;t.cell(3,c).text=a
         prs.save(self.deck);self.assertFalse(self.check())
 

@@ -117,7 +117,7 @@ The master changes shape from week to week, so treat these as optional:
     
     version has the extra column is cloned from that table, so the sector deck keeps
     
-    it. `التحديات` and `أبرز التحديثات` are also read independently from Suhail
+    its content but labels the output column `ملاحظات`. `التحديات` and `أبرز التحديثات` are also read independently from Suhail
 
     summary pages and appear only when that sector has rows.
     
@@ -127,6 +127,10 @@ If detection fails the script stops with a clear message — fix the keys rather
 than falling back to hard-coded indices.
 
 ## Deck structure per sector
+
+Omit the `القطاع` column from every output table in sector reports, including tasks, support, Suhail updates/challenges and any legacy transaction table that contains it. Continue using the source sector values internally to assign records to the correct report. Keep the sector name on the cover. Remove the column before measuring/paginating, redistribute its width across the remaining fields without shrinking fonts, and preserve all records, dates, notes, numbering, status formatting and RTL. This exception applies only to sector reports; consolidated and Monday reports retain their own columns.
+
+Keep the `المهمة` column exactly the same width in every task-status and support table, using the on-plan task-detail pattern after removing sector/status as the reference. Keep every table at its full content width. Give the space of a missing date column to `ملاحظات` (or `طلب الدعم` in the support table), so notes are wider in tables without dates. Normalize widths before measuring and paginating, including continuation tables. QA rejects inconsistent task-column widths. Label the suspended-task note column `ملاحظات`, preserving the source `التحديث` text.
 
 Cover → ملخص المهام → ملخص مشاريع سهيل → المعاملات → شكرا.
 
@@ -164,6 +168,10 @@ no per-sector totals for completed / on-plan / not-started transactions, so
 computing them would be fabrication. Recentre the surviving gold number in the
 
 KPI card and delete the rest of the card's contents.
+
+Start the transactions table at the same vertical content origin as task and project tables (`TOP_Y = 1780255` EMU), directly below the KPI area. Do not reuse its lower vertical position from the consolidated master. Keep its horizontal position and width; continuation tables also start at this common top. QA rejects a misplaced transaction table.
+
+Make the title `المعاملات المتأخرة` explicitly bold on every page, including continuations. QA rejects a nonbold title. Preserve the body and column-header formatting.
 
 ## Sector names
 
@@ -261,6 +269,8 @@ These all cost a rebuild once. They are handled in the scripts; keep them handle
 
 ## Before delivering
 
+The refinement and QA render paths use the shared `report_common/render.py` exporter. It materializes RTL column order only in a disposable LibreOffice export copy, keeping the editable source PPTX unchanged. Verify numbering on the right in every rendered table; an RTL XML property alone is insufficient. Run `tests/check_rendered_pdf.py` on exported PDF/PPTX pairs to check actual numbering coordinates, fonts and page counts.
+
 First smoke-test one sector through `uv run` with `--only <name>`. Then run the full build and `qa_report.py` through `uv run` using the commands above. Confirm: sector name right on every cover; totals match the
 
 master's detail slides; each table holds only its own status; no empty tables; no
@@ -288,19 +298,21 @@ with, and the footer check reads the safety margin as well as the content.
 
 - Verify actual font usage in the exported PDF, not just font declarations in PowerPoint. On the validated Windows host, PowerPoint SaveAs PDF substituted Calibri even for the unchanged approved master; Adobe PDFMaker preserved Abar and matches the supplied reference export route. If an exporter substitutes fonts, use a verified available exporter and repeat the visual check. Never mark font acceptance passed from successful export alone.
 
-## Planned dates for on-plan tasks
+## Planned dates for delayed and on-plan tasks
 
-For `المهام على المخطط` only, clone the master's task-detail table and retain its six-column order: `# | المهمة | القطاع | تاريخ الإنجاز المخطط | الحالة | ملاحظات`. Copy the planned date from that task's detail row exactly, including blank dates. Retain detail typography, column proportions, and status styling; fit the existing content width and paginate rather than shrink text. Completed, delayed and suspended task tables keep their existing summary layout without this added date.
+For `المهام المتأخرة` and `المهام على المخطط`, clone the master's task-detail table and omit `القطاع` and `الحالة`, producing four columns in this order: `# | المهمة | تاريخ الإنجاز المخطط | ملاحظات`. Keep both titles bold on every page, including continuations. Copy the planned date exactly, including blank dates. Retain detail typography and remaining column proportions; fit the existing content width and paginate rather than shrink text. Completed and suspended task tables retain their summary fields with the sector column omitted and without this added date. Project tables retain their status column.
 
-Acceptance: only on-plan task tables gain the date; every date matches the master detail row and appears between sector and status. Preserve task order, numbering, counts and notes. The output must later pass source reconciliation and final visual review for clipping, wrapping and footer clearance.
+Acceptance: no output table contains a sector column; delayed and on-plan task tables show the planned date between task and notes, with no status column. Every date matches its source detail row. Preserve task order, numbering, counts and notes. QA rejects a restored sector header, a status column in either dated task table, or a nonbold on-plan title. The output must pass source reconciliation and final visual review for clipping, wrapping and footer clearance.
 
 ## Approved table typography
+
+Every generated PowerPoint table must have native RTL table direction, including support, project status, transactions and continuation tables. Right-aligned Arabic text alone is insufficient. Keep numbering at the right and preserve field content, column widths and merged titles when converting an LTR source pattern. QA must reject any table without RTL enabled.
 
 Apply to every summary/detail/status table, including patterns cloned from the bundled master or a supplied 10 pt report. All table text must be **11 pt**: titles, column headers, body, status, notes and empty-cell defaults. This is the explicit exception to preserving the source's font size/alignment.
 
 Apply horizontal alignment to the column headers and body paragraphs:
 
-- Center القطاع, تاريخ الإنجاز المخطط / تاريخ الانجاز المخطط, تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع.
+- Center تاريخ الإنجاز المخطط / تاريخ الانجاز المخطط, تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. The sector column is omitted from output tables.
 - Right-align المهمة, المشروع / اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه.
 - Preserve merged title alignment, numbering and unspecified columns, vertical alignment, RTL, Abar, bold emphasis, bullets and colors.
 
