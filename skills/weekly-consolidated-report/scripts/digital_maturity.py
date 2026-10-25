@@ -22,6 +22,7 @@ from pptx.util import Pt
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from report_common import pptx_helpers as helpers
 from weekly_data import content_bottom, set_cell_exact
+from report_common.table_typography import set_table_directions
 
 
 MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
@@ -274,7 +275,7 @@ def detail_slides(prs):
     matches = []
     for slide in prs.slides:
         if any(sh.has_table and len(sh.table.columns) == 4 and len(sh.table.rows) >= 2
-               and sh.table.cell(1, 0).text == 'أساس التقييم' for sh in slide.shapes):
+               and any(c.text == 'أساس التقييم' for c in sh.table.rows[1].cells) for sh in slide.shapes):
             matches.append(slide)
     if len(matches) != 6:
         raise ValueError('Expected six approved digital-maturity detail slides')
@@ -283,12 +284,18 @@ def detail_slides(prs):
 
 def _detail_table(slide):
     return next(sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 4
-                and len(sh.table.rows) >= 2 and sh.table.cell(1, 0).text == 'أساس التقييم')
+                and len(sh.table.rows) >= 2 and any(c.text == 'أساس التقييم' for c in sh.table.rows[1].cells))
 
 
 def _challenge_table(slide):
     return next((sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 2
                  and sh.table.cell(0, 0).text == 'التحديات'), None)
+
+def _detail_columns(table, row):
+    # A merged section heading stays in its merge origin, in either direction.
+    if table.cell(1, 0).text == 'أساس التقييم' or row.cells[0].span_width == 4:
+        return range(4)
+    return range(3, -1, -1)
 
 
 def _protect_codes(value):
@@ -332,10 +339,11 @@ def populate_details(prs, data):
             raise ValueError(f'Digital-maturity PDF page {detail["page"]} exceeds its detail table capacity')
         set_cell_exact(table.cell(0, 0), detail['title'])
         for index, values in enumerate(detail['rows'], 2):
-            for cell, value in zip(table.rows[index].cells, values):
-                set_cell_exact(cell, _protect_codes(value))
+            columns = _detail_columns(table, table.rows[index])
+            for column, value in zip(columns, values):
+                set_cell_exact(table.cell(index, column), _protect_codes(value))
             if re.fullmatch(r'[A-Z]{1,5}-\d{2,3}', values[3]):
-                code_cell = table.cell(index, 3)
+                code_cell = table.cell(index, columns[3])
                 code_cell.text_frame.paragraphs[0]._p.get_or_add_pPr().set('rtl', '0')
         for row in list(table.rows)[2+len(detail['rows']):]:
             row._tr.getparent().remove(row._tr)
@@ -410,6 +418,7 @@ def populate(prs, data):
     for row in list(table.rows)[2+len(data['challenges']):]:
         row._tr.getparent().remove(row._tr)
     populate_details(prs, data)
+    set_table_directions(prs)
     return slide
 
 
@@ -454,7 +463,8 @@ def check(prs, report_path, data, errors):
         table = _detail_table(slide)
         if table.cell(0, 0).text != detail['title']:
             errors.append(f'Digital-maturity detail title differs on PDF page {detail["page"]}')
-        actual_rows = [[_plain(cell.text) for cell in row.cells] for row in list(table.rows)[2:]]
+        actual_rows = [[_plain(row.cells[column].text) for column in _detail_columns(table, row)]
+                       for row in list(table.rows)[2:]]
         if actual_rows != detail['rows']:
             errors.append(f'Digital-maturity detail rows differ on PDF page {detail["page"]}')
         challenges = _challenge_table(slide)

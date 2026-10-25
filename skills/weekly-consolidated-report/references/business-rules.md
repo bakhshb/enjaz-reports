@@ -138,6 +138,8 @@ In `ما تم حتى تاريخه`, bold only the leading `تاريخ التحد
 
 ## Table column alignment
 
+All PowerPoint tables must explicitly enable RTL table direction. Normalize LTR-stored patterns by reversing their column grid and merged cell groups together before enabling RTL; keep each value with its original field and width. Numbering is the rightmost field. Preserve Latin-code text direction inside RTL tables. This applies to both models and every continuation table.
+
 Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.
 
 

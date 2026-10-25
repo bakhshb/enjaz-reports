@@ -13,42 +13,9 @@ from pptx.oxml.ns import qn
 from pptx.util import Pt
 from report_common.pptx_helpers import fill_titled_table, remove_slide, resize_table, set_cell_text
 from report_common.update_format import format_table_updates
-from report_common.table_typography import apply_table
+from report_common.table_typography import apply_table, rtl_table
 
 AGENDA_PT=14
-
-
-def rtl_table(table):
-    """Mirror LTR storage while preserving the visible column order and merges."""
-    if table._tbl.tblPr.get('rtl') not in ('1', 'true'):
-        grid = table._tbl.tblGrid
-        for col in reversed(list(grid)):
-            grid.append(col)
-        for row in table.rows:
-            groups = []
-            cells = list(row._tr.tc_lst)
-            i = 0
-            while i < len(cells):
-                span = int(cells[i].get('gridSpan', '1'))
-                groups.append(cells[i:i + span])
-                i += span
-            for group in reversed(groups):
-                for cell in group:
-                    row._tr.insert_element_before(cell, 'a:extLst')
-                    props = cell.find(qn('a:tcPr'))
-                    if props is not None:
-                        left, right = props.find(qn('a:lnL')), props.find(qn('a:lnR'))
-                        for node in (left, right):
-                            if node is not None: props.remove(node)
-                        if left is not None:
-                            left.tag = qn('a:lnR'); props.insert(0,left)
-                        if right is not None:
-                            right.tag = qn('a:lnL'); props.insert(0,right)
-    table._tbl.tblPr.set('rtl', '1')
-    for row in table.rows:
-        for cell in row.cells:
-            for p in cell.text_frame.paragraphs:
-                p._p.get_or_add_pPr().set('rtl', '1')
 
 
 def bullet_example(prs):

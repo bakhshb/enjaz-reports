@@ -14,7 +14,7 @@ from weekly_data import MASTER, approved_styles, transaction_data, field_key, TR
 
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
-from report_common.table_typography import set_table_sizes, TABLE_PT, check_table_typography
+from report_common.table_typography import set_table_sizes, set_table_directions, TABLE_PT, check_table_typography
 from weekly_artwork import check_detail_artwork, all_shapes, DIGITAL_DETAIL_LABEL
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
@@ -73,7 +73,7 @@ def check_navigation(prs,errors):
         if any(i<=divider_index or i>=len(slides)-1 for i,_ in groups[kind]):errors.append('Detail section order changed')
     if groups['task'] and groups['project'] and groups['task'][-1][0]>=groups['project'][0][0]:errors.append('Task/project order changed')
     digital=[(i,sl) for i,sl in enumerate(slides) if any(sh.has_table and len(sh.table.columns)==4
-             and len(sh.table.rows)>1 and sh.table.cell(1,0).text=='أساس التقييم' for sh in sl.shapes)]
+             and len(sh.table.rows)>1 and any(c.text=='أساس التقييم' for c in sh.table.rows[1].cells) for sh in sl.shapes)]
     if digital:
         if len(digital)!=6 or [i for i,_ in digital]!=list(range(digital[0][0],digital[0][0]+6)) or digital[-1][0]!=len(slides)-2:
             errors.append('Digital detail slides are missing or out of order')
@@ -89,7 +89,7 @@ def check_navigation(prs,errors):
                 errors.append('Digital detail divider button has the wrong destination')
     for i,sl in enumerate(slides):
         for sh in helpers.tables(sl,4):
-            if len(sh.table.rows)>1 and sh.table.cell(1,0).text=='أساس التقييم':
+            if len(sh.table.rows)>1 and any(c.text=='أساس التقييم' for c in sh.table.rows[1].cells):
                 continue
             title=helpers.table_title(sh)
             start,end=(positions[0],positions[1]) if title in helpers.TASK_SUMMARY_TITLES else (positions[1],positions[2])
@@ -108,6 +108,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     else:reviewed=None
     errors=[];validation.package(report,errors)
     final=Presentation(report);master=Presentation(template);set_table_sizes(master)
+    set_table_directions(master)
     check_table_typography(final,errors)
     if (final.slide_width,final.slide_height)!=(master.slide_width,master.slide_height):errors.append('Slide dimensions changed')
     tk,tc,ts,td=helpers.task_data(tasks);pk,pc,ps,pd=helpers.suhail_data(suhail);xk,xc,xd=transaction_data(transactions)

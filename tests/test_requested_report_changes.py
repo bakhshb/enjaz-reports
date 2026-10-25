@@ -15,35 +15,119 @@ class RequestedReportChangesTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):cls.temp.cleanup()
 
-    def test_sector_planned_dates_only_for_on_plan_and_in_detail_order(self):
+    def test_sector_delayed_and_on_plan_dates_without_status_in_detail_order(self):
         master=Presentation(self.root/'weekly.pptx')
-        expected=[r for sl in master.slides for sh in workflow.weekly.builder.detail_tables(sl,'task') for r in list(sh.table.rows)[2:] if r.cells[4].text=='على المخطط']
-        self.assertTrue(expected)
         for deck in (self.root/'sectors').glob('*.pptx'):
             prs=Presentation(deck)
-            seen=[]
+            seen={title:[] for title in ('المهام على المخطط','المهام المتأخرة')}
             for sl in prs.slides:
                 for sh in workflow.weekly.builder.tables(sl):
                     title=workflow.weekly.builder.table_title(sh)
-                    if title=='المهام على المخطط':
-                        self.assertEqual([c.text for c in sh.table.rows[1].cells],['#','المهمة','القطاع','تاريخ الإنجاز المخطط','الحالة','ملاحظات'])
-                        seen.extend([[c.text for c in r.cells][1:] for r in list(sh.table.rows)[2:]])
+                    if title in seen:
+                        self.assertEqual([c.text for c in sh.table.rows[1].cells],['#','المهمة','تاريخ الإنجاز المخطط','ملاحظات'])
+                        seen[title].extend([[c.text for c in r.cells][1:] for r in list(sh.table.rows)[2:]])
                     elif title in workflow.splitter.TASK_TITLE.values():
                         self.assertNotIn('تاريخ الإنجاز المخطط',[c.text for c in sh.table.rows[1].cells])
-            self.assertEqual(seen,[[c.text for c in r.cells][1:] for r in expected])
+            for status in ('على المخطط','متأخرة'):
+                expected=[r for sl in master.slides for sh in workflow.weekly.builder.detail_tables(sl,'task') for r in list(sh.table.rows)[2:] if workflow.splitter.norm_status(r.cells[4].text)==status]
+                self.assertTrue(expected)
+                self.assertEqual(seen[workflow.splitter.TASK_TITLE[status]],[[r.cells[i].text for i in (1,3,5)] for r in expected])
+
+    def test_sector_tables_omit_sector_and_on_plan_title_is_bold(self):
+        found=False
+        for deck in (self.root/'sectors').glob('*.pptx'):
+            for sl in Presentation(deck).slides:
+                for sh in workflow.weekly.builder.tables(sl):
+                    self.assertNotIn('القطاع',[c.text for c in sh.table.rows[1].cells])
+                    if workflow.weekly.builder.table_title(sh)=='المهام المعلقة':
+                        self.assertIn('ملاحظات',[c.text for c in sh.table.rows[1].cells])
+                        self.assertNotIn('التحديث',[c.text for c in sh.table.rows[1].cells])
+                    if workflow.weekly.builder.table_title(sh)=='المهام على المخطط':
+                        found=True
+                        runs=[run for cell in sh.table.rows[0].cells
+                              for p in cell.text_frame.paragraphs for run in p.runs if run.text.strip()]
+                        self.assertTrue(runs)
+                        self.assertTrue(all(run.font.bold for run in runs))
+        self.assertTrue(found)
 
     def test_sector_date_corruption_rejected(self):
+        for title in ('المهام على المخطط','المهام المتأخرة'):
+            with self.subTest(title=title),tempfile.TemporaryDirectory() as td:
+                out=Path(td)/'sectors';shutil.copytree(self.root/'sectors',out)
+                deck=next(out.glob('*.pptx'));prs=Presentation(deck)
+                sh=next(sh for sl in prs.slides for sh in workflow.weekly.builder.tables(sl) if workflow.weekly.builder.table_title(sh)==title)
+                sh.table.cell(2,2).text='تاريخ خاطئ';prs.save(deck)
+                import json
+                manifest=json.loads((out/'manifest.json').read_text(encoding='utf-8'))
+                for entry in manifest:entry['out']=str(deck)
+                (out/'manifest.json').write_text(json.dumps(manifest),encoding='utf-8')
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertFalse(workflow.fixtures.sector_qa.check(out,self.root/'weekly.pptx',self.root/'transactions.xlsx'))
+
+    def test_sector_task_widths_match_on_plan_with_full_width_tables(self):
+        for deck in (self.root/'sectors').glob('*.pptx'):
+            tables={workflow.weekly.builder.table_title(sh):sh
+                    for sl in Presentation(deck).slides for sh in workflow.weekly.builder.tables(sl)}
+            reference=tables['المهام على المخطط']
+            widths={c.text:reference.table.columns[i].width for i,c in enumerate(reference.table.rows[1].cells)}
+            for title in (*workflow.splitter.TASK_TITLE.values(),'طلبات الدعم'):
+                sh=tables[title]
+                actual={c.text:sh.table.columns[i].width for i,c in enumerate(sh.table.rows[1].cells)}
+                with self.subTest(title=title):
+                    self.assertEqual(sh.width,reference.width)
+                    self.assertEqual(actual['#'],widths['#'])
+                    self.assertEqual(actual['المهمة'],widths['المهمة'])
+                    if 'ملاحظات' in actual:
+                        extra=0 if 'تاريخ الإنجاز المخطط' in actual else widths['تاريخ الإنجاز المخطط']
+                        self.assertAlmostEqual(actual['ملاحظات'],widths['ملاحظات']+extra,delta=2)
+
+    def test_sector_qa_rejects_nonbold_title_and_restored_headers(self):
+        deck=next((self.root/'sectors').glob('*.pptx'))
+        for damage in ('title','sector_header','status_header','suspended_notes','task_width'):
+            with self.subTest(damage=damage):
+                prs=Presentation(deck)
+                title='المهام المعلقة' if damage=='suspended_notes' else 'المهام على المخطط'
+                table=next(sh.table for sl in prs.slides for sh in workflow.weekly.builder.tables(sl)
+                           if workflow.weekly.builder.table_title(sh)==title)
+                if damage=='title':
+                    for cell in table.rows[0].cells:
+                        for p in cell.text_frame.paragraphs:
+                            for run in p.runs:run.font.bold=False
+                    message='title must be bold'
+                elif damage=='sector_header':
+                    table.cell(1,1).text='القطاع'
+                    message='Sector column must be omitted'
+                elif damage=='status_header':
+                    table.cell(1,3).text='الحالة'
+                    message='without status'
+                elif damage=='suspended_notes':
+                    table.cell(1,2).text='التحديث'
+                    message='notes header'
+                else:
+                    table.columns[1].width+=100000
+                    table.columns[3].width-=100000
+                    message='Task column widths must match'
+                with self.assertRaisesRegex(ValueError,message):
+                    workflow.fixtures.sector_qa.actual_records(prs)
+
+    def test_sector_planned_dates_preserve_distinct_and_blank_values(self):
         with tempfile.TemporaryDirectory() as td:
-            out=Path(td)/'sectors';shutil.copytree(self.root/'sectors',out)
-            deck=next(out.glob('*.pptx'));prs=Presentation(deck)
-            sh=next(sh for sl in prs.slides for sh in workflow.weekly.builder.tables(sl) if workflow.weekly.builder.table_title(sh)=='المهام على المخطط')
-            sh.table.cell(2,3).text='تاريخ خاطئ';prs.save(deck)
-            import json
-            manifest=json.loads((out/'manifest.json').read_text(encoding='utf-8'))
-            for entry in manifest:entry['out']=str(deck)
-            (out/'manifest.json').write_text(json.dumps(manifest),encoding='utf-8')
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertFalse(workflow.fixtures.sector_qa.check(out,self.root/'weekly.pptx',self.root/'transactions.xlsx'))
+            root=Path(td);master=root/'source.pptx';prs=Presentation(self.root/'weekly.pptx')
+            for sl in prs.slides:
+                for sh in workflow.weekly.builder.detail_tables(sl,'task'):
+                    for row in list(sh.table.rows)[2:]:
+                        status=workflow.splitter.norm_status(row.cells[4].text)
+                        if status in ('متأخرة','على المخطط'):
+                            row.cells[3].text='15/03/1448' if status=='متأخرة' else ''
+            prs.save(master);before=master.read_bytes();out=root/'sectors'
+            workflow.require(workflow.fixtures.run(workflow.fixtures.SECTOR/'split_report.py',master,'--transactions',self.root/'transactions.xlsx','--outdir',out,'--no-refine'))
+            expected=workflow.fixtures.sector_qa.expected_records(master,self.root/'transactions.xlsx')
+            for deck in out.glob('*.pptx'):
+                actual=workflow.fixtures.sector_qa.actual_records(Presentation(deck))
+                self.assertEqual(actual,expected['وكالة شؤون الحج'])
+                self.assertEqual(actual['المهام المتأخرة'][0][1],'15/03/1448')
+                self.assertEqual(actual['المهام على المخطط'][0][1],'')
+            self.assertEqual(master.read_bytes(),before)
 
     def rich_case(self,folder):
         folder.mkdir(exist_ok=True)

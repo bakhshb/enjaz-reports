@@ -14,6 +14,7 @@ import digital_maturity as digital
 import build_report as weekly_build
 from weekly_artwork import prepare_navigation, DIGITAL_DETAIL_LABEL
 from pptx.oxml.ns import qn
+from report_common.table_typography import all_tables
 
 
 class DigitalMaturityTests(unittest.TestCase):
@@ -98,6 +99,7 @@ class DigitalMaturityTests(unittest.TestCase):
         data = self.load()
         prs = Presentation(digital.MASTER)
         digital.populate(prs, data)
+        self.assertTrue(all(t._tbl.tblPr.get('rtl') == '1' for t in all_tables(prs)))
         report = self.root / 'report.pptx'
         prs.save(report)
         errors = []
@@ -129,7 +131,7 @@ class DigitalMaturityTests(unittest.TestCase):
         slide = digital.detail_slides(prs)[4]
         challenges = digital._challenge_table(slide)
         self.assertEqual([row.cells[1].text for row in list(challenges.rows)[2:]], data['detail_pages'][4]['challenges'])
-        code = digital._detail_table(slide).cell(3, 3)
+        code = digital._detail_table(slide).cell(3, 0)
         self.assertEqual(digital._plain(code.text), 'W-01')
         self.assertEqual(code.text_frame.paragraphs[0]._p.get_or_add_pPr().get('rtl'), '0')
 
@@ -146,7 +148,7 @@ class DigitalMaturityTests(unittest.TestCase):
         for slide, page in zip(slides, data['detail_pages']):
             table = digital._detail_table(slide)
             self.assertEqual(table.cell(0, 0).text, page['title'])
-            self.assertEqual(table.cell(3, 2).text, page['rows'][1][2])
+            self.assertEqual(table.cell(3, 1).text, page['rows'][1][2])
         divider = prs.slides[5]
         button = next(shape for shape in divider.shapes if getattr(shape, 'has_text_frame', False)
                       and shape.text == DIGITAL_DETAIL_LABEL)
@@ -168,6 +170,33 @@ class DigitalMaturityTests(unittest.TestCase):
                             for table in tables))
         self.assertTrue(all(first.top + first.height < second.top
                             for first, second in zip(tables, tables[1:])))
+
+    def test_full_digital_model_builds_rtl_tables_and_rejects_disabled_direction(self):
+        import contextlib
+        import io
+        import run_weekly_workflow as workflow
+        inputs = self.root / 'inputs'
+        self.load()
+        report = self.root / 'digital.pptx'
+        with contextlib.redirect_stdout(io.StringIO()):
+            workflow.scenario(inputs, 'normal')
+            weekly_build.main(['--tasks', str(inputs / 'tasks.xlsx'),
+                               '--suhail', str(inputs / 'projects.xlsx'),
+                               '--transactions', str(inputs / 'transactions.xlsx'),
+                               '--model', 'digital', '--digital-pdf', str(self.pdf),
+                               '--digital-data', str(self.review), '--output', str(report)])
+        prs = Presentation(report)
+        tables = list(all_tables(prs))
+        self.assertTrue(all(t._tbl.tblPr.get('rtl') == '1' for t in tables))
+        table = digital._detail_table(digital.detail_slides(prs)[0])
+        table._tbl.tblPr.set('rtl', '0')
+        prs.save(report)
+        before = report.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'Table direction must be RTL'):
+            workflow.weekly_validation.validate(report, inputs / 'tasks.xlsx',
+                inputs / 'projects.xlsx', inputs / 'transactions.xlsx',
+                digital.MASTER, 'digital', self.pdf, self.review)
+        self.assertEqual(report.read_bytes(), before)
 
 
 if __name__ == '__main__':

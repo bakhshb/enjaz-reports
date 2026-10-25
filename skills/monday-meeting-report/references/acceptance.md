@@ -25,6 +25,8 @@ Do **not** reject a deck because it has more than 18 slides, a new task source, 
 
 ## Mandatory visual QA
 
+Verify the rendered column order, not just `rtl=1`: `#`/`م` must appear on the right of each table. The approved reference PDF is authoritative for appearance. LibreOffice exports must use the shared disposable-copy renderer and pass the PDF numbering-coordinate check. Reject a PDF with numbering on the left even when source reconciliation and RTL-property checks pass.
+
 After the programmatic gate passes, render the same gated PPTX and inspect the generated dynamic sections. Temporarily unhide appendix slides only in a disposable QA copy if necessary.
 
 Do not deliver if the render shows clipped text, overlaps, broken Arabic glyphs, missing/duplicated rows, unintended bullets, broken table titles/headers, or content outside the approved page geometry. If visual density is too high, the correct repair is normally to create another continuation page, not to shrink the design.

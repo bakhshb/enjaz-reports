@@ -2,6 +2,10 @@
 
 ## Acceptance checks before delivery
 
+- Verify actual PDF coordinates: numbering (`#`, `م`, or transaction number) is on the right of every rendered table. Reject visibly LTR output even when the PPTX contains `rtl=1`. Use the shared renderer for LibreOffice exports; never change the editable source's column storage to compensate for an exporter that ignores table direction.
+
+- Every PowerPoint table has native RTL direction enabled, including support requests, transactions, digital details/challenges, and continuation tables. Reject a deliberately disabled RTL property even if Arabic text is right-aligned. Confirm numbering at the right, intact merges, unchanged field/value associations and widths, and readable Latin task codes after native rendering.
+
 - `إجمالي المهام = مكتملة + على المخطط + متأخر + معلق`; each status total across sectors must equal the summary, and the sum of all task-detail sections must equal the total.
 - `إجمالي مشاريع سهيل = مكتملة + على المخطط + متأخر + لم تبدأ`; sector totals and the number of project-detail records must match the summary.
 - `إجمالي المعاملات = مكتملة + على المخطط + متأخر`; sector totals must match the summary, and the number of records in the delayed-transactions table must match the `متأخرة` indicator. `لم تبدأ` must not appear in transaction indicators, chart data, or acceptance arithmetic.

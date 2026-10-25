@@ -42,6 +42,8 @@ Use the intended meeting date for the filename and cover. Pass `--meeting-date Y
 
 ## Table typography
 
+Every PowerPoint table must use native right-to-left (RTL) table direction, including the agenda, summaries, details and continuation tables. Right-aligned text alone is insufficient. Keep numbering at the right, preserve each field's content and width, and retain valid merged titles. Reject output tables without RTL enabled.
+
 The Monday topics/agenda table uses **14 pt** throughout, including headers, body cells and blank-cell defaults. Every other table uses **11 pt**, including titles, headers, statuses and notes. Apply these sizes explicitly, preserving Abar, bold emphasis, RTL, fills and column widths. Keep all 9 or 10 agenda topics on one slide using content-sized rows and compact padding; never paginate the agenda or reduce its font. Summaries and details can continue onto additional slides. Verify 14 pt for topics and 11 pt for other tables, with readable Arabic in the PPTX and QA PDF. Regenerate row measurements at the requested sizes.
 
 Apply the per-column horizontal alignment in the business rules to **summary and detail tables**, including headers: sector/dates/status centered; task/project names, notes, updates, support text and challenges right-aligned.
@@ -70,6 +72,8 @@ uv run scripts/report_gate_v2.py --report "<candidate.pptx>" --topics "<topics.x
 The candidate is saved only after programmatic checks pass. Failed builds preserve existing outputs and inputs; output paths cannot alias an input or master. A programmatic pass is not visual acceptance.
 
 ## Visual review
+
+For LibreOffice PDF previews, use `uv run ../report_common/render.py --report "<candidate.pptx>" --output "<candidate.pdf>"`. The shared exporter materializes the RTL visual column order in a disposable copy because LibreOffice ignores the native DrawingML RTL table setting. It leaves the editable PPTX unchanged. Inspect every rendered table: numbering must be on the right, followed by the task/project and remaining fields to its left. An RTL flag alone is not visual acceptance. `tests/check_rendered_pdf.py` verifies numbering from actual PDF coordinates as well as fonts and page counts.
 
 Render the validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.
 

@@ -11,7 +11,7 @@ re-designs anything: every table, row, KPI card and title bar is cloned from a
 shape that already exists in the master, and only the text, the fills that encode
 status, and the geometry are changed.
 """
-import argparse, json, math, os, posixpath, re, shutil, subprocess, sys, zipfile, pathlib, tempfile
+import argparse, json, math, os, re, shutil, sys, zipfile, pathlib
 from collections import defaultdict
 from copy import deepcopy
 
@@ -20,15 +20,15 @@ from pptx.util import Emu
 from lxml import etree
 
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]))
-from report_common.table_typography import set_table_sizes
+from report_common.table_typography import set_table_sizes, set_table_directions
+from report_common.package_tools import reachable_parts
+from report_common.render import export_pdf
 
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
-R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
 def q(t):  return '{%s}%s' % (A, t)
 def qp(t): return '{%s}%s' % (P, t)
 EMU = 914400
-SOFFICE = shutil.which('soffice')
 
 # ---- layout constants taken from the master deck -------------------------
 CX, CW   = 474245, 6623050      # content column: x and width of the KPI card
@@ -230,6 +230,8 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
     tcell = next((tc for tc in tcs_t if tc.get('gridSpan')), tcs_t[0])
     clean_title_row(ttr, accent)
     set_cell(tcell, title, algn='r', fallback_rpr=fb)
+    if title in (TASK_TITLE['متأخرة'], TASK_TITLE['على المخطط'], 'المعاملات المتأخرة'):
+        for properties in tcell.iter(q('rPr')): properties.set('b', '1')
     if headers is not None:
         if len(headers) != ncols:
             raise ValueError('Header width does not match table: ' + title)
@@ -261,7 +263,8 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
 CPI, LINE, PAD = 15.5 * 10 / 11, 14 / 72, 0.12
 def header_height(widths):
     # Narrow date/status columns need up to three 14 pt lines at 11 pt type.
-    return 0.60 if len(widths)==6 else 0.30
+    if len(widths) in (4, 5): return 0.75
+    return 0.60 if len(widths)>=4 else 0.30
 
 def preserved_row_height(row, widths):
     # A row copied from a 10 pt source must still fit the approved 11 pt output.
@@ -592,8 +595,36 @@ def continuation_slide(prs, source_index, keep, base_count):
     return slide, new_index
 
 def place_table(prs, slide, y, source_index, keep, base_count, tmpl, title, rows, algns,
-                frame_name, estimate, x=CX, frame_width=CW, page_top=TOP_Y, **kwargs):
+                frame_name, estimate, x=CX, frame_width=CW, page_top=TOP_Y, column_widths=None, **kwargs):
     """Place whole rows on as many same-design summary pages as required."""
+    headers = [norm(cell_text_el(tc)) for tc in gf_tbl(tmpl).findall(q('tr'))[1].findall(q('tc'))]
+    omitted = {'القطاع'}
+    if title in (TASK_TITLE['متأخرة'], TASK_TITLE['على المخطط']): omitted.add('الحالة')
+    for column in reversed([i for i,h in enumerate(headers) if h in omitted]):
+        tmpl = deepcopy(tmpl)
+        tbl = gf_tbl(tmpl)
+        grid = tbl.find(q('tblGrid'))
+        grid.remove(grid.findall(q('gridCol'))[column])
+        for index, tr in enumerate(tbl.findall(q('tr'))):
+            if index == 0: expand_title_row(tr, len(headers)-1)
+            else: tr.remove(tr.findall(q('tc'))[column])
+        rows = [[v for i,v in enumerate(row) if i != column] for row in rows]
+        algns = [v for i,v in enumerate(algns) if i != column]
+        if kwargs.get('headers') is not None:
+            kwargs['headers'] = [v for i,v in enumerate(kwargs['headers']) if i != column]
+        for option in ('status_col', 'bold_update_col'):
+            if kwargs.get(option) == column: kwargs[option] = None
+            elif kwargs.get(option) is not None and kwargs[option] > column: kwargs[option] -= 1
+        headers.pop(column)
+        rescale(tbl, frame_width)
+    if column_widths:
+        tmpl = deepcopy(tmpl)
+        grid = gf_tbl(tmpl).find(q('tblGrid')).findall(q('gridCol'))
+        fields = [field_key(h) for h in kwargs.get('headers', headers)]
+        widths = [column_widths.get(h, int(g.get('w'))) for h,g in zip(fields,grid)]
+        flexible = fields.index('ملاحظات') if 'ملاحظات' in fields else fields.index('طلب الدعم')
+        widths[flexible] += frame_width - sum(widths)
+        for g,w in zip(grid,widths): g.set('w', str(w))
     width = tbl_colwidths(gf_tbl(tmpl))
     remaining = list(rows)
     while remaining:
@@ -679,15 +710,23 @@ def build(master, outdir, aliases, transactions=None, only=None):
     task_templates = {st: titled_frame(role['task_summaries'], TASK_TITLE[st])
                       for st in TASK_ORDER}
     task_fallback = next((v for v in task_templates.values() if v is not None), None)
-    # On-plan tasks use the approved detail layout, including planned date.
+    # Delayed and on-plan tasks use the approved detail layout for planned dates.
     task_detail_shapes = [sh for i in role['task_details']
                           for sh, rows in find_tables(sl[i], ['المهمة', 'الحالة'])
                           if len(rows[1]) == 6]
-    if any(t['status'] == 'على المخطط' for t in tasks):
-        if not task_detail_shapes:
-            raise ValueError('No task detail pattern for on-plan planned dates')
-        task_templates['على المخطط'] = deepcopy(task_detail_shapes[0]._element)
-        rescale(gf_tbl(task_templates['على المخطط']), CW)
+    for status in ('متأخرة', 'على المخطط'):
+        if any(t['status'] == status for t in tasks):
+            if not task_detail_shapes:
+                raise ValueError('No task detail pattern for planned dates')
+            task_templates[status] = deepcopy(task_detail_shapes[0]._element)
+            rescale(gf_tbl(task_templates[status]), CW)
+    task_column_widths = {}
+    if task_detail_shapes:
+        detail = task_detail_shapes[0].table
+        widths = {field_key(c.text):col.width for c,col in zip(detail.rows[1].cells,detail.columns)
+                  if field_key(c.text) not in ('القطاع','الحالة')}
+        total = sum(widths.values())
+        task_column_widths = {h:round(CW*w/total) for h,w in widths.items()}
     TMPL_SUPPORT = titled_frame(role['task_summaries'], 'طلبات الدعم')
     TMPL_UPD = titled_frame(role['project_summaries'], 'أبرز التحديثات')
     TMPL_CHALLENGE = titled_frame(role['project_summaries'], 'التحديات')
@@ -735,6 +774,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
                 headers = [cell_text_el(tc) for tc in gf_tbl(tmpl).findall(q('tr'))[1].findall(q('tc'))]
                 if task_templates[st] is None:
                     headers = ['#', 'المهمة', 'القطاع', 'ملاحظات'] if len(headers) == 4 else ['#', 'المهمة', 'القطاع']
+                headers = ['ملاحظات' if field_key(h) == 'التحديث' else h for h in headers]
                 rows = []
                 for i, t in enumerate(sel):
                     values = {'#': str(i+1), 'المهمة': t['text'], 'القطاع': sec,
@@ -745,7 +785,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
                 s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), tmpl,
                                    TASK_TITLE[st], rows, ['ctr' if h == '#' else 'r' for h in headers],
                                    'tbl_' + st, est_table, accent=ACCENT[st], headers=headers,
-                                   status_col=4 if st == 'على المخطط' else None)
+                                   column_widths=task_column_widths)
             if d['support']:
                 if TMPL_SUPPORT is None: raise ValueError('No support table to clone')
                 headers = [cell_text_el(tc) for tc in gf_tbl(TMPL_SUPPORT).findall(q('tr'))[1].findall(q('tc'))]
@@ -755,7 +795,8 @@ def build(master, outdir, aliases, transactions=None, only=None):
                     rows.append([values.get(norm(h), '') for h in headers])
                 s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), TMPL_SUPPORT,
                                    'طلبات الدعم', rows, ['ctr' if h == '#' else 'r' for h in headers],
-                                   'tbl_support', est_table, accent=ACCENT['تحديثات'])
+                                   'tbl_support', est_table, accent=ACCENT['تحديثات'],
+                                   column_widths=task_column_widths)
 
         if d['projs'] or d['ups'] or d['challenges']:
             s = prs.slides[role['projects']]
@@ -794,20 +835,21 @@ def build(master, outdir, aliases, transactions=None, only=None):
         if d['trans']:
             s = prs.slides[role['trans']]
             tframe = find_tables(s, ['رقم المعاملة'])[0][0]
-            tx, ty, tw = tframe.left, tframe.top, tframe.width
+            tx, tw = tframe.left, tframe.width
             clear_body(s)
             single_kpi(s, len(d['trans']), 'إجمالي المعاملات المتأخرة')
             rows = []
             for item in d['trans']:
                 rows.append([item['row'][item['head'].index(h)] for h in item['head']])
-            place_table(prs, s, ty, role['trans'], keep, len(sl), TMPL_TRANS,
+            place_table(prs, s, TOP_Y, role['trans'], keep, len(sl), TMPL_TRANS,
                         'المعاملات المتأخرة', rows,
                         ['ctr' if 'تاريخ' in h or 'رقم' in h else 'r' for h in d['trans'][0]['head']],
-                        'tbl_trans', est_table, x=tx, frame_width=tw, page_top=ty,
+                        'tbl_trans', est_table, x=tx, frame_width=tw,
                         accent=ACCENT['متأخرة'])
 
         path = os.path.join(full_dir, 'تقرير الإنجاز الأسبوعي - %s.pptx' % sec)
         set_table_sizes(prs)
+        set_table_directions(prs)
         prs.save(path)
         manifest.append({'sector': sec, 'file': path, 'keep': keep,
                          'edited': [i for i in keep if i in (role['tasks'], role['projects'], role['trans'])
@@ -818,35 +860,6 @@ def build(master, outdir, aliases, transactions=None, only=None):
     return manifest
 
 # ================== pass 2: measure, then reflow ==========================
-def _bands(page):
-    rs = [r for r in page.rects if 20 < r['width'] < 560 and r['height'] < 200 and r['top'] > 60]
-    rs.sort(key=lambda r: r['top'])
-    gs = []
-    for r in rs:
-        if gs and r['top'] - gs[-1][1] < 10: gs[-1][1] = max(gs[-1][1], r['bottom'])
-        else: gs.append([r['top'], r['bottom']])
-    return gs
-
-def to_pdf(pptx_path, work='_m'):
-    shutil.copy(pptx_path, work + '.pptx')
-    if os.path.exists(work + '.pdf'): os.remove(work + '.pdf')
-    if not SOFFICE:
-        raise RuntimeError('soffice is required for the refinement pass')
-    pdf_dir = tempfile.mkdtemp(prefix='soffice-pdf-')
-    profile_dir = tempfile.mkdtemp(prefix='soffice-profile-')
-    try:
-        subprocess.run([SOFFICE, '-env:UserInstallation=file://' + profile_dir,
-                        '--headless', '--convert-to', 'pdf',
-                        '--outdir', pdf_dir, work + '.pptx'],
-                       capture_output=True, check=True)
-        shutil.move(os.path.join(pdf_dir, os.path.basename(work) + '.pdf'),
-                    work + '.pdf')
-    finally:
-        shutil.rmtree(pdf_dir, ignore_errors=True)
-        shutil.rmtree(profile_dir, ignore_errors=True)
-    os.remove(work + '.pptx')
-    return work + '.pdf'
-
 SAFETY = 1.12
 OFFPAGE = 40_000_000
 
@@ -881,7 +894,7 @@ def refine_positions(manifest):
                 for j, sh in enumerate(_frames(probe.slides[si])):
                     if j != k: sh.top = Emu(OFFPAGE + j * 100000)
             probe.save('_probe.pptx')
-            pdf_path = to_pdf('_probe.pptx')
+            pdf_path = export_pdf('_probe.pptx', '_m.pdf')
             with pdfplumber.open(pdf_path) as pdf:
                 for si in item['edited']:
                     fr = _frames(prs.slides[si])
@@ -922,51 +935,6 @@ def shrink_media(wd):
         buf = __import__('io').BytesIO()
         im.save(buf, 'JPEG', quality=85, optimize=True)
         if buf.tell() < f.stat().st_size: f.write_bytes(buf.getvalue())
-
-def reachable_parts(wd):
-    """Remove links to discarded slides, then keep only reachable package parts."""
-    root=pathlib.Path(wd)
-    ns={'p':P,'r':'http://schemas.openxmlformats.org/package/2006/relationships'}
-    pres=etree.parse(str(root/'ppt/presentation.xml'))
-    ids={el.get('{'+R+'}id') for el in pres.findall('.//p:sldId',ns)}
-    def target(name,rel):
-        source=posixpath.join(posixpath.dirname(posixpath.dirname(name)),posixpath.basename(name)[:-5])
-        return posixpath.normpath(posixpath.join(posixpath.dirname(source),rel.get('Target','').split('#',1)[0])).lstrip('/')
-    prels='ppt/_rels/presentation.xml.rels'
-    kept={target(prels,rel) for rel in etree.parse(str(root/prels)).getroot()
-          if rel.get('Id') in ids}
-    for path in root.rglob('*.rels'):
-        name=path.relative_to(root).as_posix(); tree=etree.parse(str(path)); rels=tree.getroot(); removed=set()
-        for rel in list(rels):
-            if rel.get('Type','').endswith('/slide') and target(name,rel) not in kept:
-                removed.add(rel.get('Id'));rels.remove(rel)
-        if removed:
-            tree.write(str(path),xml_declaration=True,encoding='UTF-8',standalone=True)
-            source=path.parent.parent/path.name[:-5]
-            if source.is_file() and source.suffix=='.xml':
-                document=etree.parse(str(source))
-                for link in document.xpath('//*[@r:id]',namespaces={'r':R}):
-                    if link.get('{'+R+'}id') in removed and link.tag in {q('hlinkClick'),q('hlinkMouseOver')}:
-                        link.getparent().remove(link)
-                document.write(str(source),xml_declaration=True,encoding='UTF-8',standalone=True)
-    reachable={'[Content_Types].xml'}; pending=['']
-    while pending:
-        source=pending.pop()
-        relname=(posixpath.join(posixpath.dirname(source),'_rels',posixpath.basename(source)+'.rels') if source else '_rels/.rels')
-        if relname in reachable or not (root/relname).exists():continue
-        reachable.add(relname)
-        for rel in etree.parse(str(root/relname)).getroot():
-            if rel.get('TargetMode')=='External':continue
-            part=target(relname,rel)
-            if not (root/part).is_file():raise ValueError('Missing package target: '+part)
-            if part not in reachable:reachable.add(part);pending.append(part)
-    content_types=root/'[Content_Types].xml'; tree=etree.parse(str(content_types))
-    for child in list(tree.getroot()):
-        if child.tag.endswith('Override') and child.get('PartName','').lstrip('/') not in reachable:
-            tree.getroot().remove(child)
-    tree.write(str(content_types),xml_declaration=True,encoding='UTF-8',standalone=True)
-    return reachable
-
 
 def slim(manifest, outdir):
     """Remove unwanted slides and their unreachable content before packaging."""

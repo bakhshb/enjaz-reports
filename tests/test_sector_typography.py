@@ -30,12 +30,13 @@ class SectorTypographyTests(unittest.TestCase):
                     deck=next(out.glob('*.pptx'));prs=Presentation(deck)
                     errors=[];check_table_typography(prs,errors);self.assertFalse(errors)
                     original=deck.read_bytes()
-                    for damage in ['size','alignment']:
+                    for damage in ['size','alignment','direction']:
                         deck.write_bytes(original);prs=Presentation(deck)
                         t=next(t for t in all_tables(prs) if any(c.text=='الحالة' for c in t.rows[1].cells))
                         j=next(i for i,c in enumerate(t.rows[1].cells) if c.text=='الحالة');cell=t.cell(2,j)
                         if damage=='size':next(r for p in cell.text_frame.paragraphs for r in p.runs if r.text).font.size=Pt(10)
-                        else:cell.text_frame.paragraphs[0].alignment=PP_ALIGN.RIGHT
+                        elif damage=='alignment':cell.text_frame.paragraphs[0].alignment=PP_ALIGN.RIGHT
+                        else:t._tbl.tblPr.set('rtl','0')
                         prs.save(deck)
                         result=run(SECTOR/'qa_report.py',out,'--master',source)
                         self.assertNotEqual(result.returncode,0)

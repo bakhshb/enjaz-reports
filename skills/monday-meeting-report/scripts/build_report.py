@@ -20,7 +20,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from report_common.pptx_helpers import (val, set_text, clear_cell_bullets, set_cell_text, shape_by_id, recursive_text, slide_texts, resize_table, fill_titled_table, slide_index, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, first_table, find_slide_with_text, find_header, read_block, detail_sections, summary_records, task_data, suhail_data, read_sector_counts)
 
 import monday_layout as layout
-from report_common.table_typography import set_table_sizes
+from report_common.table_typography import set_table_sizes, set_table_directions
 
 
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
@@ -274,6 +274,7 @@ def build_candidate(a):
         remove_slide(prs,sl)
 
     set_table_sizes(prs,agenda_pt=layout.AGENDA_PT)
+    set_table_directions(prs)
     prs.save(out); patch_charts(out,tchart,schart)
 
 
