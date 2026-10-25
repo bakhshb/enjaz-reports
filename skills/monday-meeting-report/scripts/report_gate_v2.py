@@ -42,7 +42,7 @@ SUMMARY_HEADERS={
     "التحديات":["التحدي","القطاع","المشروع","#"],
 }
 FONT="Abar Mid"; ALLOWED={"Abar Mid","Abar Mid SemiBold"}
-AGENDA_PT=11.0; TABLE_PT=11.0
+AGENDA_PT=14; TABLE_PT=11.0
 
 
 
@@ -123,7 +123,7 @@ def read_summary(path,sheet,titles):
 
 
 def collect(prs,errors,template=status_styles.MASTER):
-    check_table_typography(prs,errors)
+    check_table_typography(prs,errors,agenda_pt=AGENDA_PT)
     ag=[]; agenda_tables=0; task=[]; suh=[]; suh_seq=[]; summaries={title:[] for title in SUMMARY_HEADERS}
     approved=status_styles.examples(template)
     for slide in prs.slides:

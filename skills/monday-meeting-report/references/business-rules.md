@@ -6,7 +6,7 @@
 
 Read agenda rows in source order and stop after including `ملخص الاجتماع`. Ignore rows below it.
 
-Keep every topic, including `ملخص الاجتماع`, together on exactly one agenda slide. Measure the current text at 11 pt, use content-sized rows and 2 pt top/bottom cell padding, and preserve the approved column widths, RTL, header and footer clearance. Do not use the sample row heights or sample row count as capacity. Never split topics across slides, shrink the font, clip or omit records. If the complete topics table still cannot fit at 11 pt, report the space constraint clearly and preserve the previous output; request shorter source topics or an approved layout adjustment. This single-page requirement applies only to the agenda; summaries and details still use continuation pages.
+Keep every topic, including `ملخص الاجتماع`, together on exactly one agenda slide. Measure the current text at 14 pt, use content-sized rows and 2 pt top/bottom cell padding, and preserve the approved column widths, RTL, header and footer clearance. Do not use the sample row heights or sample row count as capacity. Never split topics across slides, shrink the font, clip or omit records. If the complete topics table still cannot fit at 14 pt, report the space constraint clearly and preserve the previous output; request shorter source topics or an approved layout adjustment. Normal input contains 9 or 10 topics. This single-page requirement applies only to the agenda; summaries and details still use continuation pages.
 
 ### Task summary
 
@@ -55,7 +55,7 @@ For example, 20 projects may naturally produce three or more Suhail-detail pages
 ## Text and formatting rules
 
 - Preserve slide size, backgrounds, logos, masters, layout, colors, borders, alignment, RTL behavior, column widths, and approved fonts.
-- Agenda tables use `Abar Mid` 11 pt.
+- Agenda tables use `Abar Mid` 14 pt, including headers and body cells.
 - Other dynamic tables use `Abar Mid` 11 pt; preserve `Abar Mid SemiBold` where the approved pattern uses it.
 - Do not summarize, rewrite, proofread, infer, or recalculate source content.
 - Blank source cells clear old template content; never carry previous-week text forward.

@@ -15,6 +15,8 @@ from report_common.pptx_helpers import fill_titled_table, remove_slide, resize_t
 from report_common.update_format import format_table_updates
 from report_common.table_typography import apply_table
 
+AGENDA_PT=14
+
 
 def rtl_table(table):
     """Mirror LTR storage while preserving the visible column order and merges."""
@@ -67,6 +69,7 @@ def bullet_example(prs):
 def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
     rtl_table(shape.table)
     fixed=1 if kind=='agenda' else 2
+    font_pt=AGENDA_PT if kind=='agenda' else 11
     if kind=='agenda':
         resize_table(shape.table,1+len(rows),1)
         for i,values in enumerate(rows,1):
@@ -102,9 +105,9 @@ def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
                 for run in p.runs:
                     if run.font.name not in ('Abar Mid', 'Abar Mid SemiBold'):
                         run.font.name = 'Abar Mid'
-                    run.font.size = Pt(11)
+                    run.font.size = Pt(font_pt)
 
-    apply_table(shape.table)
+    apply_table(shape.table,font_pt)
 
 
 def measure(specs, template, styles, bullets, engine='auto'):
@@ -131,13 +134,14 @@ def measure(specs, template, styles, bullets, engine='auto'):
         sh.name = key
         populate(sh, rows, title, kind, styles, bullets)
         fixed=1 if kind=='agenda' else 2
+        scale=(AGENDA_PT if kind=='agenda' else 11)/11
         heights = []
         for row in list(sh.table.rows)[fixed:]:
-            height = 20
+            height = 20*scale
             for j, cell in enumerate(row.cells):
                 width = max(20, sh.table.columns[j].width / 12700 - (cell.margin_left + cell.margin_right) / 12700)
-                lines = sum(max(1, math.ceil(len(line) * 4.8 / width)) for line in cell.text.splitlines())
-                height = max(height, lines * 14 + (cell.margin_top + cell.margin_bottom) / 12700 + 2)
+                lines = sum(max(1, math.ceil(len(line) * 4.8 * scale / width)) for line in cell.text.splitlines())
+                height = max(height, lines * 14 * scale + (cell.margin_top + cell.margin_bottom) / 12700 + 2)
             heights.append(int(Pt(height)))
             row.height = Pt(1) if native else Pt(height)
         sh.height = sum(r.height for r in sh.table.rows)

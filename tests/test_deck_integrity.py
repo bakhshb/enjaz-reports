@@ -111,7 +111,7 @@ def build_scenario(root,name,task_count,project_count,new_names=False):
         if result.returncode:raise AssertionError(result.stderr+result.stdout)
     topics=root/'topics.xlsx';wb=Workbook();ws=wb.active;ws.title='Sheet1'
     ws.append([name]);ws.append(['الترتيب','الموضوع','المتحدث','الوقت المطلوب من المالك'])
-    for i in range(18 if name=='overflow' else 1):ws.append([i+1,f'موضوع تجريبي {i+1}','مالك',5])
+    for i in range(9 if name=='overflow' else 1):ws.append([i+1,f'موضوع تجريبي {i+1}','مالك',5])
     ws.append([ws.max_row-1,'ملخص الاجتماع','مالك',5]);wb.save(topics)
     deck=root/'monday.pptx'
     result=run(MONDAY/'build_report.py','--topics',topics,'--tasks',tasks,'--suhail',projects,'--output',deck)
@@ -179,12 +179,13 @@ class ScenarioTests(unittest.TestCase):
             agenda_pages=[sl for sl in prs.slides if any(sh.has_table and sh.table.cell(0,0).text=='م' for sh in sl.shapes)]
             self.assertEqual(len(agenda_pages),1)
             agenda=next(sh for sh in agenda_pages[0].shapes if sh.has_table and sh.table.cell(0,0).text=='م')
-            self.assertEqual(len(agenda.table.rows),20)  # 18 topics + meeting summary + header.
+            self.assertEqual(len(agenda.table.rows),11)  # 9 topics + meeting summary + header.
             self.assertLessEqual(agenda.top+agenda.height,prs.slide_height-int(55*12700))
             for sl in prs.slides:
                 for sh in sl.shapes:
                     if sh.has_table:
-                        self.assertTrue(all(r.font.size.pt==11 for row in sh.table.rows
+                        size=14 if sh.table.cell(0,0).text=='م' else 11
+                        self.assertTrue(all(r.font.size.pt==size for row in sh.table.rows
                                             for cell in row.cells for p in cell.text_frame.paragraphs for r in p.runs))
 
 
@@ -219,7 +220,7 @@ class MondayGateTests(unittest.TestCase):
         result=self.check(self.candidate())
         self.assertEqual(result.returncode,0,result.stderr+result.stdout)
 
-    def test_nine_and_ten_long_topics_fit_one_page_at_11_pt(self):
+    def test_nine_and_ten_long_topics_fit_one_page_at_14_pt(self):
         for count in (9,10):
             with self.subTest(count=count),tempfile.TemporaryDirectory() as td:
                 topics=Path(td)/'topics.xlsx';wb=load_workbook(self.topics);ws=wb['Sheet1']
@@ -237,7 +238,7 @@ class MondayGateTests(unittest.TestCase):
                 self.assertEqual(len(agendas[0].table.rows),count+1)
                 from report_common.pptx_helpers import slide_texts
                 self.assertIn('26 أكتوبر 2026',slide_texts(prs.slides[0]))
-                self.assertTrue(all(r.font.size.pt==11 for row in agendas[0].table.rows for cell in row.cells
+                self.assertTrue(all(r.font.size.pt==14 for row in agendas[0].table.rows for cell in row.cells
                                     for p in cell.text_frame.paragraphs for r in p.runs))
 
     def test_split_topics_rejected_even_when_all_records_match(self):
@@ -264,7 +265,7 @@ class MondayGateTests(unittest.TestCase):
             result=run(MONDAY/'build_report.py','--topics',topics,'--tasks',self.tasks,
                        '--suhail',self.projects,'--output',output,'--layout-engine','estimate')
             self.assertNotEqual(result.returncode,0)
-            self.assertIn('Topics cannot fit on one page at 11 pt',result.stderr)
+            self.assertIn('Topics cannot fit on one page at 14 pt',result.stderr)
             self.assertEqual(output.read_bytes(),b'accepted report')
 
     def test_status_typography_corruption_is_not_hidden(self):

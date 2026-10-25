@@ -218,7 +218,7 @@ def build_candidate(a):
         raise ValueError('Bundled Monday meeting template checksum mismatch')
 
     agenda=agenda_rows(a.topics); tk,tchart,task_summaries,tdetails=task_data(a.tasks); sk,schart,suhail_summaries,sdetails=suhail_data(a.suhail)
-    out=Path(a.output); prs=Presentation(template); set_table_sizes(prs); validate_master_patterns(prs)
+    out=Path(a.output); prs=Presentation(template); set_table_sizes(prs,agenda_pt=layout.AGENDA_PT); validate_master_patterns(prs)
     approved=status_styles.examples(template)
 
     # Capture all master patterns before any slide is cloned or removed.
@@ -240,12 +240,12 @@ def build_candidate(a):
             specs.append((f'{kind}:{i}',shape,[row[:6] for row in rows],title,kind))
     measurements=layout.measure(specs,template,approved,bullets,getattr(a,'layout_engine','auto'))
 
-    # All topics stay on one slide at 11 pt, using measured content heights.
+    # All topics stay on one slide at 14 pt, using measured content heights.
     date=getattr(a,'meeting_date',None) or meeting_date()
     set_text(shape_by_id(prs.slides[0],4),f'{date.day} {MONTHS[date.month-1]} {date.year}')
     header,heights=measurements['agenda']
     if agenda_shape.top+sum(header)+sum(heights)>prs.slide_height-int(55*12700):
-        raise ValueError('Topics cannot fit on one page at 11 pt; shorten the topics or use an approved wider layout. '
+        raise ValueError('Topics cannot fit on one page at 14 pt; shorten the topics or use an approved wider layout. '
                          'No topics were split, clipped or omitted.')
     layout.populate(agenda_shape,agenda,kind='agenda')
     layout.size_shape(agenda_shape,header,heights,agenda_shape.top)
@@ -273,7 +273,7 @@ def build_candidate(a):
     for sl in task_unused+suhail_unused:
         remove_slide(prs,sl)
 
-    set_table_sizes(prs)
+    set_table_sizes(prs,agenda_pt=layout.AGENDA_PT)
     prs.save(out); patch_charts(out,tchart,schart)
 
 
