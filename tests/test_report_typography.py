@@ -9,6 +9,23 @@ sys.path.insert(0,str(ROOT/'skills'))
 from report_common.table_typography import set_table_sizes, all_tables, check_table_typography
 
 class TableTypographyTests(unittest.TestCase):
+    def test_monday_topics_only_use_14_pt_including_headers_and_defaults(self):
+        prs=next(self.templates())
+        set_table_sizes(prs,agenda_pt=14)
+        found=False
+        for table in all_tables(prs):
+            agenda=table.cell(0,0).text.strip()=='م' and len(table.columns)==4
+            found=found or agenda
+            expected=14 if agenda else 11
+            for row in table.rows:
+                for cell in row.cells:
+                    for p in cell.text_frame.paragraphs:
+                        self.assertEqual(p.font.size.pt,expected)
+                        self.assertTrue(all(r.font.size.pt==expected for r in p.runs))
+        self.assertTrue(found)
+        errors=[];check_table_typography(prs,errors,agenda_pt=14)
+        self.assertEqual(errors,[])
+
     def templates(self):
         for skill,name in [('monday-meeting-report','monday-meeting-master.pptx'),('weekly-consolidated-report','weekly-report-master.pptx')]:
             yield Presentation(ROOT/'skills'/skill/'assets'/name)

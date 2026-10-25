@@ -6,7 +6,7 @@
 
 Read agenda rows in source order and stop after including `ملخص الاجتماع`. Ignore rows below it.
 
-If the approved agenda table fills, clone the agenda slide and continue automatically. Repeat the same header and visual design. Do not fail merely because the agenda needs more than one page.
+Keep every topic, including `ملخص الاجتماع`, together on exactly one agenda slide. Measure the current text at 14 pt, use content-sized rows and 2 pt top/bottom cell padding, and preserve the approved column widths, RTL, header and footer clearance. Do not use the sample row heights or sample row count as capacity. Never split topics across slides, shrink the font, clip or omit records. If the complete topics table still cannot fit at 14 pt, report the space constraint clearly and preserve the previous output; request shorter source topics or an approved layout adjustment. Normal input contains 9 or 10 topics. This single-page requirement applies only to the agenda; summaries and details still use continuation pages.
 
 ### Task summary
 
@@ -55,14 +55,14 @@ For example, 20 projects may naturally produce three or more Suhail-detail pages
 ## Text and formatting rules
 
 - Preserve slide size, backgrounds, logos, masters, layout, colors, borders, alignment, RTL behavior, column widths, and approved fonts.
-- Agenda tables use `Abar Mid` 11 pt.
+- Agenda tables use `Abar Mid` 14 pt, including headers and body cells.
 - Other dynamic tables use `Abar Mid` 11 pt; preserve `Abar Mid SemiBold` where the approved pattern uses it.
 - Do not summarize, rewrite, proofread, infer, or recalculate source content.
 - Blank source cells clear old template content; never carry previous-week text forward.
 - Remove inherited bullets from ordinary dynamic cells. Apply the Suhail update exception below in summaries and details.
 - In `ما تم حتى تاريخه`, put the existing `تاريخ التحديث` and its day/month/year date on the first content line in bold. Body text is not bold. Ignore leading/trailing empty paragraphs. Two or more nonempty source paragraphs after this line are separate update points: render native bullets using the approved master bullet paragraph. A single sentence/paragraph stays unbulleted. Do not split prose by punctuation or visual wrapping, invent a date, or rewrite source wording.
 - All tables must explicitly use RTL, with `#` at the right. When converting a summary pattern stored left-to-right, reverse its underlying columns and merged groups as well as enabling RTL, so visible column order and approved widths remain unchanged.
-- The cover date is the runtime creation date in the runtime timezone, formatted like `27 سبتمبر 2026`.
+- The cover date is the intended meeting date, formatted like `26 أكتوبر 2026`. Use `--meeting-date YYYY-MM-DD` when supplied; otherwise use this Monday if today is Monday, or the next Monday, using Riyadh (UTC+3). A Sunday 25 October 2026 build displays Monday 26 October 2026. Never use the generation date as the meeting date.
 
 
 ## Summary layout

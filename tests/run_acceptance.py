@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pandas>=2.2,<3", "openpyxl>=3.1,<4", "python-pptx>=1.0.2", "lxml>=5.3", "pillow", "xlrd>=2"]
+# dependencies = ["pandas>=2.2,<3", "openpyxl>=3.1,<4", "python-pptx>=1.0.2", "lxml>=5.3", "pillow", "xlrd>=2", "pdfplumber>=0.11"]
 # ///
 """Run all synthetic regression tests with one isolated dependency environment."""
 from pathlib import Path

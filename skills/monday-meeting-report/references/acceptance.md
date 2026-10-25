@@ -9,6 +9,7 @@ The final gate checks that:
 - the PPTX package and XML are valid and every internal relationship resolves (opening in PowerPoint is a separate visual acceptance step);
 - there are no external workbook relationships;
 - agenda records match the current topics workbook and end at `ملخص الاجتماع`;
+- the complete agenda occupies exactly one slide at 14 pt; its compact row heights/padding fit above the footer without clipping, and it is never split or truncated;
 - all task-detail records match the current task workbook;
 - all Suhail-detail records match the current Suhail workbook;
 - record order matches the source, including when totals are unchanged;
@@ -48,7 +49,14 @@ Do not deliver if the render shows clipped text, overlaps, broken Arabic glyphs,
 
 ## Table font size acceptance
 
-Every visible table run must be 11 pt, including title/header rows, blank-cell defaults, statuses, notes and the Monday agenda. Verify generated PPTX content, not only the template or instructions. The weekly read-only gate rejects a 10 pt run; the Monday gate normalizes ordinary cells and validates status cells against 11 pt approved styles. Preserve other formatting and recheck rendered row heights, clipping and pagination at 11 pt. Previous 10 pt layout measurements must be regenerated.
+Every visible topics/agenda table run and blank-cell default must be 14 pt, including headers and body cells. All other table text remains 11 pt, including titles, statuses and notes. Verify generated PPTX content, not only the template or instructions. The weekly report retains its 11 pt policy. The Monday gate preserves and verifies the 14 pt agenda exception while validating other tables at 11 pt. Regenerate agenda measurements at 14 pt and recheck row heights, clipping and footer clearance.
+
+## Monday date, measurement recovery and single-page topics
+
+- A Sunday 25 October 2026 build displays 26 October 2026; a Monday build keeps that Monday. Verify the Riyadh midnight and year boundaries and an explicit `--meeting-date` in the cover and exported PDF.
+- Native measurement must cover every table and row with positive finite numeric heights. In auto mode, process errors, timeouts, missing/malformed/incomplete results visibly warn and fall back to fresh conservative estimates; explicit native mode fails clearly. Programmatic and visual acceptance remain mandatory, including after fallback.
+- Normal acceptance uses 9 and 10 topics, including long Arabic entries: all records stay on one agenda slide at 14 pt, and other tables stay at 11 pt. Task/project details can still span multiple slides. Reject a split agenda even when its data matches. Excess content that cannot fit must fail without shrinking, clipping, omitting rows or replacing the previous report. The previous 18-topic/11 pt stress case is superseded by the requested 14 pt policy.
+- Run `tests/test_monday_date.py`, `tests/test_monday_measurement.py`, `tests/test_report_typography.py`, and `tests/test_deck_integrity.py` through the existing acceptance runner. Render native and estimate/fallback candidates and verify Arabic, actual Abar use, 14 pt topic spans, 11 pt other table spans, footer clearance and no overlaps in their exact final bytes.
 
 ## Table column alignment
 

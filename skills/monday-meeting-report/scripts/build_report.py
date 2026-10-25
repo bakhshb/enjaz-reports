@@ -17,7 +17,7 @@ import monday_status_styles as status_styles
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from report_common.pptx_helpers import (val, set_text, clear_cell_bullets, set_cell_text, shape_by_id, recursive_text, slide_texts, resize_table, _body_base_height, fill_titled_table, estimate_lines, row_units, slide_index, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, first_table, find_slide_with_text, find_header, read_block, detail_sections, summary_records, task_data, suhail_data, read_sector_counts)
+from report_common.pptx_helpers import (val, set_text, clear_cell_bullets, set_cell_text, shape_by_id, recursive_text, slide_texts, resize_table, fill_titled_table, slide_index, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, first_table, find_slide_with_text, find_header, read_block, detail_sections, summary_records, task_data, suhail_data, read_sector_counts)
 
 import monday_layout as layout
 from report_common.table_typography import set_table_sizes
@@ -25,62 +25,9 @@ from report_common.table_typography import set_table_sizes
 
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
 MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
-AGENDA_HEADERS=['م','جدول الأعمال','المسؤول','المدة الزمنية (بالدقيقة)']
 MASTER_SHA256='1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255'
 TASK_SUMMARY_TITLES=('المهام المكتملة','المهام المتأخرة','المهام المعلقة','طلبات الدعم')
 SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المتأخرة','التحديات')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def fill_agenda_table(shape, rows, weights=None):
-    t=shape.table
-    base=_body_base_height(t,1); header_h=t.rows[0].height
-    resize_table(t,1+len(rows),1 if len(t.rows)>1 else 0)
-    for j,x in enumerate(AGENDA_HEADERS): set_cell_text(t.cell(0,j),x)
-    for i,row in enumerate(rows,1):
-        for j,x in enumerate(row): set_cell_text(t.cell(i,j),x)
-    if weights is None: weights=[1]*len(rows)
-    for i,w in enumerate(weights,1): t.rows[i].height=max(base,int(base*w))
-    if header_h: t.rows[0].height=header_h
-    shape.height=sum((r.height or 0) for r in t.rows)
-
-
-
-
-
-
-def paginate_rows(rows, shape, fixed_rows=2, font_pt=11, capacity_units=None):
-    t=shape.table
-    if capacity_units is None: capacity_units=max(1,len(t.rows)-fixed_rows)
-    pages=[]; cur=[]; weights=[]; used=0
-    for row in rows:
-        w=row_units(row,t,font_pt)
-        if w>capacity_units:
-            raise ValueError('A single row needs %d units but the template page holds %d; '
-                             'shorten the source text or use a taller approved template row.'
-                             % (w,capacity_units))
-        if cur and used+w>capacity_units:
-            pages.append((cur,weights)); cur=[]; weights=[]; used=0
-        cur.append(row); weights.append(w); used+=w
-    if cur or not pages: pages.append((cur,weights))
-    return pages
 
 
 
@@ -253,7 +200,15 @@ def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=N
 
 def parse_args(argv=None):
     ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template'); ap.add_argument('--layout-engine',choices=['auto','native','estimate'],default=os.environ.get('MONDAY_LAYOUT_ENGINE','auto'))
+    ap.add_argument('--meeting-date',type=dt.date.fromisoformat,help='Meeting date YYYY-MM-DD; defaults to this/next Monday in Riyadh')
     return ap.parse_args(argv)
+
+
+def meeting_date(now=None):
+    # Riyadh is UTC+3 year-round; no system timezone or tzdata dependency.
+    riyadh=dt.timezone(dt.timedelta(hours=3))
+    today=(now or dt.datetime.now(riyadh)).astimezone(riyadh).date()
+    return today+dt.timedelta(days=(-today.weekday())%7)
 
 
 def build_candidate(a):
@@ -263,7 +218,7 @@ def build_candidate(a):
         raise ValueError('Bundled Monday meeting template checksum mismatch')
 
     agenda=agenda_rows(a.topics); tk,tchart,task_summaries,tdetails=task_data(a.tasks); sk,schart,suhail_summaries,sdetails=suhail_data(a.suhail)
-    out=Path(a.output); prs=Presentation(template); set_table_sizes(prs); validate_master_patterns(prs)
+    out=Path(a.output); prs=Presentation(template); set_table_sizes(prs,agenda_pt=layout.AGENDA_PT); validate_master_patterns(prs)
     approved=status_styles.examples(template)
 
     # Capture all master patterns before any slide is cloned or removed.
@@ -274,7 +229,7 @@ def build_candidate(a):
     task_patterns=detail_pattern_slides(prs,'task'); suhail_patterns=detail_pattern_slides(prs,'suhail')
 
     bullets=layout.bullet_example(prs)
-    specs=[]
+    specs=[('agenda',agenda_shape,agenda,None,'agenda')]
     for slide,sections,titles in [(task_summary,task_summaries,TASK_SUMMARY_TITLES),(suhail_summary,suhail_summaries,SUHAIL_SUMMARY_TITLES)]:
         patterns={table_title(sh):sh for sh in tables(slide)}
         specs.extend(('summary:'+title,patterns[title],sections[title],None,None) for title in titles)
@@ -285,13 +240,15 @@ def build_candidate(a):
             specs.append((f'{kind}:{i}',shape,[row[:6] for row in rows],title,kind))
     measurements=layout.measure(specs,template,approved,bullets,getattr(a,'layout_engine','auto'))
 
-    # Cover + agenda. Agenda automatically adds continuation pages when needed.
-    set_text(shape_by_id(prs.slides[0],4),f'{dt.datetime.now().astimezone().date().day} {MONTHS[dt.datetime.now().astimezone().date().month-1]} {dt.datetime.now().astimezone().date().year}')
-    agenda_pages=paginate_rows(agenda,agenda_shape,1,11)
-    agenda_targets=[agenda_slide]; last=agenda_slide
-    for _ in range(1,len(agenda_pages)):
-        last=clone_slide(prs,agenda_slide,after=last); agenda_targets.append(last)
-    for sl,(chunk,weights) in zip(agenda_targets,agenda_pages):fill_agenda_table(first_table(sl,4),chunk,weights)
+    # All topics stay on one slide at 14 pt, using measured content heights.
+    date=getattr(a,'meeting_date',None) or meeting_date()
+    set_text(shape_by_id(prs.slides[0],4),f'{date.day} {MONTHS[date.month-1]} {date.year}')
+    header,heights=measurements['agenda']
+    if agenda_shape.top+sum(header)+sum(heights)>prs.slide_height-int(55*12700):
+        raise ValueError('Topics cannot fit on one page at 14 pt; shorten the topics or use an approved wider layout. '
+                         'No topics were split, clipped or omitted.')
+    layout.populate(agenda_shape,agenda,kind='agenda')
+    layout.size_shape(agenda_shape,header,heights,agenda_shape.top)
 
     # Task summary can expand down the left side; when that area fills, create a
     # clean continuation page containing only the approved heading/table pattern.
@@ -316,7 +273,7 @@ def build_candidate(a):
     for sl in task_unused+suhail_unused:
         remove_slide(prs,sl)
 
-    set_table_sizes(prs)
+    set_table_sizes(prs,agenda_pt=layout.AGENDA_PT)
     prs.save(out); patch_charts(out,tchart,schart)
 
 

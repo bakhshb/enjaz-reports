@@ -1,0 +1,123 @@
+{
+  "revision": "Topics/agenda table only changes to 14 pt; every other table remains 11 pt.",
+  "supersedes_font_policy_in": "tests/monday-issue20-acceptance-evidence.json",
+  "implementation_commit": "40fea20d09daeab2bdb8061bb2eafa1ad760b49f",
+  "scope": "Synthetic workbooks only. Installed skills, input workbooks and the approved master were not modified.",
+  "topics_pt": 14,
+  "other_tables_pt": 11,
+  "single_page_topics_counts_verified": [
+    9,
+    10
+  ],
+  "focused_verification": {
+    "tests_passed": 36,
+    "result": "passed",
+    "command": "python -m unittest test_monday_date test_monday_layout test_monday_measurement test_report_typography test_deck_integrity.ScenarioTests test_deck_integrity.MondayGateTests test_sector_typography -v",
+    "log_sha256": "0c864836a762a3dcf6fccf08c3bf6982e3e456da250e1dbc5841b96c28ea5fbf"
+  },
+  "native_review": "Four candidates open in PowerPoint. Every native table cell is 14 pt for topics or 11 pt otherwise; native text bounds and footer checks pass.",
+  "visual_review": "All rendered slides reviewed, with full-size topic-page inspection; no clipping, overlap or extra topic pages.",
+  "export_precision": "Adobe PDFMaker represents nominal 14 pt as 14.04 and nominal 11 pt as 11.04. Actual Abar usage and both table sizes were checked in each PDF.",
+  "cases": [
+    {
+      "scenario": "native-nine",
+      "engine": "native",
+      "topics": 9,
+      "slides": 14,
+      "input_sha256": {
+        "topics.xlsx": "c2ef684ed54f05e32fe6e86cf49c3e1ac7773c33d3597a167ec5ed752cc695a5",
+        "tasks.xlsx": "f692fff8a489b05ceeae902728913f8e847f8b846a566477bb472d903a2dc60c",
+        "projects.xlsx": "67737da0d0ddb56f129aa5250813edc07335bbac73891b5f0c18a5dbf7182397",
+        "monday-meeting-master.pptx": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255"
+      },
+      "pptx_sha256": "9815a70102399cc432ff5c49e107ddcea74063e42084150ce60dd87bae766ec9",
+      "pdf": {
+        "scenario": "native-nine",
+        "pages": 14,
+        "table_chars_checked": 1728,
+        "table_pdf_sizes": [
+          11.04,
+          14.04
+        ],
+        "errors": [],
+        "pptx_sha256": "9815a70102399cc432ff5c49e107ddcea74063e42084150ce60dd87bae766ec9",
+        "pdf_sha256": "36031b64895bcb7267de694f2db3c6cb706d2ead28d00493afe7b66fcbe9bd98"
+      }
+    },
+    {
+      "scenario": "native-ten",
+      "engine": "native",
+      "topics": 10,
+      "slides": 14,
+      "input_sha256": {
+        "topics.xlsx": "e2434b7cfd627645afe22230c6f07c42ac09fac658cbfbcc5cf5c4967775c5aa",
+        "tasks.xlsx": "c8a5b0aebb2a5a54bf39bbd92209384ca82fcf0fc4abd84804bdf1f9211dfae6",
+        "projects.xlsx": "981ee9e1bf83588d11977d28b08fc581986dc9dccd6686abc71324955068fb8b",
+        "monday-meeting-master.pptx": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255"
+      },
+      "pptx_sha256": "d23efcbdb77a01edb58c91ae545d88342de61078077f6d55abd6b22f9ec5eabf",
+      "pdf": {
+        "scenario": "native-ten",
+        "pages": 14,
+        "table_chars_checked": 1819,
+        "table_pdf_sizes": [
+          11.04,
+          14.04
+        ],
+        "errors": [],
+        "pptx_sha256": "d23efcbdb77a01edb58c91ae545d88342de61078077f6d55abd6b22f9ec5eabf",
+        "pdf_sha256": "f3620a4af86a277f98fb9e7260568160f4b435a75df74b6eb32df90e9c3bf462"
+      }
+    },
+    {
+      "scenario": "estimate-ten",
+      "engine": "estimate",
+      "topics": 10,
+      "slides": 14,
+      "input_sha256": {
+        "topics.xlsx": "ecb798c078cf6bcca13a9fd5d7bf776575633f2c70d58cbc6861239ded255a43",
+        "tasks.xlsx": "62017e9711c82ace020f52ccef5b49ce62b1cd9c7bfad5c45ae02706c2d6e8fc",
+        "projects.xlsx": "932354a3bc5240061d42cbdf1ff1ea808a8eb92baf341348ab18d14d32b16118",
+        "monday-meeting-master.pptx": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255"
+      },
+      "pptx_sha256": "de7634bcc7cb939ed970b2c8bf4e9566f28d2f1ba05c3f467190960b9e9a8423",
+      "pdf": {
+        "scenario": "estimate-ten",
+        "pages": 14,
+        "table_chars_checked": 1801,
+        "table_pdf_sizes": [
+          11.04,
+          14.04
+        ],
+        "errors": [],
+        "pptx_sha256": "de7634bcc7cb939ed970b2c8bf4e9566f28d2f1ba05c3f467190960b9e9a8423",
+        "pdf_sha256": "0b3e3387b5d1562069e096df7a98be4c6fb3148c4a74d61eee9033c65d637738"
+      }
+    },
+    {
+      "scenario": "fallback-ten",
+      "engine": "auto",
+      "topics": 10,
+      "slides": 14,
+      "input_sha256": {
+        "topics.xlsx": "d3dea3e0bf7078d9616bc327ffefbf58d2ee14840db94e1d11803a2ab19c4628",
+        "tasks.xlsx": "cacd149d84fbdea5b4fdac9c47747b3e89ea0e6fc4aa671644628d1de5ced7c7",
+        "projects.xlsx": "c0c9ab44b22dafdb002506fc849a9b525c6aac5cff9d19856525cd600c861fa7",
+        "monday-meeting-master.pptx": "1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255"
+      },
+      "pptx_sha256": "f1a7234e2b6ba8e652f8d0b7f4e4a9b2b166596c29c38866497757199183ad66",
+      "pdf": {
+        "scenario": "fallback-ten",
+        "pages": 14,
+        "table_chars_checked": 1801,
+        "table_pdf_sizes": [
+          11.04,
+          14.04
+        ],
+        "errors": [],
+        "pptx_sha256": "f1a7234e2b6ba8e652f8d0b7f4e4a9b2b166596c29c38866497757199183ad66",
+        "pdf_sha256": "62bcedbb74c6b6cb92aaec5580e557f8d473a9725f5147028815d560779eb460"
+      }
+    }
+  ]
+}

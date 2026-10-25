@@ -38,10 +38,11 @@ Never redesign these patterns. Clone and reuse them when more space is required.
 
 
 Primary output: a new editable `MM_YYYY-MM-DD.pptx`. Generate a delivery PDF only if requested; a QA render remains mandatory.
+Use the intended meeting date for the filename and cover. Pass `--meeting-date YYYY-MM-DD` for a specified meeting; otherwise the builder uses this/next Monday in Riyadh (UTC+3), including when prepared on Sunday.
 
 ## Table typography
 
-All table text is **11 pt**, including table titles, headers, data, status cells and notes (and the Monday agenda). Apply this explicit size even when the master stores 10 or 14 pt. Preserve Abar, bold emphasis, RTL, fills and column widths. Adjust row heights and pagination when needed; never reduce the font to make a table fit.
+The Monday topics/agenda table uses **14 pt** throughout, including headers, body cells and blank-cell defaults. Every other table uses **11 pt**, including titles, headers, statuses and notes. Apply these sizes explicitly, preserving Abar, bold emphasis, RTL, fills and column widths. Keep all 9 or 10 agenda topics on one slide using content-sized rows and compact padding; never paginate the agenda or reduce its font. Summaries and details can continue onto additional slides. Verify 14 pt for topics and 11 pt for other tables, with readable Arabic in the PPTX and QA PDF. Regenerate row measurements at the requested sizes.
 
 Apply the per-column horizontal alignment in the business rules to **summary and detail tables**, including headers: sector/dates/status centered; task/project names, notes, updates, support text and challenges right-aligned.
 
@@ -58,7 +59,7 @@ Apply every rule in [the report-specific reference](references/business-rules.md
 uv run scripts/build_report.py --topics "<topics.xlsx>" --tasks "<tasks.xlsx>" --suhail "<suhail.xlsx>" --output "<candidate.pptx>"
 ```
 
-On Windows, the builder measures a disposable populated copy in native PowerPoint before pagination. It does not alter the master or inputs. A native measurement failure stops publication. On other hosts, the conservative content estimate requires visual verification; `--layout-engine estimate` explicitly selects that fallback and `--layout-engine native` requires PowerPoint. `MONDAY_LAYOUT_ENGINE` can select the same engine in automated tests. No measurement cache is reused.
+On Windows, the builder measures a disposable populated copy in native PowerPoint. In `auto` mode, recoverable PowerPoint/PowerShell failures, timeouts, and missing or invalid measurement results produce a visible warning and use fresh conservative estimates for every table. The bundled measurement script runs with a process-only execution-policy override; no machine policy changes. `--layout-engine native` requires valid PowerPoint measurements and stops with the failure reason; `--layout-engine estimate` explicitly selects estimates. Every engine still requires programmatic checks and final visual verification before delivery. `MONDAY_LAYOUT_ENGINE` selects the same engine in automated tests. No measurement cache is reused. The master and inputs are unchanged.
 
 3. The builder includes the programmatic gate, including typography normalization. Do not repeat the gate for unchanged bytes. After a layout correction, rerun the gate once and render its resulting bytes.
 
