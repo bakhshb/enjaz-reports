@@ -168,7 +168,7 @@ class ScenarioTests(unittest.TestCase):
             self.assertEqual(result.returncode,0,result.stderr+result.stdout)
             self.assertTrue(any('قطاع جديد تجريبي' in sh.table.cell(0,0).text for sl in Presentation(deck).slides for sh in sl.shapes if sh.has_table))
 
-    def test_agenda_and_detail_overflow(self):
+    def test_topics_stay_on_one_page_while_details_continue(self):
         with tempfile.TemporaryDirectory() as td:
             result,deck=build_scenario(Path(td),'overflow',32,24)
             self.assertEqual(result.returncode,0,result.stderr+result.stdout)
@@ -177,7 +177,15 @@ class ScenarioTests(unittest.TestCase):
                 pages=[sl for sl in prs.slides if any(sh.has_table and len(sh.table.columns)==6 and sh.table.cell(1,1).text==marker for sh in sl.shapes)]
                 self.assertGreater(len(pages),1)
             agenda_pages=[sl for sl in prs.slides if any(sh.has_table and sh.table.cell(0,0).text=='م' for sh in sl.shapes)]
-            self.assertGreater(len(agenda_pages),1)
+            self.assertEqual(len(agenda_pages),1)
+            agenda=next(sh for sh in agenda_pages[0].shapes if sh.has_table and sh.table.cell(0,0).text=='م')
+            self.assertEqual(len(agenda.table.rows),20)  # 18 topics + meeting summary + header.
+            self.assertLessEqual(agenda.top+agenda.height,prs.slide_height-int(55*12700))
+            for sl in prs.slides:
+                for sh in sl.shapes:
+                    if sh.has_table:
+                        self.assertTrue(all(r.font.size.pt==11 for row in sh.table.rows
+                                            for cell in row.cells for p in cell.text_frame.paragraphs for r in p.runs))
 
 
 class MondayGateTests(unittest.TestCase):
@@ -210,6 +218,54 @@ class MondayGateTests(unittest.TestCase):
     def test_generated_deck_passes(self):
         result=self.check(self.candidate())
         self.assertEqual(result.returncode,0,result.stderr+result.stdout)
+
+    def test_nine_and_ten_long_topics_fit_one_page_at_11_pt(self):
+        for count in (9,10):
+            with self.subTest(count=count),tempfile.TemporaryDirectory() as td:
+                topics=Path(td)/'topics.xlsx';wb=load_workbook(self.topics);ws=wb['Sheet1']
+                ws.delete_rows(3,ws.max_row)
+                for i in range(count-1):
+                    ws.append([i+1,'متابعة تقدم الأعمال ومناقشة الملاحظات\nوالتوصيات والإجراءات المطلوبة للأسبوع القادم','مالك الموضوع',10])
+                ws.append([count,'ملخص الاجتماع','مالك',5]);wb.save(topics)
+                deck=Path(td)/'monday.pptx'
+                result=run(MONDAY/'build_report.py','--topics',topics,'--tasks',self.tasks,'--suhail',self.projects,
+                           '--output',deck,'--layout-engine','estimate','--meeting-date','2026-10-26')
+                self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+                prs=Presentation(deck)
+                agendas=[sh for sl in prs.slides for sh in sl.shapes if sh.has_table and sh.table.cell(0,0).text=='م']
+                self.assertEqual(len(agendas),1)
+                self.assertEqual(len(agendas[0].table.rows),count+1)
+                from report_common.pptx_helpers import slide_texts
+                self.assertIn('26 أكتوبر 2026',slide_texts(prs.slides[0]))
+                self.assertTrue(all(r.font.size.pt==11 for row in agendas[0].table.rows for cell in row.cells
+                                    for p in cell.text_frame.paragraphs for r in p.runs))
+
+    def test_split_topics_rejected_even_when_all_records_match(self):
+        from report_common.pptx_helpers import clone_slide
+        path=self.candidate();prs=Presentation(path)
+        slide=next(sl for sl in prs.slides if any(sh.has_table and sh.table.cell(0,0).text=='م' for sh in sl.shapes))
+        following=clone_slide(prs,slide,after=slide)
+        for sl,index in [(slide,2),(following,1)]:
+            sh=next(sh for sh in sl.shapes if sh.has_table and sh.table.cell(0,0).text=='م')
+            sh.table._tbl.remove(sh.table.rows[index]._tr)
+            sh.height=sum(r.height for r in sh.table.rows)
+        prs.save(path)
+        result=self.check(path)
+        self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('Topics must occupy exactly one page',result.stdout)
+
+    def test_excess_topics_preserve_existing_report_without_splitting_or_shrinking(self):
+        with tempfile.TemporaryDirectory() as td:
+            topics=Path(td)/'topics.xlsx';wb=load_workbook(self.topics);ws=wb['Sheet1']
+            ws.delete_rows(3,ws.max_row)
+            for i in range(60):ws.append([i+1,'موضوع','مالك',5])
+            ws.append([61,'ملخص الاجتماع','مالك',5]);wb.save(topics)
+            output=Path(td)/'report.pptx';output.write_bytes(b'accepted report')
+            result=run(MONDAY/'build_report.py','--topics',topics,'--tasks',self.tasks,
+                       '--suhail',self.projects,'--output',output,'--layout-engine','estimate')
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('Topics cannot fit on one page at 11 pt',result.stderr)
+            self.assertEqual(output.read_bytes(),b'accepted report')
 
     def test_status_typography_corruption_is_not_hidden(self):
         for attribute,value in [('name','Calibri'),('size',Inches(.4)),('bold',True)]:

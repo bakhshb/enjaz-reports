@@ -6,7 +6,7 @@
 
 Read agenda rows in source order and stop after including `ملخص الاجتماع`. Ignore rows below it.
 
-If the approved agenda table fills, clone the agenda slide and continue automatically. Repeat the same header and visual design. Do not fail merely because the agenda needs more than one page.
+Keep every topic, including `ملخص الاجتماع`, together on exactly one agenda slide. Measure the current text at 11 pt, use content-sized rows and 2 pt top/bottom cell padding, and preserve the approved column widths, RTL, header and footer clearance. Do not use the sample row heights or sample row count as capacity. Never split topics across slides, shrink the font, clip or omit records. If the complete topics table still cannot fit at 11 pt, report the space constraint clearly and preserve the previous output; request shorter source topics or an approved layout adjustment. This single-page requirement applies only to the agenda; summaries and details still use continuation pages.
 
 ### Task summary
 

@@ -124,7 +124,7 @@ def read_summary(path,sheet,titles):
 
 def collect(prs,errors,template=status_styles.MASTER):
     check_table_typography(prs,errors)
-    ag=[]; task=[]; suh=[]; suh_seq=[]; summaries={title:[] for title in SUMMARY_HEADERS}
+    ag=[]; agenda_tables=0; task=[]; suh=[]; suh_seq=[]; summaries={title:[] for title in SUMMARY_HEADERS}
     approved=status_styles.examples(template)
     for slide in prs.slides:
         for shape in slide.shapes:
@@ -150,6 +150,7 @@ def collect(prs,errors,template=status_styles.MASTER):
             if t._tbl.tblPr.get("rtl") not in ("1","true"):errors.append(f"slide {si} table is not RTL")
             if sh.top+sum(r.height for r in t.rows)>prs.slide_height-int(50*12700):errors.append(f"slide {si} table crosses footer clearance")
             if cols==4 and rr and rr[0]==AGENDA_HEADERS:
+                agenda_tables+=1
                 ag.extend(tuple(x) for x in rr[1:] if any(x))
             elif cols==6 and len(rr)>=2 and rr[1][:2]==["#","المهمة"]:
                 if not any(x.startswith("تفاصيل المهام (") for x in rr[0]):errors.append(f"slide {si} task table missing title row")
@@ -183,6 +184,7 @@ def collect(prs,errors,template=status_styles.MASTER):
                             if run.font.name not in ALLOWED:errors.append(f"slide {si} unapproved font {run.font.name!r}: {run.text[:30]!r}")
                             sz=run.font.size.pt if run.font.size else None
                             if sz is None or abs(sz-want)>.01:errors.append(f"slide {si} wrong table font size {sz!r}; expected {want:g}")
+    if agenda_tables!=1:errors.append('Topics must occupy exactly one page')
     if ag and ag[-1][1]!="ملخص الاجتماع":errors.append("agenda does not end at ملخص الاجتماع")
     if len(ag)!=len(set(ag)):errors.append("agenda contains duplicate rows")
     if len(suh_seq)!=len(set(suh_seq)):

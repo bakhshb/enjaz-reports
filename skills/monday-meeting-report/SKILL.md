@@ -42,7 +42,7 @@ Use the intended meeting date for the filename and cover. Pass `--meeting-date Y
 
 ## Table typography
 
-All table text is **11 pt**, including table titles, headers, data, status cells and notes (and the Monday agenda). Apply this explicit size even when the master stores 10 or 14 pt. Preserve Abar, bold emphasis, RTL, fills and column widths. Adjust row heights and pagination when needed; never reduce the font to make a table fit.
+All table text is **11 pt**, including table titles, headers, data, status cells and notes (and the Monday agenda). Apply this explicit size even when the master stores 10 or 14 pt. Preserve Abar, bold emphasis, RTL, fills and column widths. Keep all agenda topics on one slide using content-sized rows and compact padding; never paginate the agenda or reduce its font. Summaries and details can continue onto additional slides. Verify 11 pt and readable Arabic in both the PPTX and QA PDF; do not accept an exporter that substitutes or scales the approved font.
 
 Apply the per-column horizontal alignment in the business rules to **summary and detail tables**, including headers: sector/dates/status centered; task/project names, notes, updates, support text and challenges right-aligned.
 

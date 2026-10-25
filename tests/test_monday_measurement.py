@@ -100,6 +100,19 @@ class MondayMeasurementTests(unittest.TestCase):
                                       for v, baseline in zip(values[:2], self.estimates[key][0])])
             self.assertEqual(heights, [int(Pt(v + 2)) for v in values[2:]])
 
+    def test_probe_never_points_template_tags_at_a_slide_layout(self):
+        # A raw copied table can retain rId1, which means "tags" in its source
+        # but "slideLayout" in a fresh probe. PowerPoint refuses that package.
+        def run(args, **kwargs):
+            probe=Presentation(args[-1])
+            for slide in probe.slides:
+                for tag in slide._element.xpath('.//p:tags'):
+                    rid=tag.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                    self.assertTrue(slide.part.rels[rid].reltype.endswith('/tags'))
+            return self.native_result({'agenda':[24,24,30,31],'followup':[24,24,32]})(args,**kwargs)
+        with patch.object(layout.subprocess,'run',side_effect=run):
+            self.measure('native')
+
 
 if __name__ == '__main__':
     unittest.main()

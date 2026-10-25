@@ -11,7 +11,7 @@ import warnings
 from pptx import Presentation
 from pptx.oxml.ns import qn
 from pptx.util import Pt
-from report_common.pptx_helpers import fill_titled_table, remove_slide, set_cell_text
+from report_common.pptx_helpers import fill_titled_table, remove_slide, resize_table, set_cell_text
 from report_common.update_format import format_table_updates
 from report_common.table_typography import apply_table
 
@@ -66,8 +66,17 @@ def bullet_example(prs):
 
 def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
     rtl_table(shape.table)
-    fill_titled_table(shape, rows, title=title)
-    for i, values in enumerate(rows, 2):
+    fixed=1 if kind=='agenda' else 2
+    if kind=='agenda':
+        resize_table(shape.table,1+len(rows),1)
+        for i,values in enumerate(rows,1):
+            for j,value in enumerate(values):set_cell_text(shape.table.cell(i,j),value)
+        for row in shape.table.rows:
+            for cell in row.cells:
+                cell.margin_top=cell.margin_bottom=Pt(2)
+    else:
+        fill_titled_table(shape, rows, title=title)
+    for i, values in enumerate(rows, fixed):
         for j, value in enumerate(values):
             cell = shape.table.cell(i, j)
             # Remove surplus template paragraphs, which otherwise create empty lines.
@@ -75,7 +84,7 @@ def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
             while len(cell.text_frame.paragraphs) > wanted:
                 p = cell.text_frame.paragraphs[-1]._p
                 p.getparent().remove(p)
-        if kind:
+        if kind in ('task','suhail'):
             import monday_status_styles as status_styles
             cell = shape.table.cell(i, 4)
             status = status_styles.canonical(cell.text)
@@ -111,12 +120,19 @@ def measure(specs, template, styles, bullets, engine='auto'):
         slide = probe.slides.add_slide(probe.slide_layouts[0])
         for sh in list(slide.shapes):
             sh.element.getparent().remove(sh.element)
-        slide.shapes._spTree.insert_element_before(copy.deepcopy(shape.element), 'p:extLst')
+        element=copy.deepcopy(shape.element)
+        # Match clone_slide: source-local Office tags/IDs cannot follow a table
+        # into a fresh slide, where the same rId can mean a slide layout.
+        for node in list(element.iter()):
+            if node.tag.rsplit('}',1)[-1] in {'custDataLst','creationId'}:
+                node.getparent().remove(node)
+        slide.shapes._spTree.insert_element_before(element, 'p:extLst')
         sh = slide.shapes[-1]
         sh.name = key
         populate(sh, rows, title, kind, styles, bullets)
+        fixed=1 if kind=='agenda' else 2
         heights = []
-        for row in list(sh.table.rows)[2:]:
+        for row in list(sh.table.rows)[fixed:]:
             height = 20
             for j, cell in enumerate(row.cells):
                 width = max(20, sh.table.columns[j].width / 12700 - (cell.margin_left + cell.margin_right) / 12700)
@@ -125,7 +141,7 @@ def measure(specs, template, styles, bullets, engine='auto'):
             heights.append(int(Pt(height)))
             row.height = Pt(1) if native else Pt(height)
         sh.height = sum(r.height for r in sh.table.rows)
-        estimates[key] = ([r.height for r in list(sh.table.rows)[:2]], heights)
+        estimates[key] = ([r.height for r in list(sh.table.rows)[:fixed]], heights)
     if not native or not estimates:
         return estimates
     try:
@@ -145,8 +161,12 @@ def measure(specs, template, styles, bullets, engine='auto'):
             if (not isinstance(values,list) or len(values)!=sum(map(len,estimates[key]))
                     or any(type(v) not in (int,float) or not math.isfinite(v) or v<=0 for v in values)):
                 raise ValueError('Invalid PowerPoint row measurements: '+key)
-        return {key: ([max(int(Pt(v)), estimates[key][0][i]) for i,v in enumerate(values[:2])],
-                      [max(int(Pt(v + 2)), int(Pt(20))) for v in values[2:]]) for key, values in actual.items()}
+        measured={}
+        for key,values in actual.items():
+            fixed=len(estimates[key][0])
+            measured[key]=([max(int(Pt(v)), estimates[key][0][i]) for i,v in enumerate(values[:fixed])],
+                           [max(int(Pt(v + 2)), int(Pt(20))) for v in values[fixed:]])
+        return measured
     except (OSError, subprocess.SubprocessError, ValueError, TypeError) as exc:
         message='Native PowerPoint row measurement failed: '+str(exc)
         if engine=='native':
