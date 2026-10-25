@@ -38,6 +38,7 @@ Never redesign these patterns. Clone and reuse them when more space is required.
 
 
 Primary output: a new editable `MM_YYYY-MM-DD.pptx`. Generate a delivery PDF only if requested; a QA render remains mandatory.
+Use the intended meeting date for the filename and cover. Pass `--meeting-date YYYY-MM-DD` for a specified meeting; otherwise the builder uses this/next Monday in Riyadh (UTC+3), including when prepared on Sunday.
 
 ## Table typography
 

@@ -253,7 +253,15 @@ def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=N
 
 def parse_args(argv=None):
     ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template'); ap.add_argument('--layout-engine',choices=['auto','native','estimate'],default=os.environ.get('MONDAY_LAYOUT_ENGINE','auto'))
+    ap.add_argument('--meeting-date',type=dt.date.fromisoformat,help='Meeting date YYYY-MM-DD; defaults to this/next Monday in Riyadh')
     return ap.parse_args(argv)
+
+
+def meeting_date(now=None):
+    # Riyadh is UTC+3 year-round; no system timezone or tzdata dependency.
+    riyadh=dt.timezone(dt.timedelta(hours=3))
+    today=(now or dt.datetime.now(riyadh)).astimezone(riyadh).date()
+    return today+dt.timedelta(days=(-today.weekday())%7)
 
 
 def build_candidate(a):
@@ -286,7 +294,8 @@ def build_candidate(a):
     measurements=layout.measure(specs,template,approved,bullets,getattr(a,'layout_engine','auto'))
 
     # Cover + agenda. Agenda automatically adds continuation pages when needed.
-    set_text(shape_by_id(prs.slides[0],4),f'{dt.datetime.now().astimezone().date().day} {MONTHS[dt.datetime.now().astimezone().date().month-1]} {dt.datetime.now().astimezone().date().year}')
+    date=getattr(a,'meeting_date',None) or meeting_date()
+    set_text(shape_by_id(prs.slides[0],4),f'{date.day} {MONTHS[date.month-1]} {date.year}')
     agenda_pages=paginate_rows(agenda,agenda_shape,1,11)
     agenda_targets=[agenda_slide]; last=agenda_slide
     for _ in range(1,len(agenda_pages)):
