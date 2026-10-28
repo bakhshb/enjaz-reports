@@ -12,30 +12,111 @@
 
 `monday-meeting-report` مسار مستقل يأخذ ملف مواضيع الأسبوع وملفي Excel النهائيين للمهام وسهيل لينشئ عرض اجتماع الاثنين. ملفات القوالب كاملة وغير مجزأة. كلا المسارين يستخدم تعليمات مستقلة وسكربت إنشاء وتحقق، ثم مراجعة مرئية إلزامية. ثبّت مجلد `skills/report_common/` مع مجلدي مهارتي التقارير لأنه يحتوي أدوات التنفيذ المشتركة. يجب التحقق من المدخلات الحالية والملف النهائي وفق تعليمات كل مهارة.
 
-## التثبيت في Claude و GPT
+## التثبيت
 
-المهارات بصيغة `SKILL.md` الموحدة، فتعمل في Claude و OpenAI Codex من المصدر نفسه.
+المهارات بصيغة `SKILL.md` الموحدة، فتعمل في Claude و OpenAI من المصدر نفسه. تعليمات التثبيت للوكيل بالإنجليزية في `INSTALL.md`.
 
-- **Claude Code (إضافة):** `/plugin marketplace add bakhshb/enjaz-reports` ثم `/plugin install enjaz-reports@enjaz-reports`. تُثبَّت المهارات الست مع `report_common`.
-- **حزم مستقلة:** شغّل `python3 tools/package_skills.py` لإنشاء مجلد و zip لكل مهارة في `dist/`. تحمل كل حزمة نسختها من `report_common` داخل `scripts/`، ومهارة التقسيم تحمل القالب الأسبوعي في `assets/`.
-  - **Codex:** انسخ مجلدات `dist/<skill>` إلى مجلد مهارات Codex (`~/.codex/skills/`).
-  - **claude.ai و ChatGPT:** ارفع ملف `dist/<skill>.zip` من إعدادات المهارات.
-- تحتاج المهارات Python 3.12 و `uv`، و LibreOffice لمعاينات PDF. خط Abar يجب أن يكون مثبتًا في بيئة التصدير.
+### الطريقة الأسهل: اطلب من الوكيل
+
+انسخ هذه الرسالة وأرسلها إلى Claude Code أو Codex:
+
+```text
+Install the skills from https://github.com/bakhshb/enjaz-reports by following INSTALL.md in that repository, then verify the installation.
+```
+
+### Claude Code
+
+داخل Claude Code:
+
+```text
+/plugin marketplace add bakhshb/enjaz-reports
+```
+
+```text
+/plugin install enjaz-reports@enjaz-reports
+```
+
+للتحديث بعد أي تعديل في `main`:
+
+```text
+/plugin marketplace update enjaz-reports
+```
+
+أو فعّل التحديث التلقائي لهذا المصدر من قائمة `/plugin`.
+
+### Codex
+
+مرة واحدة: استنسخ المستودع واربط المهارات بمجلد Codex.
+
+```bash
+git clone https://github.com/bakhshb/enjaz-reports ~/enjaz-reports
+mkdir -p ~/.codex/skills
+for s in ~/enjaz-reports/skills/*/SKILL.md; do ln -sfn "$(dirname "$s")" ~/.codex/skills/; done
+```
+
+للتحديث:
+
+```bash
+git -C ~/enjaz-reports pull
+```
+
+أعد تشغيل Codex بعد التثبيت ليقرأ المهارات.
+
+### claude.ai و ChatGPT
+
+بعد كل دمج في `main` تُبنى ملفات zip تلقائيًا وتُنشر في إصدار `skills-latest`. نزّل ملف المهارة وارفعه من إعدادات المهارات. لا يوجد تحديث تلقائي هنا؛ أعد الرفع بعد كل تعديل.
+
+```text
+https://github.com/bakhshb/enjaz-reports/releases/tag/skills-latest
+```
+
+لبناء الملفات محليًا في `dist/`:
+
+```bash
+python3 tools/package_skills.py
+```
+
+### المتطلبات
+
+- Python 3.12 و `uv`. تثبّت المهارات `uv` بنفسها إذا لم يكن موجودًا.
+- LibreOffice لمعاينات PDF ولقياس الصفحات في مهارة التقسيم.
+- خط Abar مثبت في بيئة التصدير.
 
 ## اختبارات سلامة بيانات Excel
 
-من جذر المستودع شغّل `uv run tests/test_upstream_integrity.py -v`.
+من جذر المستودع:
+
+```bash
+uv run tests/test_upstream_integrity.py -v
+```
+
 تستخدم الاختبارات ملفات اصطناعية مؤقتة ولا تحتاج بيانات الوزارة. تتحقق من حالات سهيل والأسبوع الأحدث، أعمدة طلبات الدعم، اكتمال قراءة ملفات المعاملات، التعارض عند استبعاد التكرار، التقارير الفارغة، وحماية المخرج السابق عند فشل التحقق. هذه الاختبارات لا تثبت سلامة عرض PowerPoint أو المطابقة البصرية.
 
 ## اختبارات سلامة عروض PowerPoint
 
-من جذر المستودع شغّل `uv run tests/test_deck_integrity.py -v`.
+من جذر المستودع:
+
+```bash
+uv run tests/test_deck_integrity.py -v
+```
+
 تتحقق الاختبارات من مطابقة السجلات وترتيبها وتصنيفها، المؤشرات والمخططات وملفات Excel المضمنة، وسلامة تقسيم العرض. تشمل بيانات فارغة وقطاعًا ومصدرًا جديدين وصفحات إضافية، وحالات إفساد متعمد يجب رفضها. يبقى فتح الملفات في PowerPoint وفحص النسخة النهائية بصريًا شرطًا مستقلًا للتسليم.
 
 ## التحقق الكامل القابل للتكرار
 
-شغّل `uv run tests/run_acceptance.py` لتشغيل جميع اختبارات السلامة في بيئة معزولة.
-ثم شغّل `uv run tests/run_weekly_workflow.py --outdir <new-output-directory>` لإنشاء ملفات اصطناعية لحالات عادية وفارغة وقطاع جديد وصفحات استمرار. يشمل المسار ملخصات Excel الثلاثة، عرض الاثنين، تعبئة القالب الأسبوعي، وتقسيم القطاعات، ويحفظ نتائج المطابقة والبصمات في `evidence.json` لكل حالة.
+لتشغيل جميع اختبارات السلامة في بيئة معزولة:
+
+```bash
+uv run tests/run_acceptance.py
+```
+
+ثم لإنشاء ملفات اصطناعية:
+
+```bash
+uv run tests/run_weekly_workflow.py --outdir <new-output-directory>
+```
+
+ينشئ هذا الأمر ملفات لحالات عادية وفارغة وقطاع جديد وصفحات استمرار. يشمل المسار ملخصات Excel الثلاثة، عرض الاثنين، تعبئة القالب الأسبوعي، وتقسيم القطاعات، ويحفظ نتائج المطابقة والبصمات في `evidence.json` لكل حالة.
 
 هذا المسار أداة تحقق للقالب الحالي، وليس بديلًا عن قرارات توزيع الجداول المبنية على العرض المرئي. تشمل الحالات الأسبوعية ألوان الحالات المشتركة المعتمدة من المستخدم، مع الحفاظ على تنسيق القالب الأسبوعي. الفحص المرئي لجميع الصفحات بوابة القبول الأخيرة. القالب الأصلي لا يتغير. لا تستخدم المخرجات الاصطناعية كتقارير فعلية.
 
@@ -46,5 +127,12 @@
 - تستخدم المهارات القالبين ومرجعي PDF المحدّثين من المستخدم، مع التحقق من البصمات الجديدة.
 - يحذف المخطط القطاع فقط إذا كانت جميع حالاته صفرًا أو فارغة، مع إبقاء المؤشرات والسجلات الأصلية دون تغيير.
 - يتحقق `tests/test_template_acceptance.py` من بيانات المخطط وملف Excel المضمن ومن خط Abar في صفوف المعاملات والملاحظات والصفوف المضافة.
-- على Windows مع Adobe PDFMaker، شغّل `tests/export_acceptance.ps1 -ReportRoot <directory>`، ثم `uv run tests/check_rendered_pdf.py <directory>`. يطابق هذا المسار تصدير المراجع المعتمدة. فشل تصدير PowerPoint المباشر في الحفاظ على Abar على جهاز التحقق؛ نجاح إنشاء PDF وحده ليس قبولًا للخط.
+- على Windows مع Adobe PDFMaker، شغّل الأمرين التاليين بالترتيب:
+
+  ```powershell
+  tests/export_acceptance.ps1 -ReportRoot <directory>
+  uv run tests/check_rendered_pdf.py <directory>
+  ```
+
+  يطابق هذا المسار تصدير المراجع المعتمدة. فشل تصدير PowerPoint المباشر في الحفاظ على Abar على جهاز التحقق؛ نجاح إنشاء PDF وحده ليس قبولًا للخط.
 - راجع الصفحات المرئية بعد التصدير: لا تداخل أو اقتطاع، ولا قطاعات فارغة، وخط Abar ظاهر في النصوص العربية. سجّل بصمات الملفات النهائية ونتائج القبول قبل التسليم.

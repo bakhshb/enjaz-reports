@@ -1,7 +1,8 @@
 {
   "name": "enjaz-reports",
   "description": "Ministry of Hajj and Umrah weekly achievement reports: tasks, Suhail projects, transactions, weekly and Monday meeting decks, and per-sector splits.",
-  "version": "1.0.0",
-  "author": { "name": "Baraa" },
+  "author": {
+    "name": "Baraa"
+  },
   "repository": "https://github.com/bakhshb/enjaz-reports"
 }
