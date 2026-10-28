@@ -882,6 +882,21 @@ def _row_bands(page, x0, x1, y0):
 def _frames(slide):
     return sorted([sh for sh in slide.shapes if sh.has_table], key=lambda s: s.top)
 
+def split_rows(frame, room):
+    """Keep the data rows that fit in `room` EMU; return a copy of the frame holding
+    the title, header and remaining rows, or None when no data row fits."""
+    trs = frame._element.find('.//' + q('tbl')).findall(q('tr'))
+    hs = [int(tr.get('h')) for tr in trs]
+    n, used = 2, hs[0] + hs[1]
+    while n < len(trs) and used + hs[n] <= room:
+        used += hs[n]; n += 1
+    if n == 2: return None
+    rest = deepcopy(frame._element)
+    for tr in trs[n:]: tr.getparent().remove(tr)
+    for tr in rest.find('.//' + q('tbl')).findall(q('tr'))[2:n]: tr.getparent().remove(tr)
+    frame.height = Emu(used)
+    return rest
+
 def refine_positions(manifest):
     """Measure every row and write the real height back, so a table's declared
     geometry matches what it occupies. Stacked tables overlap each other in the
@@ -915,7 +930,9 @@ def refine_positions(manifest):
                     heights[(si, k)] = [int(h / 72 * EMU * SAFETY)
                                         for h in [title_h] + [b[1] - b[0] for b in bands]]
             os.remove(pdf_path); os.remove('_probe.pptx')
-        for si in item['edited']:
+        pending = list(item['edited'])
+        while pending:
+            si = pending.pop(0)
             fr = _frames(prs.slides[si])
             y = fr[0].top if fr else 0
             for k, sh in enumerate(fr):
@@ -924,6 +941,26 @@ def refine_positions(manifest):
                     for tr, h in zip(sh._element.find('.//' + q('tbl')).findall(q('tr')), hs):
                         tr.set('h', str(h))
                     sh.height = Emu(sum(hs))
+            for k, sh in enumerate(fr):
+                # Measured rows can be taller than the estimate. Rows that no longer fit move
+                # to a continuation page placed directly after this one: whole tables when
+                # none of their rows fit, otherwise the overflowing rows of this table.
+                if y + sh.height > FOOTER_Y:
+                    rest = split_rows(sh, FOOTER_Y - y)
+                    if rest is None and not k:
+                        continue  # a single row taller than a page; QA rejects it
+                    spill, new = continuation_slide(prs, si, item['keep'], item['nslides'])
+                    item['keep'].remove(new); item['keep'].insert(item['keep'].index(si) + 1, new)
+                    item['edited'].append(new); pending.insert(0, new)
+                    if rest is not None:
+                        sh.top = Emu(int(y))
+                        spill.shapes._spTree.append(rest)
+                    for moved in fr[k + (rest is not None):]:
+                        spill.shapes._spTree.append(moved._element)
+                    first = next(f for f in spill.shapes if f._element is (fr[k]._element if rest is None else rest))
+                    first.top = Emu(TOP_Y)
+                    first.height = Emu(sum(int(tr.get('h')) for tr in first._element.find('.//' + q('tbl')).findall(q('tr'))))
+                    break
                 sh.top = Emu(int(y))
                 y += sh.height + GAP
         prs.save(item['file'])
