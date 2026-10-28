@@ -263,9 +263,11 @@ When installing or updating this skill locally, first run `uv --version`.
 `scripts/build_report.py` does the whole job:
 
 ```bash
-uv run scripts/build_report.py --input-dir /mnt/user-data/uploads \
-  --output "/mnt/user-data/outputs/تقرير_المعاملات_الموحد.xlsx" [--dedupe]
+uv run scripts/build_report.py --input-dir "<folder-with-sector-files>" \
+  --output "<output-dir>/تقرير_المعاملات_الموحد.xlsx" [--dedupe]
 ```
+
+On claude.ai both arguments may be omitted: they default to `/mnt/user-data/uploads` and `/mnt/user-data/outputs/`.
 
 `--dedupe` counts each transaction number once; without it every record counts.
 

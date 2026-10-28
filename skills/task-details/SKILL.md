@@ -76,7 +76,7 @@ Two sheets, both right-to-left, font **Abar Mid, size 10** throughout (titles,
 
 headers, and body cells alike — this is a fixed rule, not a default to
 
-override), Arabic text with **no diacritics** anywhere Claude writes it
+override), Arabic text with **no diacritics** anywhere the agent writes it
 
 (titles, headers, labels).
 
@@ -237,9 +237,11 @@ When installing or updating this skill locally, first run `uv --version`.
 ## Running it
 
 ```bash
-uv run scripts/build_report.py --input /mnt/user-data/uploads/<source>.xlsx \
-  --output "/mnt/user-data/outputs/ملخص وتفاصيل المهام الاستراتيجية.xlsx"
+uv run scripts/build_report.py --input "<source.xlsx>" \
+  --output "<output-dir>/ملخص وتفاصيل المهام الاستراتيجية.xlsx"
 ```
+
+On claude.ai, uploads are in `/mnt/user-data/uploads/` and outputs go to `/mnt/user-data/outputs/`.
 
 The script prints the total, the four status counts, the sector list, the
 

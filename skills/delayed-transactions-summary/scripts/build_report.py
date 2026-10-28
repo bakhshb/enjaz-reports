@@ -292,9 +292,12 @@ def verify(output, expected_delayed, expected_sectors):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input-dir", default="/mnt/user-data/uploads")
+    # claude.ai defaults; elsewhere the input folder is required and output goes to the working directory.
+    claude_ai = os.path.isdir("/mnt/user-data/uploads")
+    parser.add_argument("--input-dir", required=not claude_ai,
+                        default="/mnt/user-data/uploads" if claude_ai else None)
     parser.add_argument("--output",
-                        default="/mnt/user-data/outputs/تقرير_المعاملات_الموحد.xlsx")
+                        default=("/mnt/user-data/outputs/" if claude_ai else "") + "تقرير_المعاملات_الموحد.xlsx")
     parser.add_argument("--dedupe", action="store_true",
                         help="count each transaction number once")
     args = parser.parse_args()

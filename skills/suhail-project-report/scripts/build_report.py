@@ -15,11 +15,13 @@ Auto-detects the highest-numbered "Wxx" week for both the status column
 """
 import re
 import sys
+from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 SRC = sys.argv[1]
-OUT = sys.argv[2] if len(sys.argv) > 2 else '/mnt/user-data/outputs/ملخص_مشاريع_سهيل.xlsx'
+# claude.ai uses /mnt/user-data/outputs; other agents (Codex, Claude Code) write to the working directory.
+OUT = sys.argv[2] if len(sys.argv) > 2 else ('/mnt/user-data/outputs/' if Path('/mnt/user-data/outputs').is_dir() else '') + 'ملخص_مشاريع_سهيل.xlsx'
 BLANK_STATUS_DEFAULT = 'على المخطط'
 STATUSES = ['مكتملة', 'على المخطط', 'متأخر', 'لم تبدأ']
 

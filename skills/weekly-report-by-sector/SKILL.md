@@ -316,6 +316,6 @@ Apply horizontal alignment to the column headers and body paragraphs:
 - Right-align المهمة, المشروع / اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه.
 - Preserve merged title alignment, numbering and unspecified columns, vertical alignment, RTL, Abar, bold emphasis, bullets and colors.
 
-The splitter applies the shared `report_common/table_typography.py` rules before refinement, and QA rejects a different font size or specified column alignment. Install this skill with the sibling `skills/report_common/` directory. Measure/refine and repaginate at 11 pt; never shrink text to fit.
+The splitter applies the shared `report_common/table_typography.py` rules before refinement, and QA rejects a different font size or specified column alignment. Install this skill with the sibling `skills/report_common/` directory, or use the standalone bundle from `tools/package_skills.py`, which carries `scripts/report_common/` and the weekly master in `assets/`. Measure/refine and repaginate at 11 pt; never shrink text to fit.
 
 Acceptance: test a 10 pt source with incorrect alignment and a current 11 pt source; both must produce 11 pt tables with the above alignment, reconcile all source records/counts/statuses/planned dates, and pass native visual review for clipping/overlap/footer clearance. Deliberately changing an output to 10 pt or right-aligning a centered column must fail QA. Templates and source workbooks remain unchanged.

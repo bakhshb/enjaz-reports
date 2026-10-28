@@ -63,7 +63,7 @@ When installing or updating this skill locally, first run `uv --version`.
 uv run scripts/build_report.py <source.xlsx> [output.xlsx]
 ```
 
-Defaults to `/mnt/user-data/outputs/ملخص_مشاريع_سهيل.xlsx`. It prints the week it picked, the project count, and the status breakdown — check that line before delivering. Then present the file.
+Without an output path it writes `ملخص_مشاريع_سهيل.xlsx` to `/mnt/user-data/outputs/` on claude.ai, otherwise to the working directory. It prints the week it picked, the project count, and the status breakdown — check that line before delivering. Then present the file.
 
 ## Sheet 1 — «ملخص مشاريع سهيل»
 

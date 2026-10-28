@@ -122,6 +122,20 @@ class WeeklyChainTests(unittest.TestCase):
         next(sh for sh in slide.shapes if sh.shape_id==24).text='999'
         prs.save(self.deck);self.assertFalse(self.check())
 
+    @unittest.skipUnless(shutil.which('soffice'), 'LibreOffice is required for measured refinement')
+    def test_measured_refinement_moves_overflowing_tables(self):
+        # Production chain from raw exports: an empty challenges table leaves four project
+        # tables whose measured heights overflow the page the estimate chose.
+        src=self.root/'baseline';p=self.path;ROOT=workflow.fixtures.ROOT
+        workflow.require(run(ROOT/'skills/task-details/scripts/build_report.py','--input',src/'raw-tasks.xlsx','--output',p/'tasks.xlsx'))
+        workflow.require(run(ROOT/'skills/suhail-project-report/scripts/build_report.py',src/'raw-projects.xlsx',p/'projects.xlsx'))
+        workflow.require(run(ROOT/'skills/delayed-transactions-summary/scripts/build_report.py','--input-dir',src/'raw-transactions','--output',p/'transactions.xlsx'))
+        workflow.require(run(ROOT/'skills/weekly-consolidated-report/scripts/build_report.py','--tasks',p/'tasks.xlsx','--suhail',p/'projects.xlsx','--transactions',p/'transactions.xlsx','--output',p/'weekly.pptx'))
+        out=p/'refined'
+        workflow.require(run(SECTOR/'split_report.py',p/'weekly.pptx','--transactions',p/'transactions.xlsx','--outdir',out))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(qa.validate(out) and qa.check(out,p/'weekly.pptx',p/'transactions.xlsx'))
+
     def test_missing_transaction_mapping_rejected(self):
         result=run(SECTOR/'split_report.py',self.master,'--outdir',self.path/'missing','--no-refine')
         self.assertNotEqual(result.returncode,0);self.assertIn('--transactions',result.stderr)
