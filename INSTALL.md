@@ -53,11 +53,9 @@ git -C ~/enjaz-reports pull
 
 Do not copy single skill folders out of the repository: three skills import `skills/report_common/`. If links are not possible, build standalone copies with `python3 tools/package_skills.py` and copy the folders from `dist/`.
 
-## claude.ai and ChatGPT
+## ChatGPT
 
-An agent cannot install skills into these apps. The user downloads a zip from the `skills-latest` release and uploads it in the app's skill settings:
-
-https://github.com/bakhshb/enjaz-reports/releases/tag/skills-latest
+An agent cannot add plugins to ChatGPT. The user adds the repository `https://github.com/bakhshb/enjaz-reports` from the ChatGPT Plugins page (**Add**) and presses the refresh button there after changes to `main`.
 
 ## Prerequisites
 
