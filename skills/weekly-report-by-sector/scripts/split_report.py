@@ -699,7 +699,11 @@ def build(master, outdir, aliases, transactions=None, only=None):
     for u in challenges: B(C(u['sector']))['challenges'].append(u)
 
     sl = list(src.slides)
-    asset_path = pathlib.Path(__file__).resolve().parents[2] / 'weekly-consolidated-report' / 'assets' / 'weekly-report-master.pptx'
+    here = pathlib.Path(__file__).resolve()
+    # Standalone bundles carry the master in assets/; repository installs use the sibling skill.
+    asset_path = here.parents[1] / 'assets' / 'weekly-report-master.pptx'
+    if not asset_path.exists():
+        asset_path = here.parents[2] / 'weekly-consolidated-report' / 'assets' / 'weekly-report-master.pptx'
     design = Presentation(str(asset_path)) if asset_path.exists() else None
     design_slides = list(design.slides) if design else []
     def titled_frame(indices, title):

@@ -12,6 +12,16 @@
 
 `monday-meeting-report` مسار مستقل يأخذ ملف مواضيع الأسبوع وملفي Excel النهائيين للمهام وسهيل لينشئ عرض اجتماع الاثنين. ملفات القوالب كاملة وغير مجزأة. كلا المسارين يستخدم تعليمات مستقلة وسكربت إنشاء وتحقق، ثم مراجعة مرئية إلزامية. ثبّت مجلد `skills/report_common/` مع مجلدي مهارتي التقارير لأنه يحتوي أدوات التنفيذ المشتركة. يجب التحقق من المدخلات الحالية والملف النهائي وفق تعليمات كل مهارة.
 
+## التثبيت في Claude و GPT
+
+المهارات بصيغة `SKILL.md` الموحدة، فتعمل في Claude و OpenAI Codex من المصدر نفسه.
+
+- **Claude Code (إضافة):** `/plugin marketplace add bakhshb/enjaz-reports` ثم `/plugin install enjaz-reports@enjaz-reports`. تُثبَّت المهارات الست مع `report_common`.
+- **حزم مستقلة:** شغّل `python3 tools/package_skills.py` لإنشاء مجلد و zip لكل مهارة في `dist/`. تحمل كل حزمة نسختها من `report_common` داخل `scripts/`، ومهارة التقسيم تحمل القالب الأسبوعي في `assets/`.
+  - **Codex:** انسخ مجلدات `dist/<skill>` إلى مجلد مهارات Codex (`~/.codex/skills/`).
+  - **claude.ai و ChatGPT:** ارفع ملف `dist/<skill>.zip` من إعدادات المهارات.
+- تحتاج المهارات Python 3.12 و `uv`، و LibreOffice لمعاينات PDF. خط Abar يجب أن يكون مثبتًا في بيئة التصدير.
+
 ## اختبارات سلامة بيانات Excel
 
 من جذر المستودع شغّل `uv run tests/test_upstream_integrity.py -v`.

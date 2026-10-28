@@ -1,0 +1,14 @@
+{
+  "name": "enjaz-reports",
+  "description": "Enjaz weekly report skills for the Ministry of Hajj and Umrah.",
+  "owner": {
+    "name": "Baraa"
+  },
+  "plugins": [
+    {
+      "name": "enjaz-reports",
+      "source": "./",
+      "description": "Arabic weekly achievement report skills (Excel and PowerPoint)."
+    }
+  ]
+}

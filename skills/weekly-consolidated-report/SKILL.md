@@ -85,7 +85,7 @@ Stop the affected report when inputs conflict, a required pattern/style is unapp
 
 ## Runtime and installation
 
-Prefer `uv run` using the declared dependencies. Reuse an existing installation. If resolution is unavailable and an existing compatible Python satisfies the dependencies, use it and record the fallback; do not modify host Python. If installing uv is necessary, use Astral's official user-scoped installer, not pip. Both report folders require the sibling `skills/report_common/` directory, installed together from this repository. Runtime scripts must not import test fixtures or the other report's generator.
+Prefer `uv run` using the declared dependencies. Reuse an existing installation. If resolution is unavailable and an existing compatible Python satisfies the dependencies, use it and record the fallback; do not modify host Python. If installing uv is necessary, use Astral's official user-scoped installer, not pip. Shared code lives in `report_common/`: the sibling `skills/report_common/` in a repository or plugin install, or `scripts/report_common/` inside a standalone bundle from `tools/package_skills.py`. In a bundle, run the PDF exporter as `uv run scripts/report_common/render.py`. Runtime scripts must not import test fixtures or the other report's generator.
 
 ## Delivery
 
