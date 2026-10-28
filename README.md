@@ -62,15 +62,19 @@ git -C ~/enjaz-reports pull
 
 أعد تشغيل Codex بعد التثبيت ليقرأ المهارات.
 
-### claude.ai و ChatGPT
+### ChatGPT
 
-بعد كل دمج في `main` تُبنى ملفات zip تلقائيًا وتُنشر في إصدار `skills-latest`. نزّل ملف المهارة وارفعه من إعدادات المهارات. لا يوجد تحديث تلقائي هنا؛ أعد الرفع بعد كل تعديل.
+من صفحة Plugins اضغط **Add** وأضف المستودع:
 
 ```text
-https://github.com/bakhshb/enjaz-reports/releases/tag/skills-latest
+https://github.com/bakhshb/enjaz-reports
 ```
 
-لبناء الملفات محليًا في `dist/`:
+يقرأ ChatGPT المهارات من المستودع مباشرة. بعد أي دمج في `main` اضغط زر التحديث 🔄 أعلى صفحة Plugins.
+
+### رفع يدوي (عند الحاجة فقط)
+
+للمنصات التي تقبل ملف zip فقط، ابنِ الملفات محليًا في `dist/` ثم ارفع ملف المهارة. لا يوجد تحديث تلقائي هنا؛ أعد البناء والرفع بعد كل تعديل.
 
 ```bash
 python3 tools/package_skills.py
