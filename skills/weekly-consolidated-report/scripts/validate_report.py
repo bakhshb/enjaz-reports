@@ -15,7 +15,7 @@ from weekly_data import MASTER, approved_styles, transaction_data, field_key, TR
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
 from report_common.table_typography import set_table_sizes, set_table_directions, TABLE_PT, check_table_typography
-from weekly_artwork import check_detail_artwork, all_shapes, DIGITAL_DETAIL_LABEL
+from weekly_artwork import check_detail_artwork, all_shapes, DIGITAL_DETAIL_LABEL, is_digital_detail
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
@@ -37,10 +37,20 @@ def font_signature(run):
     cs=run._r.find('./'+qn('a:rPr')+'/'+qn('a:cs'))
     return (run.font.name,run.font.size.pt if run.font.size else None,cs.get('typeface') if cs is not None else run.font.name)
 
-def check_table_style(table,pattern,errors):
+def digital_reference_row(pattern):
+    """Digital detail rows are generated from the master's heading/body examples, not by index."""
+    heading=next((row for row in list(pattern.rows)[2:] if row.cells[0].span_width==4),None)
+    body=next((row for row in list(pattern.rows)[2:] if row.cells[0].span_width!=4),None)
+    def resolve(ri,row):
+        if ri<2:return pattern.rows[ri]
+        if len(pattern.columns)==4 and row.cells[0].span_width==4:return heading
+        return body if body is not None else pattern.rows[min(ri,len(pattern.rows)-1)]
+    return resolve
+
+def check_table_style(table,pattern,errors,resolve=None):
     if [c.width for c in table.columns]!=[c.width for c in pattern.columns]:errors.append('Table column widths changed')
     for ri,row in enumerate(table.rows):
-        reference=pattern.rows[ri if ri<len(pattern.rows) else 2]
+        reference=resolve(ri,row) if resolve else pattern.rows[ri if ri<len(pattern.rows) else 2]
         for ci,cell in enumerate(row.cells):
             base=reference.cells[ci]
             is_status=len(table.columns)==6 and ri>=2 and ci==4
@@ -72,10 +82,10 @@ def check_navigation(prs,errors):
         if targets!=expected:errors.append('Navigation target differs: '+kind)
         if any(i<=divider_index or i>=len(slides)-1 for i,_ in groups[kind]):errors.append('Detail section order changed')
     if groups['task'] and groups['project'] and groups['task'][-1][0]>=groups['project'][0][0]:errors.append('Task/project order changed')
-    digital=[(i,sl) for i,sl in enumerate(slides) if any(sh.has_table and len(sh.table.columns)==4
-             and len(sh.table.rows)>1 and any(c.text=='أساس التقييم' for c in sh.table.rows[1].cells) for sh in sl.shapes)]
+    digital=[(i,sl) for i,sl in enumerate(slides) if is_digital_detail(sl)]
     if digital:
-        if len(digital)!=6 or [i for i,_ in digital]!=list(range(digital[0][0],digital[0][0]+6)) or digital[-1][0]!=len(slides)-2:
+        # The slide count follows the reviewed data; the block must stay contiguous before the closing slide.
+        if [i for i,_ in digital]!=list(range(digital[0][0],digital[0][0]+len(digital))) or digital[-1][0]!=len(slides)-2:
             errors.append('Digital detail slides are missing or out of order')
         if groups['project'] and digital[0][0]<=groups['project'][-1][0]:
             errors.append('Digital details must follow Suhail details')
@@ -89,7 +99,7 @@ def check_navigation(prs,errors):
                 errors.append('Digital detail divider button has the wrong destination')
     for i,sl in enumerate(slides):
         for sh in helpers.tables(sl,4):
-            if len(sh.table.rows)>1 and any(c.text=='أساس التقييم' for c in sh.table.rows[1].cells):
+            if is_digital_detail(sl) and len(sh.table.rows)>1 and any(c.text=='أساس التقييم' for c in sh.table.rows[1].cells):
                 continue
             title=helpers.table_title(sh)
             start,end=(positions[0],positions[1]) if title in helpers.TASK_SUMMARY_TITLES else (positions[1],positions[2])
@@ -142,9 +152,10 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     patterns={helpers.table_title(sh):sh.table for sl in master.slides for sh in helpers.tables(sl,4)}
     digital_patterns={}
     if reviewed is not None:
-        from digital_maturity import detail_slides, _detail_table, _challenge_table
-        digital_patterns={current.part:(_detail_table(pattern),_challenge_table(pattern))
-                          for current,pattern in zip(detail_slides(final),detail_slides(master))}
+        from digital_maturity import detail_slides, _detail_table, _challenge_table, CHALLENGE_HEADERS
+        pattern_slide=detail_slides(master)[0]
+        digital_patterns={current.part:(_detail_table(pattern_slide),_challenge_table(pattern_slide))
+                          for current in detail_slides(final)}
     task_pattern=helpers.detail_tables(helpers.detail_pattern_slides(master,'task')[0],'task')[0].table
     project_pattern=helpers.detail_tables(helpers.detail_pattern_slides(master,'project')[0],'project')[0].table
     transaction_pattern=next(sh.table for sl in master.slides for sh in helpers.tables(sl,5))
@@ -166,9 +177,12 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 if headers!=[c.text for c in pattern.rows[1].cells]:errors.append('Digital challenge headers changed')
             elif sl.part in digital_patterns and len(headers) in (2,4):
                 pattern=digital_patterns[sl.part][0 if len(headers)==4 else 1]
-                if pattern is None or headers!=[c.text for c in pattern.rows[1].cells]:
+                approved=None if pattern is None else [c.text for c in pattern.rows[1].cells]
+                # The challenge header follows the source (التحدي/التحديث); the detail header is fixed.
+                if pattern is None or (headers!=approved and not (len(headers)==2 and headers[0]=='#' and headers[1] in CHALLENGE_HEADERS)):
                     errors.append('Digital detail table headers changed')
                     continue
+                check_table_style(table,pattern,errors,digital_reference_row(pattern));continue
             elif len(headers)==6:
                 kind='task' if 'المهمة' in headers else 'project'
                 pattern=task_pattern if kind=='task' else project_pattern
@@ -224,7 +238,8 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                     if (actual_bullet is not None)!=bullet:errors.append('Suhail update list formatting differs')
     for title,records in {**ts,**ps}.items():
         if title in SUMMARY_UPDATE_TITLES:
-            cells=[row.cells[update_column(sh.table)] for sl in final.slides for sh in helpers.tables(sl)
+            # Digital challenge tables may share the «أبرز التحديثات» title; they reconcile separately.
+            cells=[row.cells[update_column(sh.table)] for sl in final.slides if not is_digital_detail(sl) for sh in helpers.tables(sl)
                    if helpers.table_title(sh)==title for row in list(sh.table.rows)[2:]]
             if len(cells)!=len(records):errors.append('Suhail summary update count differs')
             for cell,row in zip(cells,records):check_update(cell,exact(row[3]),errors,paragraph_items=True)
@@ -245,7 +260,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
         divider_index=next(i for i,sl in enumerate(final.slides) if {'تفاصيل المهام','تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))
         if digital_index <= transaction_index or digital_index != divider_index-1:
             errors.append('Digital-maturity slide is outside its approved position')
-        check_digital(final,report,reviewed,errors)
+        check_digital(final,report,reviewed,errors,master)
     check_navigation(final,errors)
     check_detail_artwork(final,master,errors)
     if errors:raise ValueError('\n'.join(dict.fromkeys(errors)))

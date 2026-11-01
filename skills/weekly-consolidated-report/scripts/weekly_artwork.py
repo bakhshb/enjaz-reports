@@ -17,8 +17,14 @@ DIGITAL_DETAIL_LABEL = 'تفاصيل مؤشر نضج التجربة الرقمي
 def label(text):
     return ' '.join(text.split())
 
+def is_digital_detail(slide):
+    """A digital indicator-detail slide carries the approved four-column table."""
+    return any(sh.has_table and len(sh.table.columns) == 4 and len(sh.table.rows) > 1
+               and any(c.text == 'أساس التقييم' for c in sh.table.rows[1].cells) for sh in slide.shapes)
+
 def detail_kind(slide):
-    return next((kind for kind in ('task', 'project') if helpers.detail_tables(slide, kind)), None)
+    kind = next((kind for kind in ('task', 'project') if helpers.detail_tables(slide, kind)), None)
+    return kind or ('digital' if is_digital_detail(slide) else None)
 
 def all_shapes(shapes):
     for shape in shapes:
@@ -81,9 +87,7 @@ def prepare_navigation(prs):
                 link.set(qn('r:id'), rid)
                 link.set('action', 'ppaction://hlinksldjump')
                 props.insert(0, link)
-    details = [sl for sl in prs.slides if any(sh.has_table and len(sh.table.columns) == 4
-               and len(sh.table.rows) > 1 and any(c.text == 'أساس التقييم' for c in sh.table.rows[1].cells)
-               for sh in sl.shapes)]
+    details = [sl for sl in prs.slides if is_digital_detail(sl)]
     if details:
         divider = next(sl for sl in prs.slides if {'تفاصيل المهام', 'تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))
         labels = [sh for sh in all_shapes(divider.shapes)
@@ -117,6 +121,9 @@ def layer_signature(layer):
 
 def check_detail_artwork(prs, master, errors):
     patterns = {kind: helpers.detail_pattern_slides(master, kind)[0] for kind in ('task', 'project')}
+    digital_patterns = [sl for sl in master.slides if is_digital_detail(sl)]
+    if digital_patterns:
+        patterns['digital'] = digital_patterns[0]
     destinations = targets(prs)
     if DIGITAL_NAME in destinations:
         digital = next(sl for sl in prs.slides if sl.part == destinations[DIGITAL_NAME])
@@ -131,7 +138,7 @@ def check_detail_artwork(prs, master, errors):
     checked = set()
     for index, slide in enumerate(prs.slides, 1):
         kind = detail_kind(slide)
-        if kind is None:
+        if kind is None or kind not in patterns:
             continue
         prefix = f'Slide {index}: '
         if slide._element.get('showMasterSp', '1') not in ('1', 'true'):
