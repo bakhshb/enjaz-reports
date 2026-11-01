@@ -14,7 +14,7 @@ Create the report from current final Excel inputs and one of this skill's approv
 When the user sends the Excel files without choosing a model, ask: **«أي نموذج تريد: التقرير الموحد الحالي، أم التقرير الموحد مع نضج التجربة الرقمية؟»** Wait for the choice before generating. If the user already selected one, use it without repeating the question. Do not select a model from the mere presence or absence of a PDF.
 
 - **التقرير الموحد الحالي** (`standard`): the existing master and three Excel inputs, with unchanged business rules.
-- **التقرير الموحد مع نضج التجربة الرقمية** (`digital`): the second bundled master and the same three Excel inputs, plus the current digital-maturity PDF. PDF page one fills the summary; pages two through seven fill the six approved detail slides. Read [digital-maturity mapping](references/digital-maturity.md) only for this model. If the PDF is missing, ask for it before building.
+- **التقرير الموحد مع نضج التجربة الرقمية** (`digital`): the second bundled master and the same three Excel inputs, plus the current digital-maturity PDF (the landscape «horizontal» export). The PDF is a data source only: page one fills the summary; every later page belongs to one sector, and a sector may span several source pages titled «(k/n)». Merge each sector's pages into one record set and re-flow it into the approved portrait detail slides; never reproduce the source pagination, one slide per PDF page, or a half-empty slide. Read [digital-maturity mapping](references/digital-maturity.md) only for this model. If the PDF is missing, ask for it before building.
 
 ## Inputs and output
 
@@ -22,7 +22,8 @@ When the user sends the Excel files without choosing a model, ask: **«أي نم
 - ملخص_مشاريع_سهيل.xlsx: ورقتا ملخص مشاريع سهيل وتفاصيل مشاريع سهيل.
 - تقرير_المعاملات_الموحد.xlsx: ورقة المعاملات.
 - قالب PowerPoint المعتمد الحالي: `assets/weekly-report-master.pptx`، مع PDF الموافق مرجعًا بصريًا. هذا القالب هو مصدر التصميم المعتمد الحالي.
-- قالب النموذج الرقمي الإضافي: `assets/weekly-report-digital-master.pptx`. يبقى النموذج الحالي متاحًا دون استبدال.
+- قالب النموذج الرقمي الإضافي: `assets/weekly-report-digital-master.pptx`. يبقى النموذج الحالي متاحًا دون استبدال. مرجعه البصري المعتمد للمخرج هو `assets/weekly-report-digital-reference.pdf` (تقرير 29 أكتوبر 2026): يبيّن كيف يُعاد صبّ قطاعات ملف التجربة الرقمية الأفقي في شرائح التفاصيل العمودية، وهو مرجع تصميم لا مصدر بيانات.
+- عينة المصدر الأفقي المعتمد لملف التجربة الرقمية محفوظة في المستودع: `tests/fixtures/digital-maturity-horizontal.pdf` (تحديث 1448/5/17هـ). يختبرها `tests/test_weekly_digital_maturity.py` استخراجًا ودمجًا وبناءً؛ أي تغيير في المستخرج يجب أن يبقي هذه العينة ناجحة.
 - At runtime, use the new Excel files attached to the request. Restore the approved PowerPoint template from the assets attached to this skill; the user should not need to attach the template again. Ask for the template only if the skill assets are unavailable or fail integrity verification. Never substitute sample values.
 - Primary output: `تقرير الإنجاز الأسبوعي بتاريخ الإنشاء.pptx`, saved as a new file. Create a matching PDF only when requested. Never modify the inputs or overwrite the original template.
 
@@ -51,7 +52,7 @@ Apply every rule in [the report-specific reference](references/business-rules.md
 uv run scripts/digital_maturity.py --pdf "<digital.pdf>" --output "<review.json>"
 ```
 
-Compare every extracted card percentage, sector/bar color and value, sector note, and challenge line with rendered page one. Review the six detail-page titles, four cards per page, every table row, and every challenge against rendered PDF pages two through seven. Correct PDF text-layer reversal, numbers, codes, or ligature errors in the review file; never invent missing values. Set `reviewed` to `true` only after the full comparison. The builder rejects unreviewed data and a PDF hash mismatch. Keep the review file as QA evidence outside the delivered slides.
+Compare every extracted card percentage, sector/bar color and value, sector note, and challenge line with rendered page one. Review every merged sector in `detail_sectors` (title without suffix, four cards, every table row in source order, every challenge from all of its pages) against the rendered source pages listed in its `source_pages`. Correct PDF text-layer reversal, numbers, codes, `(cid:…)` glyph gaps, or ligature errors in the review file; never invent missing values and never merge, reword or drop challenges. Set `reviewed` to `true` only after the full comparison. The builder rejects unreviewed data, a PDF hash mismatch, a title that still carries «(k/n)», or a row that still carries «(تتمة)». Keep the review file as QA evidence outside the delivered slides. If the extractor rejects the PDF (layout, page count, table shape), stop and report the exact error; do not hand-build the digital slides page by page.
 2. Generate into a new candidate path:
 
 ```bash

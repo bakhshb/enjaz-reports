@@ -15,11 +15,11 @@ from report_common import pptx_helpers as builder
 from report_common import status_styles
 from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
-from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom
+from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP
 
 from update_format import format_update
 from report_common.update_format import format_table_updates
-from weekly_artwork import next_shape_id, prepare_navigation
+from weekly_artwork import place_table_copy, prepare_navigation
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
@@ -65,13 +65,7 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
         chunk=[];weights=[];heights=[]
         def place():
             nonlocal y,chunk,weights,heights
-            element=deepcopy(pattern._element)
-            identity=element.find('.//'+qn('p:cNvPr'))
-            identity.set('id',str(next_shape_id(current)))
-            for node in list(element.iter()):
-                if node.tag.rsplit('}',1)[-1] in ('creationId','custDataLst'):node.getparent().remove(node)
-            current.shapes._spTree.insert_element_before(element,'p:extLst')
-            sh=list(current.shapes)[-1];sh.top=y
+            sh=place_table_copy(current,pattern._element);sh.top=y
             builder.fill_titled_table(sh,chunk,title=title,weights=weights)
             for row,values in zip(list(sh.table.rows)[2:],chunk):
                 for cell,value in zip(row.cells,values):set_cell_exact(cell,value)
@@ -82,7 +76,7 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
             if fixed_heights:
                 for row,height in zip(sh.table.rows,fixed_heights+heights):row.height=height
                 sh.height=sum(row.height for row in sh.table.rows)
-            y+=sh.height+90000;chunk=[];weights=[];heights=[]
+            y+=sh.height+TABLE_GAP;chunk=[];weights=[];heights=[]
         for index,row in enumerate(records):
             weight=builder.row_units(row,pattern.table,11)
             height=math.ceil(measured['body'][index]*12700) if measured else base*weight
