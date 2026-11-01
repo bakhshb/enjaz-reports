@@ -79,6 +79,119 @@ class VisualTextTests(unittest.TestCase):
         self.assertEqual(digital.split_title('وكالة شؤون العمرة والزيارة'), ('وكالة شؤون العمرة والزيارة', None, None))
 
 
+class LandscapeFixtureTests(unittest.TestCase):
+    """The committed landscape export is the approved source layout; extraction must keep reading it."""
+
+    FIXTURE = ROOT / 'tests/fixtures/digital-maturity-horizontal.pdf'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.data = digital.extract_pdf(cls.FIXTURE)
+
+    def test_summary_page(self):
+        data = self.data
+        self.assertFalse(data['reviewed'])
+        self.assertEqual(data['source_date_hijri'], '1448/5/17')
+        self.assertEqual(data['metrics'], {'experience': 48, 'satisfaction': 15, 'complaints': 29, 'tools': 40})
+        self.assertEqual([s['name'] for s in data['sectors']],
+                         ['وكالة التحول الرقمي', 'وكالة شؤون الحج', 'وكالة شؤون العمرة والزيارة',
+                          'وكالة تطوير الأعمال وخدمة المستفيدين', 'مركز منصة نسك الرقمية'])
+        self.assertEqual(data['sectors'][1]['metrics'], {'experience': 15, 'satisfaction': 15, 'complaints': 15, 'tools': None})
+        self.assertEqual(data['sectors'][2]['note'], 'ستدمج في نسك وبالتالي لن تقيم بشكل مستقل')
+        self.assertTrue(all(v is None for v in data['sectors'][2]['metrics'].values()))
+        self.assertEqual(data['sectors'][4]['metrics'], {'experience': 65, 'satisfaction': 15, 'complaints': 35, 'tools': 75})
+        self.assertEqual([c['perspective'] for c in data['challenges']],
+                         ['جميع المناظير', 'تجربة المستخدم ورضا المستفيد', 'التعامل مع الشكاوى', 'جميع المناظير'])
+        self.assertIn('nusuk.sa وتطبيق نسك', data['challenges'][1]['text'])
+        self.assertIn('(15 نوفمبر)', data['challenges'][2]['text'])
+        # Glyphs the text layer cannot map stay visible for the reviewer instead of being invented.
+        self.assertIn('(cid:', data['challenges'][3]['text'])
+
+    def test_sectors_merge_source_pages(self):
+        sectors = self.data['detail_sectors']
+        self.assertEqual([(s['title'], s['source_pages']) for s in sectors], [
+            ('وكالة التحول الرقمي', [2, 3, 4]),
+            ('وكالة شؤون الحج', [5, 6]),
+            ('وكالة شؤون العمرة والزيارة', [7]),
+            ('وكالة تطوير الأعمال وخدمة المستفيدين', [8, 9, 10]),
+            ('مركز منصة نسك الرقمية', [11, 12, 13, 14, 15, 16]),
+        ])
+        for sector in sectors:
+            self.assertFalse(any(digital.CONTINUATION in row[0] for row in sector['rows'] if digital.is_heading(row)), sector['title'])
+            self.assertIsNone(digital.split_title(sector['title'])[1])
+        first = sectors[0]
+        self.assertEqual(first['cards'], {axis: '15%' for axis in digital.AXES})
+        self.assertEqual([row[0] for row in first['rows'] if digital.is_heading(row)],
+                         ['تجربة المستخدم: 15%', 'رضا المستفيد: 15%', 'التعامل مع الشكاوى: 15%', 'التقنيات والأدوات: 15%'])
+        self.assertEqual([row[3] for row in first['rows'] if not digital.is_heading(row)],
+                         [f'INF-{i:02d}' for i in range(1, 8)] + ['S-03'] + ['CS-25', 'CS-28', 'CS-34', 'CS-36', 'CS-43', 'CS-55', 'CS-59']
+                         + [f'INF-{i:02d}' for i in range(8, 15)])
+        self.assertEqual((first['challenge_title'], first['challenge_header'], len(first['challenges'])), ('أبرز التحديثات', 'التحديث', 2))
+        hajj = sectors[1]
+        self.assertEqual(hajj['cards']['tools'], 'لا ينطبق')
+        self.assertIn(['جاهزية + تحديد التواريخ', '15%', 'معالجة ملاحظات إمكانية الوصول التقنية في منصة نسك حج (18 ملاحظة)', 'TD-01..18'], hajj['rows'])
+        umrah = sectors[2]
+        self.assertEqual(umrah['cards'], {axis: 'معلق' for axis in digital.AXES})
+        self.assertEqual([row[3] for row in umrah['rows']], ['U-01..09', 'TD-01..10', 'S-01..05', 'N-01..05', 'CS-06/13/21/77'])
+        business = sectors[3]
+        self.assertEqual(business['cards'], {'experience': 'لا ينطبق', 'satisfaction': 'لا ينطبق', 'complaints': '34%', 'tools': 'لا ينطبق'})
+        self.assertEqual(business['rows'][0], ['التعامل مع الشكاوى: 34% (متوسط 18 مؤشرا)', '', '', ''])
+        self.assertEqual(len([row for row in business['rows'] if not digital.is_heading(row)]), 18)
+        tasks = [row[2] for row in business['rows']]
+        self.assertIn('نسبة إشغال الدائرة الهاتفية SIP Trunk (CS-33..34)', tasks)
+        self.assertIn('حل المشكلة من أول تواصل FCR (CS-58..63)', tasks)
+        self.assertIn('دليل الشروط والأحكام لكل قناة (CS-01..09)', tasks)
+        self.assertEqual(len(business['challenges']), 3)
+        nusuk = sectors[4]
+        self.assertEqual(nusuk['cards'], {'experience': '65%', 'satisfaction': '15%', 'complaints': '35%', 'tools': '75%'})
+        self.assertEqual(len([row for row in nusuk['rows'] if not digital.is_heading(row)]), 48)
+        self.assertIn(['رضا المستفيد: 15% (10 مهام)', '', '', ''], nusuk['rows'])
+        self.assertIn(['تقدم فعلي في التنفيذ', '85%', 'ملاحظات إمكانية الوصول التقنية في منصة نسك (15 ملاحظة، 499 حالة)', 'TD-01..15'], nusuk['rows'])
+        self.assertEqual((nusuk['challenge_title'], nusuk['challenge_header'], len(nusuk['challenges'])), ('التحديات', 'التحدي', 3))
+
+    def test_reviewed_fixture_builds_and_reconciles(self):
+        """The fixture, once reviewed, flows into the portrait master without source pagination."""
+        data = json.loads(json.dumps(self.data))
+        fixes = {'خا(cid:571)(cid:437) نطاق': 'خارج نطاق', 'المق(cid:1319)ح': 'المقترح', '(،W-03 S-02)': '(W-03، S-02)'}
+        def fix(text):
+            for old, new in fixes.items():
+                text = text.replace(old, new)
+            return text
+        for challenge in data['challenges']:
+            challenge['text'] = fix(challenge['text'])
+        for sector in data['detail_sectors']:
+            sector['challenges'] = [fix(c) for c in sector['challenges']]
+        data['reviewed'] = True
+        with tempfile.TemporaryDirectory() as temp:
+            review = Path(temp) / 'review.json'
+            review.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
+            reviewed = digital.load_reviewed(review, self.FIXTURE)
+            prs = Presentation(digital.MASTER)
+            digital.populate(prs, reviewed)
+            prepare_navigation(prs)
+            report = Path(temp) / 'report.pptx'
+            prs.save(report)
+            prs = Presentation(report)
+            errors = []
+            digital.check(prs, report, reviewed, errors)
+            self.assertEqual(errors, [])
+            slides = digital.detail_slides(prs)
+            titles = [digital._detail_table(slide).cell(0, 0).text for slide in slides]
+            groups = [digital.split_title(title)[0] for title in titles]
+            self.assertEqual(list(dict.fromkeys(groups)), [s['title'] for s in reviewed['detail_sectors']])
+            self.assertNotEqual(len(slides), 15, 'one slide per source page is the rejected layout')
+            for slide, title in zip(slides, titles):
+                base, index, total = digital.split_title(title)
+                self.assertEqual(index is None, groups.count(base) == 1, title)
+                if total:
+                    self.assertEqual(total, groups.count(base), title)
+            challenge_slides = [slide for slide in slides if digital._challenge_table(slide) is not None]
+            self.assertEqual(len(challenge_slides), 5)
+            for slide in challenge_slides:
+                self.assertEqual(slide, [s for s in slides if digital.split_title(digital._detail_table(s).cell(0, 0).text)[0]
+                                         == digital.split_title(digital._detail_table(slide).cell(0, 0).text)[0]][-1])
+
+
 class MergeTests(unittest.TestCase):
     """Source pages of one sector fold into a single record set without source pagination."""
 
