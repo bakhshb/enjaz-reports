@@ -10,7 +10,7 @@ from report_common import pptx_helpers as helpers
 from report_common import status_styles, validation
 
 MASTER=Path(__file__).resolve().parents[1]/'assets/weekly-report-master.pptx'
-MASTER_HASH='3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5'
+MASTER_HASH='4944d523075aafb37d38f90d1ee12fd0b2b80e46033f1af81880c646ad5fc689'
 TABLE_GAP=90000  # approved small clearance between stacked tables and above the footer
 TRANS_FIELDS=('رقم المعاملة','موضوع المعاملة','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط')
 # User confirmed on 2026-09-29 that Monday status colors apply to weekly too.
