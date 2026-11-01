@@ -17,6 +17,21 @@ from pptx.oxml.ns import qn
 from report_common.table_typography import all_tables
 
 
+def sector_of(slide):
+    """Sector title of a digital detail slide, without its output «(k/n)» suffix."""
+    return digital.split_title(digital._detail_table(slide).cell(0, 0).text)[0]
+
+
+def slides_for(prs, title):
+    return [slide for slide in digital.detail_slides(prs) if sector_of(slide) == title]
+
+
+def long_sector_rows(sector, times=3):
+    """One perspective heading followed by the sector's body rows repeated and renumbered."""
+    body = [row for row in sector['rows'] if not digital.is_heading(row)]
+    return [['تجربة المستخدم: 15%', '', '', '']] + [[row[0], row[1], row[2], f'X-{i:02d}'] for i, row in enumerate(body * times, 1)]
+
+
 def master_sectors():
     """Build reviewed sectors from the master's own detail examples (design samples only).
 
@@ -45,8 +60,6 @@ def master_sectors():
             'cards': {axis: digital.helpers.shape_by_id(slide, shape_id).text_frame.paragraphs[1].text
                       for axis, shape_id in digital.DETAIL_CARD_IDS.items()},
             'rows': rows,
-            'challenge_title': 'التحديات' if challenges else None,
-            'challenge_header': 'التحدي' if challenges else None,
             'challenges': challenges,
         })
     for sector in sectors:
@@ -177,7 +190,7 @@ class LandscapeFixtureTests(unittest.TestCase):
             self.assertEqual(errors, [])
             slides = digital.detail_slides(prs)
             titles = [digital._detail_table(slide).cell(0, 0).text for slide in slides]
-            groups = [digital.split_title(title)[0] for title in titles]
+            groups = [sector_of(slide) for slide in slides]
             self.assertEqual(list(dict.fromkeys(groups)), [s['title'] for s in reviewed['detail_sectors']])
             self.assertNotEqual(len(slides), 15, 'one slide per source page is the rejected layout')
             for slide, title in zip(slides, titles):
@@ -188,8 +201,7 @@ class LandscapeFixtureTests(unittest.TestCase):
             challenge_slides = [slide for slide in slides if digital._challenge_table(slide) is not None]
             self.assertEqual(len(challenge_slides), 5)
             for slide in challenge_slides:
-                self.assertEqual(slide, [s for s in slides if digital.split_title(digital._detail_table(s).cell(0, 0).text)[0]
-                                         == digital.split_title(digital._detail_table(slide).cell(0, 0).text)[0]][-1])
+                self.assertEqual(slide, slides_for(prs, sector_of(slide))[-1])
 
 
 class MergeTests(unittest.TestCase):
@@ -341,15 +353,14 @@ class DigitalMaturityTests(unittest.TestCase):
         """A long sector paginates by the portrait slide, never by the source pages."""
         first = self.data['detail_sectors'][0]
         body = [row for row in first['rows'] if not digital.is_heading(row)]
-        first['rows'] = ([['تجربة المستخدم: 15%', '', '', '']]
-                         + [[row[0], row[1], f'مهمة طويلة رقم {i} ' + row[2], f'X-{i:02d}'] for i, row in enumerate(body * 3, 1)]
+        first['rows'] = (long_sector_rows(first)
                          + [['رضا المستفيد: 15%', '', '', '']]
                          + [[row[0], row[1], row[2], f'Y-{i:02d}'] for i, row in enumerate(body, 1)])
         first['challenge_title'], first['challenge_header'] = 'أبرز التحديثات', 'التحديث'
         first['challenges'] = ['تحديث أول عن المهمة W-03 وسير العمل', 'تحديث ثان']
         data, prs, report = self.build()
         slides = digital.detail_slides(prs)
-        group = [slide for slide in slides if digital.split_title(digital._detail_table(slide).cell(0, 0).text)[0] == first['title']]
+        group = slides_for(prs, first['title'])
         self.assertGreater(len(group), 1)
         titles = [digital._detail_table(slide).cell(0, 0).text for slide in group]
         self.assertEqual(titles, [f'{first["title"]} ({i}/{len(group)})' for i in range(1, len(group)+1)])
@@ -357,8 +368,8 @@ class DigitalMaturityTests(unittest.TestCase):
             table = digital._detail_table(slide)
             shape = digital._detail_shape(slide)
             self.assertLessEqual(shape.top + shape.height, digital.content_bottom(prs, slide))
-            self.assertTrue(all(c.text == first['cards'][axis] for axis, c in
-                                ((axis, digital.helpers.shape_by_id(slide, sid).text_frame.paragraphs[1]) for axis, sid in digital.DETAIL_CARD_IDS.items())))
+            for axis, sid in digital.DETAIL_CARD_IDS.items():
+                self.assertEqual(digital.helpers.shape_by_id(slide, sid).text_frame.paragraphs[1].text, first['cards'][axis])
             self.assertFalse(digital.is_heading(digital._slide_rows(table)[-1]))
         continuation = digital._slide_rows(digital._detail_table(group[1]))[0]
         self.assertTrue(digital.is_heading(continuation))
@@ -377,11 +388,9 @@ class DigitalMaturityTests(unittest.TestCase):
     def test_premature_page_break_is_rejected(self):
         """Moving a record that still fits onto the next slide is the last-week failure."""
         first = self.data['detail_sectors'][0]
-        body = [row for row in first['rows'] if not digital.is_heading(row)]
-        first['rows'] = [['تجربة المستخدم: 15%', '', '', '']] + [[row[0], row[1], row[2], f'X-{i:02d}'] for i, row in enumerate(body * 3, 1)]
+        first['rows'] = long_sector_rows(first)
         data, prs, report = self.build()
-        group = [slide for slide in digital.detail_slides(prs)
-                 if digital.split_title(digital._detail_table(slide).cell(0, 0).text)[0] == first['title']]
+        group = slides_for(prs, first['title'])
         self.assertGreater(len(group), 1)
         source, target = digital._detail_shape(group[0]), digital._detail_shape(group[1])
         moved = source.table._tbl.tr_lst[-1]
@@ -411,12 +420,9 @@ class DigitalMaturityTests(unittest.TestCase):
         self.data['detail_sectors'][4]['challenge_header'] = 'التحدي'
         self.data['detail_sectors'][4]['rows'][1][3] = 'U-01..09'
         data, prs, report = self.build()
-        slide = [s for s in digital.detail_slides(prs)
-                 if digital.split_title(digital._detail_table(s).cell(0, 0).text)[0] == data['detail_sectors'][4]['title']][-1]
-        challenges = digital._challenge_table(slide)
+        group = slides_for(prs, data['detail_sectors'][4]['title'])
+        challenges = digital._challenge_table(group[-1])
         self.assertEqual([row.cells[1].text for row in list(challenges.rows)[2:]], data['detail_sectors'][4]['challenges'])
-        group = [s for s in digital.detail_slides(prs)
-                 if digital.split_title(digital._detail_table(s).cell(0, 0).text)[0] == data['detail_sectors'][4]['title']]
         code = next(row.cells[list(digital._detail_columns(table, row))[3]] for s in group for table in [digital._detail_table(s)]
                     for row in list(table.rows)[2:] if digital._plain(row.cells[list(digital._detail_columns(table, row))[3]].text) == 'U-01..09')
         self.assertEqual(code.text_frame.paragraphs[0]._p.get_or_add_pPr().get('rtl'), '0')
@@ -432,8 +438,7 @@ class DigitalMaturityTests(unittest.TestCase):
         self.assertEqual(indexes, list(range(11, 11 + len(slides))))
         self.assertEqual(indexes[-1], len(prs.slides) - 2)
         firsts = [slide for slide in slides if digital.split_title(digital._detail_table(slide).cell(0, 0).text)[1] in (None, 1)]
-        self.assertEqual([digital.split_title(digital._detail_table(s).cell(0, 0).text)[0] for s in firsts],
-                         [sector['title'] for sector in data['detail_sectors']])
+        self.assertEqual([sector_of(s) for s in firsts], [sector['title'] for sector in data['detail_sectors']])
         for slide, sector in zip(firsts, data['detail_sectors']):
             self.assertEqual(digital._detail_table(slide).cell(3, 1).text, sector['rows'][1][2])
         divider = prs.slides[5]
@@ -464,8 +469,7 @@ class DigitalMaturityTests(unittest.TestCase):
         import run_weekly_workflow as workflow
         inputs = self.root / 'inputs'
         first = self.data['detail_sectors'][0]
-        body = [row for row in first['rows'] if not digital.is_heading(row)]
-        first['rows'] = [['تجربة المستخدم: 15%', '', '', '']] + [[row[0], row[1], row[2], f'X-{i:02d}'] for i, row in enumerate(body * 3, 1)]
+        first['rows'] = long_sector_rows(first)
         self.load()
         report = self.root / 'digital.pptx'
         with contextlib.redirect_stdout(io.StringIO()):

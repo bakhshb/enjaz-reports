@@ -26,14 +26,13 @@ from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import PP_ALIGN
-from pptx.oxml.ns import qn
 from pptx.util import Pt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers
-from weekly_data import content_bottom, set_cell_exact
-from weekly_artwork import next_shape_id, is_digital_detail
+from weekly_data import content_bottom, set_cell_exact, TABLE_GAP
+from weekly_artwork import place_table_copy, is_digital_detail, is_digital_detail_table
 from report_common.table_typography import set_table_directions
 
 
@@ -76,7 +75,7 @@ CODE = re.compile(r'[A-Z]{1,5}-[0-9A-Z./-]+')
 CODE_IN_TEXT = re.compile(r'\b[A-Z]{1,5}-\d{2,3}(?:\.\.\d{2,3})?\b')
 MIRRORED = str.maketrans('()[]', ')(][')
 PERCENT_FIRST = re.compile(r'%(\d+(?:[.,]\d+)?)')
-GAP = 90000
+GAP = TABLE_GAP
 
 
 BRACKETS = {'(': ')', '[': ']'}
@@ -256,16 +255,28 @@ def split_title(title):
 
 
 def heading_base(text):
-    return re.sub(r'\s*' + re.escape(CONTINUATION) + r'\s*$', '', text or '').strip()
+    return (text or '').strip().removesuffix(CONTINUATION).strip()
 
 
 def is_heading(row):
     return bool(row[0].strip()) and not any(cell.strip() for cell in row[1:])
 
 
-def _card_value(page, axis, band):
+def is_continuation(row):
+    return is_heading(row) and row[0].endswith(CONTINUATION)
+
+
+def last_heading(rows):
+    return next((row[0] for row in reversed(rows) if is_heading(row)), None)
+
+
+def _card_box(axis, band):
     x0, x1 = CARD_COLUMNS[axis]
-    text = _rtl(page.within_bbox((x0, band[0], x1, band[1])).extract_text())
+    return (x0, band[0], x1, band[1])
+
+
+def _card_value(page, axis, band):
+    text = _rtl(page.within_bbox(_card_box(axis, band)).extract_text())
     label = LABELS[AXES.index(axis)]
     if not text.startswith(label):
         raise ValueError('Digital-maturity card label is missing: ' + axis)
@@ -277,8 +288,7 @@ def _card_value(page, axis, band):
 
 def _extract_summary(page):
     _check_page(page, 1)
-    metrics = {axis: _one_percent(page, (CARD_COLUMNS[axis][0], *SUMMARY_CARD_BAND[:1], CARD_COLUMNS[axis][1], SUMMARY_CARD_BAND[1]))
-               for axis in AXES}
+    metrics = {axis: _one_percent(page, _card_box(axis, SUMMARY_CARD_BAND)) for axis in AXES}
     bars = defaultdict(list)
     for rect in page.rects:
         if (SECTOR_BARS['y'][0] <= rect['top'] <= SECTOR_BARS['y'][1]
@@ -291,11 +301,12 @@ def _extract_summary(page):
     if not 1 <= len(bars) <= 5:
         raise ValueError('Digital-maturity sector bars are missing or exceed template capacity')
     ordered = sorted(bars.items())
-    pitch = min([b - a for a, b in zip([k for k, _ in ordered], [k for k, _ in ordered][1:])] or [22])
+    keys = [key for key, _ in ordered]
+    pitch = min([b - a for a, b in zip(keys, keys[1:])] or [22])
     labels = _lines(page, (SECTOR_LABELS[0], SECTOR_BARS['y'][0] - pitch, SECTOR_LABELS[1], SECTOR_BARS['y'][1] + pitch))
     sectors = []
     centres = [(segments[0][1]['top'] + segments[0][1]['bottom']) / 2 for _, segments in ordered]
-    for centre, (top, segments) in zip(centres, ordered):
+    for centre, (_, segments) in zip(centres, ordered):
         name = ' '.join(_logical(text) for line, text in labels
                         if abs(line - centre) < pitch and min(centres, key=lambda c: abs(c - line)) == centre)
         if not name:
@@ -348,9 +359,7 @@ def _extract_detail_page(page, number):
     _check_page(page, number)
     main, challenge = [], []
     for found in page.find_tables():
-        raw = found.extract()
-        rows = [[_rtl(cell) for cell in row] for row in raw]
-        rows = [[cell for cell in row if cell] for row in rows]
+        rows = [[text for text in (_rtl(cell) for cell in row) if text] for row in found.extract()]
         if not any(rows):
             continue
         header = rows[1] if len(rows) > 1 else []
@@ -370,7 +379,7 @@ def _extract_detail_page(page, number):
     if len(header) != 4 or header[1] != 'الإنجاز' or header[2] not in TASK_HEADERS:
         raise ValueError(f'Unexpected detail headers on PDF page {number}: {header}')
     draft_rows = []
-    for raw_row in main[0][2:]:
+    for raw_row in rows[2:]:
         if not raw_row:
             continue
         if len(raw_row) == 1:
@@ -399,7 +408,7 @@ def _extract_detail_page(page, number):
 
 def merge_detail_pages(pages):
     """Fold the source pagination back into one record set per sector."""
-    sectors = []
+    sectors, declared = [], {}
     for page in pages:
         base, index, total = split_title(page['title'])
         if not base:
@@ -407,28 +416,25 @@ def merge_detail_pages(pages):
         rows = [list(row) for row in page['rows']]
         current = sectors[-1] if sectors else None
         if current and current['title'] == base and index not in (None, 1):
-            if index != len(current['source_pages']) + 1 or total != current['declared']:
+            if index != len(current['source_pages']) + 1 or total != declared[base]:
                 raise ValueError(f'Digital-maturity PDF page {page["page"]} breaks the {base} page sequence')
             if page['cards'] != current['cards']:
                 raise ValueError(f'Digital-maturity cards differ between the pages of {base}')
             if rows and is_heading(rows[0]):
                 rows[0][0] = heading_base(rows[0][0])
-                if rows[0][0] == current['open_heading']:
+                if rows[0][0] == last_heading(current['rows']):
                     rows = rows[1:]
         else:
-            if any(sector['title'] == base for sector in sectors):
+            if base in declared:
                 raise ValueError(f'Digital-maturity sector {base} appears twice outside one page sequence')
             if index not in (None, 1):
                 raise ValueError(f'Digital-maturity PDF page {page["page"]} starts {base} at page {index}')
             current = {'title': base, 'source_pages': [], 'cards': page['cards'], 'rows': [],
-                       'challenge_title': None, 'challenge_header': None, 'challenges': [],
-                       'declared': total, 'open_heading': None}
+                       'challenge_title': None, 'challenge_header': None, 'challenges': []}
             sectors.append(current)
-        for row in rows:
-            if is_heading(row):
-                if row[0].endswith(CONTINUATION):
-                    raise ValueError(f'Digital-maturity PDF page {page["page"]} repeats a heading mid-page')
-                current['open_heading'] = row[0]
+            declared[base] = total
+        if any(is_continuation(row) for row in rows):
+            raise ValueError(f'Digital-maturity PDF page {page["page"]} repeats a heading mid-page')
         current['rows'].extend(rows)
         current['source_pages'].append(page['page'])
         if page['challenges']:
@@ -438,9 +444,8 @@ def merge_detail_pages(pages):
                 current[key] = page[key]
             current['challenges'].extend(page['challenges'])
     for sector in sectors:
-        if sector['declared'] not in (None, len(sector['source_pages'])):
+        if declared[sector['title']] not in (None, len(sector['source_pages'])):
             raise ValueError(f'Digital-maturity sector {sector["title"]} is missing source pages')
-        del sector['declared'], sector['open_heading']
     if not sectors:
         raise ValueError('Digital-maturity PDF has no detail pages')
     return sectors
@@ -513,7 +518,7 @@ def load_reviewed(path, pdf):
         for row in rows:
             if not (all(cell.strip() for cell in row) or is_heading(row)):
                 raise ValueError('Digital-maturity detail row must be complete or a section heading: ' + title)
-            if is_heading(row) and row[0].strip().endswith(CONTINUATION):
+            if is_continuation(row):
                 raise ValueError('Reviewed rows must not carry source continuation headings: ' + title)
         if is_heading(rows[-1]):
             raise ValueError('Digital-maturity section heading has no records: ' + title)
@@ -567,8 +572,7 @@ def detail_slides(prs):
 
 
 def _detail_shape(slide):
-    return next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 4
-                and len(sh.table.rows) >= 2 and any(c.text == 'أساس التقييم' for c in sh.table.rows[1].cells))
+    return next(sh for sh in slide.shapes if is_digital_detail_table(sh))
 
 
 def _detail_table(slide):
@@ -603,7 +607,7 @@ def _plain(value):
 
 def _set_challenge_text(cell, value):
     set_cell_exact(cell, value)
-    parts = re.split(r'(\b[A-Z]{1,5}-\d{2,3}(?:\.\.\d{2,3})?\b)', value)
+    parts = re.split(f'({CODE_IN_TEXT.pattern})', value)
     if len(parts) == 1:
         return
     paragraph = cell.text_frame.paragraphs[0]
@@ -685,14 +689,10 @@ def paginate_sector(pattern, sector):
     """
     rows, challenges = sector['rows'], sector['challenges']
     pages, index = [], 0
-
-    def open_heading():
-        return next((row[0] for row in reversed(rows[:index]) if is_heading(row)), None)
-
     while index < len(rows):
         used = pattern.title_height + pattern.header_height
         page_rows = []
-        heading = open_heading()
+        heading = last_heading(rows[:index])
         if heading is not None and not is_heading(rows[index]):
             page_rows.append([f'{heading} {CONTINUATION}', '', '', ''])
             used += pattern.heading_height
@@ -716,7 +716,7 @@ def paginate_sector(pattern, sector):
                 # Only the trailing record (with its heading) moves to the next page with the challenges.
                 page_rows.pop()
                 index -= 1
-                if page_rows and is_heading(page_rows[-1]) and not page_rows[-1][0].endswith(CONTINUATION):
+                if page_rows and is_heading(page_rows[-1]) and not is_continuation(page_rows[-1]):
                     page_rows.pop()
                     index -= 1
         if not any(not is_heading(row) for row in page_rows):
@@ -732,18 +732,17 @@ def _append_row(table, template):
     return table.rows[len(table.rows) - 1]
 
 
+def _place_table(slide, element, top):
+    """Copy an approved table onto the slide at ``top`` with only its title and header rows."""
+    shape = place_table_copy(slide, element)
+    helpers.resize_table(shape.table, 2)
+    shape.top = top
+    return shape
+
+
 def _fill_detail_table(slide, pattern, title, rows):
-    element = deepcopy(pattern.table_element)
-    identity = element.find('.//' + qn('p:cNvPr'))
-    identity.set('id', str(next_shape_id(slide)))
-    for node in list(element.iter()):
-        if node.tag.rsplit('}', 1)[-1] in ('creationId', 'custDataLst'):
-            node.getparent().remove(node)
-    slide.shapes._spTree.insert_element_before(element, 'p:extLst')
-    shape = list(slide.shapes)[-1]
+    shape = _place_table(slide, pattern.table_element, pattern.top)
     table = shape.table
-    for tr in list(table._tbl.tr_lst)[2:]:
-        table._tbl.remove(tr)
     set_cell_exact(table.cell(0, 0), title)
     table.rows[0].height, table.rows[1].height = pattern.title_height, pattern.header_height
     for values in rows:
@@ -763,23 +762,13 @@ def _fill_detail_table(slide, pattern, title, rows):
                 set_cell_exact(code_cell, values[3])
                 code_cell.text_frame.paragraphs[0]._p.get_or_add_pPr().set('rtl', '0')
         row.height = pattern.row_height(values)
-    shape.top = pattern.top
     shape.height = sum(row.height for row in table.rows)
     return shape
 
 
 def _fill_challenge_table(slide, pattern, top, sector):
-    element = deepcopy(pattern.challenge_element)
-    identity = element.find('.//' + qn('p:cNvPr'))
-    identity.set('id', str(next_shape_id(slide)))
-    for node in list(element.iter()):
-        if node.tag.rsplit('}', 1)[-1] in ('creationId', 'custDataLst'):
-            node.getparent().remove(node)
-    slide.shapes._spTree.insert_element_before(element, 'p:extLst')
-    shape = list(slide.shapes)[-1]
+    shape = _place_table(slide, pattern.challenge_element, top)
     table = shape.table
-    for tr in list(table._tbl.tr_lst)[2:]:
-        table._tbl.remove(tr)
     set_cell_exact(table.cell(0, 0), sector['challenge_title'])
     set_cell_exact(table.cell(1, 1), sector['challenge_header'])
     for index, challenge in enumerate(sector['challenges'], 1):
@@ -787,7 +776,6 @@ def _fill_challenge_table(slide, pattern, top, sector):
         set_cell_exact(row.cells[0], str(index))
         _set_challenge_text(row.cells[1], challenge)
         row.height = pattern.challenge_row_height(challenge)
-    shape.top = top
     shape.height = sum(row.height for row in table.rows)
     return shape
 
@@ -807,15 +795,16 @@ def populate_details(prs, data):
     pattern = DetailPattern(prs, seed)
     for shape in [sh for sh in seed.shapes if sh.has_table]:
         shape._element.getparent().remove(shape._element)
-    current, first = None, True
-    for sector in data['detail_sectors']:
-        pages = paginate_sector(pattern, sector)
+    layout = [(sector, paginate_sector(pattern, sector)) for sector in data['detail_sectors']]
+    # Clone the table-free seed once per page before filling, so no populated table is copied.
+    slides, current = [seed], seed
+    for _ in range(sum(len(pages) for _, pages in layout) - 1):
+        current = helpers.clone_slide(prs, seed, after=current)
+        slides.append(current)
+    targets = iter(slides)
+    for sector, pages in layout:
         for number, (rows, challenges) in enumerate(pages, 1):
-            if first:
-                slide, first = seed, False
-            else:
-                slide = helpers.clone_slide(prs, seed, after=current, shape_predicate=lambda sh: not sh.has_table)
-            current = slide
+            slide = next(targets)
             _set_cards(slide, sector['cards'])
             title = sector['title'] if len(pages) == 1 else f'{sector["title"]} ({number}/{len(pages)})'
             shape = _fill_detail_table(slide, pattern, title, rows)
@@ -880,7 +869,22 @@ def _slide_rows(table):
             for row in list(table.rows)[2:]]
 
 
-def check_details(prs, data, errors, template=None):
+class _DetailSlide:
+    """One generated digital detail slide, read once for every reconciliation check."""
+
+    def __init__(self, slide):
+        self.slide = slide
+        self.table = _detail_table(slide)
+        self.base, self.index, self.total = split_title(self.table.cell(0, 0).text)
+        self.rows = _slide_rows(self.table)
+        self.challenges = _challenge_table(slide)
+        self.bottom = max(sh.top + sh.height for sh in slide.shapes if sh.has_table)
+
+    def card(self, axis):
+        return helpers.shape_by_id(self.slide, DETAIL_CARD_IDS[axis]).text_frame.paragraphs[1].text
+
+
+def check_details(prs, data, errors, master=None):
     """Reconcile the generated detail slides with the reviewed sectors.
 
     The number of slides follows the data, so the checks cover: sector order,
@@ -894,75 +898,66 @@ def check_details(prs, data, errors, template=None):
     except ValueError as exc:
         errors.append(str(exc))
         return
-    master = template if template is not None and hasattr(template, 'slides') else Presentation(template or MASTER)
+    master = master or Presentation(MASTER)
     pattern = DetailPattern(master, detail_slides(master)[0])
     groups = []
-    for slide in slides:
-        table = _detail_table(slide)
-        base, index, total = split_title(table.cell(0, 0).text)
-        if groups and groups[-1][0] == base and index not in (None, 1):
-            groups[-1][1].append((slide, index, total))
+    for detail in map(_DetailSlide, slides):
+        if groups and groups[-1][0] == detail.base and detail.index not in (None, 1):
+            groups[-1][1].append(detail)
         else:
-            groups.append((base, [(slide, index, total)]))
+            groups.append((detail.base, [detail]))
     expected = [sector['title'] for sector in data['detail_sectors']]
     if [base for base, _ in groups] != expected:
         errors.append('Digital-maturity detail sectors differ from the reviewed PDF data: ' + ', '.join(base for base, _ in groups))
         return
     for sector, (base, members) in zip(data['detail_sectors'], groups):
         count = len(members)
-        for position, (slide, index, total) in enumerate(members, 1):
-            if (count == 1 and index is not None) or (count > 1 and (index, total) != (position, count)):
+        rows = []
+        for position, detail in enumerate(members, 1):
+            if (count == 1 and detail.index is not None) or (count > 1 and (detail.index, detail.total) != (position, count)):
                 errors.append(f'Digital-maturity detail title suffix does not match the output pagination: {base}')
-            for axis, shape_id in DETAIL_CARD_IDS.items():
-                if helpers.shape_by_id(slide, shape_id).text_frame.paragraphs[1].text != sector['cards'][axis]:
+            for axis in AXES:
+                if detail.card(axis) != sector['cards'][axis]:
                     errors.append(f'Digital-maturity detail card differs: {base}: {axis}')
-            challenge = _challenge_table(slide)
-            if position < count and challenge is not None:
+            if position < count and detail.challenges is not None:
                 errors.append(f'Digital-maturity challenge table must follow the last records of {base}')
-        rows, open_heading = [], None
-        for position, (slide, _, _) in enumerate(members, 1):
-            slide_rows = _slide_rows(_detail_table(slide))
+            slide_rows = detail.rows
             if position > 1:
-                if slide_rows and is_heading(slide_rows[0]) and slide_rows[0][0].endswith(CONTINUATION):
-                    if heading_base(slide_rows[0][0]) != open_heading:
+                if slide_rows and is_continuation(slide_rows[0]):
+                    if heading_base(slide_rows[0][0]) != last_heading(rows):
                         errors.append(f'Digital-maturity continuation heading differs: {base}')
                     slide_rows = slide_rows[1:]
-                elif open_heading is not None and slide_rows and not is_heading(slide_rows[0]):
+                elif last_heading(rows) is not None and slide_rows and not is_heading(slide_rows[0]):
                     errors.append(f'Digital-maturity continuation slide lacks its section heading: {base}')
-            for row in slide_rows:
-                if is_heading(row):
-                    if row[0].endswith(CONTINUATION):
-                        errors.append(f'Digital-maturity continuation heading appears mid-slide: {base}')
-                    open_heading = row[0]
+            if any(is_continuation(row) for row in slide_rows):
+                errors.append(f'Digital-maturity continuation heading appears mid-slide: {base}')
             rows.extend(slide_rows)
         if rows != sector['rows']:
             errors.append(f'Digital-maturity detail rows differ from the reviewed PDF data: {base}')
-        last = members[-1][0]
-        challenge = _challenge_table(last)
+        challenge = members[-1].challenges
         actual = [] if challenge is None else [_plain(row.cells[1].text) for row in list(challenge.rows)[2:]]
         if actual != sector['challenges']:
             errors.append(f'Digital-maturity detail challenges differ from the reviewed PDF data: {base}')
         if challenge is not None and sector['challenges'] and (
                 challenge.cell(0, 0).text != sector['challenge_title'] or challenge.cell(1, 1).text != sector['challenge_header']):
             errors.append(f'Digital-maturity challenge table heading differs from the source: {base}')
-        for position, ((slide, _, _), (following, _, _)) in enumerate(zip(members, members[1:]), 2):
-            bottom = max(sh.top + sh.height for sh in slide.shapes if sh.has_table)
-            following_rows = _slide_rows(_detail_table(following))
-            if following_rows and is_heading(following_rows[0]) and following_rows[0][0].endswith(CONTINUATION):
+        for position, (detail, following) in enumerate(zip(members, members[1:]), 2):
+            following_rows = following.rows
+            if following_rows and is_continuation(following_rows[0]):
                 following_rows = following_rows[1:]  # a consequence of the break, not a cost of moving the record back
             next_record = next((row for row in following_rows if not is_heading(row)), None)
             if next_record is None:
                 continue
-            if position == count and _challenge_table(following) is not None:
+            if position == count and following.challenges is not None:
                 # The last records may move only together with the challenge table.
                 need = sum(pattern.row_height(row) for row in following_rows) + GAP + pattern.challenges_height(sector['challenges'])
             else:
                 need = sum(pattern.row_height(row) for row in following_rows[:following_rows.index(next_record) + 1])
-            if bottom + need <= pattern.bottom:
+            if detail.bottom + need <= pattern.bottom:
                 errors.append(f'Digital-maturity detail slide breaks the page early; the next record still fits: {base}')
 
 
-def check(prs, report_path, data, errors, template=None):
+def check(prs, report_path, data, errors, master=None):
     from report_common import validation
     slide = digital_slide(prs)
     try:
@@ -995,7 +990,7 @@ def check(prs, report_path, data, errors, template=None):
     expected_notes = {f'Digital sector note {i}': s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
     if notes != expected_notes:
         errors.append('Digital-maturity sector notes differ from reviewed PDF data')
-    check_details(prs, data, errors, template)
+    check_details(prs, data, errors, master)
 
 
 def main(argv=None):

@@ -11,6 +11,7 @@ from report_common import status_styles, validation
 
 MASTER=Path(__file__).resolve().parents[1]/'assets/weekly-report-master.pptx'
 MASTER_HASH='3e9b018c223c76cbb0e435cd543732801ec8685fc4ec827d4a7f99b29e0423e5'
+TABLE_GAP=90000  # approved small clearance between stacked tables and above the footer
 TRANS_FIELDS=('رقم المعاملة','موضوع المعاملة','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط')
 # User confirmed on 2026-09-29 that Monday status colors apply to weekly too.
 # Weekly typography, margins, alignment and borders still come from weekly cells.
@@ -26,7 +27,7 @@ def content_bottom(prs,slide):
     footer=[shape.top for layer in layers for shape in layer.shapes
             if shape.top>prs.slide_height*.85 and shape.height<prs.slide_height*.1]
     if not footer:raise ValueError('Cannot identify approved footer artwork')
-    return min(footer)-90000
+    return min(footer)-TABLE_GAP
 
 def approved_styles(template=MASTER,kind='task'):
     result={}
