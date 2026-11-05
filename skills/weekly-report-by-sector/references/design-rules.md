@@ -25,16 +25,33 @@ The transactions table starts at the same `1780255` EMU top as task and project 
 
 ## Navigation
 
-The master has four tabs; sector decks keep three (المهام / مشاريع سهيل /
-المعاملات) and drop التفاصيل. The tabs live in the slide **layouts**, not the
-slides, so edit `1_Title Slide`, `2_Title Slide`, `5_Title Slide`.
+Sector decks keep three tabs (ملخص المهام / ملخص مشاريع سهيل / المعاملات) and
+drop every other tab (التفاصيل, and التجربة الرقمية on newer masters). The tabs
+live in the slide **layouts**, not the slides. Tabs are found by label text, never
+by coordinates — the master's tab count, widths and x positions change between
+weeks:
 
-* the التفاصيل tab sits at x `428628` — delete both its shapes
-* the remaining three sit at x `5741129`, `3970297`, `2199462`
-* shift each left by `1012345` so the group is centred on the page
+* on each layout, look only at shapes above y `700000` (the nav strip)
+* a layout has a nav bar when all three kept labels are present (whitespace
+  collapsed: the master spells `ملخص مشاريع  سهيل` with a double space)
+* every shape (or group) one tab wide (±1000 EMU) is part of a tab column;
+  delete the columns whose x is not a kept label's x
+* shift the kept columns so their bounding box is centred on the slide width
+
+The three tabs always stay visible, even when the sector has no slide for one of
+them. Links are rewritten per sector deck, never inherited from the master:
+
+* a tab whose section is in the deck jumps to that section's first slide — both
+  its label and its background (the master's المعاملات label has no link)
+* a tab whose section is absent (usually المعاملات: most weeks have no delayed
+  transactions) keeps no link at all
+
+QA rejects any output layout whose nav bar shows other tabs, is off-centre by
+more than one tab gap, has a tab that does not jump to its section, or links a
+tab whose section is absent.
 
 Keep the active-tab colours as they are: black on المهام, green on سهيل, navy on
-المعاملات. Hyperlinks pointing at deleted slides must be stripped, not retargeted.
+المعاملات.
 
 ## Status colours
 
@@ -108,11 +125,11 @@ bold — a visible regression the user will ask about. Never retype these cells.
 
 ## Table geometry must be self-consistent
 
-Every `<a:tr>` carries its measured height and the frame's `cy` equals their sum.
+Every `<a:tr>` carries its measured height (see the measurement pass in SKILL.md) and the frame's `cy` equals their sum.
 This isn't cosmetic: PowerPoint recomputes row heights with the real Abar Mid
 metrics, and a frame that claims to be shorter than its content ends up under the
 next table, whose frame then swallows the clicks — the user can no longer put the
-cursor in the lower rows. `refine_positions` handles it; anything you add that
+cursor in the lower rows. The splitter's measure-and-rebuild pass handles it; anything you add that
 touches heights must preserve `sum(row h) == frame cy`.
 
 ## Text handling

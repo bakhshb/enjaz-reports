@@ -232,7 +232,6 @@ def cmp(label,exp,act,errors):
 
 
 CHART_NS={'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
-REL_NS='{http://schemas.openxmlformats.org/package/2006/relationships}'
 RID='{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
 
 

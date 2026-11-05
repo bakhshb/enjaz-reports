@@ -48,7 +48,7 @@ FIELDS={**{t:TASK_FIELDS for t in splitter.TASK_TITLE.values()},
 
 
 def expected_records(master,transactions=None,aliases=None,only=None):
-    src=Presentation(master)
+    src=splitter.open_master(master)
     tasks,projects,trans,updates,support,challenges=splitter.read_data(src,splitter.locate(src))
     splitter.attach_transaction_sectors(trans,transactions)
     alias_path=aliases or Path(__file__).resolve().parents[1]/'references'/'sector-aliases.json'
@@ -148,6 +148,7 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
         record_errors=[]
         check_table_typography(prs,record_errors)
         record_errors.extend(identity_errors(prs,it['sector'],source_tables,master))
+        record_errors.extend(nav_errors(prs))
         try:
             actual=actual_records(prs)
             for title in set(actual)|set(source_tables):
@@ -168,6 +169,57 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
     return ok
 
 
+NAV_SECTIONS={'ملخص المهام':lambda txt:'إجمالي المهام' in txt,
+              'ملخص مشاريع سهيل':lambda txt:'إجمالي مشاريع سهيل' in txt,
+              'المعاملات':lambda txt:'رقم المعاملة' in txt or 'إجمالي المعاملات المتأخرة' in txt}
+
+
+def nav_errors(prs):
+    """Every nav bar shows exactly the three kept tabs, centred within one tab gap.
+    Every shape of a tab whose section is in this deck jumps to that section's first
+    slide; a tab whose section is absent carries no link."""
+    errors=[]
+    slides=list(prs.slides)
+    def texts(slide):
+        out=[]
+        def walk(shapes):
+            for sh in shapes:
+                if getattr(sh,'has_text_frame',False):out.append(splitter.norm(sh.text_frame.text))
+                if getattr(sh,'has_table',False):out.extend(splitter.norm(c.text) for r in sh.table.rows for c in r.cells)
+                if hasattr(sh,'shapes'):walk(sh.shapes)
+        walk(slide.shapes);return out
+    first={}
+    for slide in slides:
+        txt=texts(slide)
+        for name,test in NAV_SECTIONS.items():
+            if name not in first and test(txt):first[name]=slide.part
+    for layout in {id(s.slide_layout):s.slide_layout for s in slides}.values():
+        cols=splitter.nav_columns(layout)
+        if not cols:continue
+        names=[name for name,_ in cols]
+        if sorted(names)!=sorted(splitter.NAV_KEEP_LABELS):
+            errors.append(f'{layout.name}: nav tabs {names} are not {list(splitter.NAV_KEEP_LABELS)}');continue
+        for name,shapes in cols:
+            for sh in shapes:
+                for c in sh._element.iter(splitter.qp('cNvPr')):
+                    links=c.findall(splitter.q('hlinkClick'))
+                    if name not in first:
+                        if links:errors.append(f'{layout.name}: {name} tab links although its section is absent');break
+                        continue
+                    rid=links[0].get('{%s}id'%splitter.R_NS) if len(links)==1 else None
+                    rel=layout.part.rels.get(rid) if rid else None
+                    if rel is None or rel.is_external or rel.target_part is not first[name] \
+                            or links[0].get('action')!=splitter.JUMP:
+                        errors.append(f'{layout.name}: {name} tab does not jump to its section');break
+        tabs=[sh for _,shapes in cols for sh in shapes]
+        lo,hi=min(sh.left for sh in tabs),max(sh.left+sh.width for sh in tabs)
+        lefts=sorted(shapes[0].left for _,shapes in cols);width=cols[0][1][0].width
+        gap=max(min(b-a for a,b in zip(lefts,lefts[1:]))-width,splitter.NAV_TOL) if len(lefts)>1 else width
+        if abs((lo+hi)/2-prs.slide_width/2)>gap:
+            errors.append(f'{layout.name}: nav tabs are not centred')
+    return errors
+
+
 def identity_errors(prs,sector,records,master):
     """Check cover and approved summary identifiers independently of the manifest."""
     def walk(shapes):
@@ -178,7 +230,7 @@ def identity_errors(prs,sector,records,master):
     if not any(getattr(sh,'has_text_frame',False) and sh.text.strip()==sector
                for sh in walk(prs.slides[0].shapes)):
         errors.append('Cover sector differs from source')
-    source=Presentation(master)
+    source=splitter.open_master(master)
     specs=[('إجمالي المهام',[11,14,16,7,6],['المهام المكتملة','المهام على المخطط','المهام المتأخرة','المهام المعلقة']),
            ('إجمالي مشاريع سهيل',[10,12,14,8,7],['المشاريع المكتملة','المشاريع على المخطط','المشاريع المتأخرة','المشاريع لم تبدأ'])]
     for label,ids,titles in specs:

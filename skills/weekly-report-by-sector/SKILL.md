@@ -37,17 +37,25 @@ the source rather than trusting manifest totals. It also rejects broken internal
 relationships, external links, and unused slide parts left in the package.
 Programmatic success does not replace the mandatory render and visual review.
 
+Both scripts normalise the master in memory (`open_master`): identity-transform
+groups in the KPI zone (for example a grouped ملخص المهام KPI card) are ungrouped
+so the KPI boxes can be found and rewritten. Groups with a real transform are left
+alone. Summary tables are recognised by title **and** a `القطاع` column, so
+same-titled tables elsewhere (the التجربة الرقمية `التحديات` tables) are ignored.
+Never pre-process the master by hand.
+
+Behind a corporate TLS proxy, `uv` may fail with `invalid peer certificate:
+UnknownIssuer`; add `--system-certs` to each `uv run` command.
+
 `--only <name>` builds a single sector, which is the fast way to test a change
 
 before rebuilding all ten.
 
 When LibreOffice is unavailable, run the splitter with `--no-refine` and run
-
-`qa_report.py` without `--render`. The initial pass still sets each table's row
-
-heights to match its frame and creates continuation pages. Open the resulting
-
-deck in PowerPoint for a visual check before delivery.
+`qa_report.py` without `--render`. Row heights then come from a character-count
+estimate only (no measurement pass); the build still keeps each table's rows
+consistent with its frame and creates continuation pages. Open the resulting deck
+in PowerPoint for a visual check before delivery.
 
 `--transactions` is required when delayed transactions use the approved five-column
 
@@ -201,7 +209,7 @@ every table, row and KPI element is cloned from a shape that already exists in
 
 the master; only text, status fills, accent colour and geometry change. The three
 
-nav tabs (التفاصيل removed) sit centred on the page as one group. Title rows carry
+nav tabs (التفاصيل and التجربة الرقمية removed) sit centred on the page as one group. Title rows carry
 
 no border and no fill — only a small accent bar coloured by table type.
 
@@ -237,39 +245,27 @@ These all cost a rebuild once. They are handled in the scripts; keep them handle
     that now dangle, or the file opens as repaired.
     
 - Row heights auto-grow, and a table whose declared geometry lies about its size
-    
     becomes uneditable in PowerPoint. If the row `h` values are stale minimums while
-    
     the frame `cy` is something else, PowerPoint recomputes with the real Abar Mid
-    
     metrics, the table grows past the frame below it, and clicking a lower row hits the
-    
-    next table's frame instead — the user lands in the wrong cell. The refine pass
-    
-    therefore measures **every row**, writes the real height onto each `<a:tr>`, sets
-    
-    frame `cy` to the sum, and restacks. Keep `sum(row h) == frame cy` in anything you
-    
-    add.
-    
-- **Stacked tables overlap in the render**, which would corrupt that measurement, so
-    
-    each refine pass sends every table except the one being measured off the page and
-    
-    renders again. That's one render per table position — slower, but the measurement
-    
-    is unambiguous.
-    
-- **The preview's font isn't Abar Mid**, so measured heights run slightly short of
-    
-    PowerPoint's. `SAFETY` (1.12) covers the difference. Lowering it risks overlap;
-    
-    raising it wastes page.
-    
+    next table's frame instead — the user lands in the wrong cell. Every `<a:tr>`
+    carries the height its text needs and frame `cy` is the sum. Keep
+    `sum(row h) == frame cy` in anything you add.
+- **LibreOffice draws a row at exactly its declared height and never grows it**:
+    long text overflows into the next row. Reading row borders back from a render
+    therefore only echoes the declared heights. `report_common/measure.py` instead
+    copies each record row into its own one-row table, collapses it, renders, and
+    takes the extent of the glyphs plus the cell insets. The splitter builds once,
+    measures every record row of the kept slides, then rebuilds with those heights, so
+    pagination, continuation pages and frame geometry all come from measured rows.
+    Rows copied from the consolidated deck are re-measured too; their source height
+    is only the consolidated builder's estimate.
+- **Install Abar Mid** where LibreOffice runs. With a substitute font the measured
+    heights are wrong in both directions.
 
 ## Before delivering
 
-The refinement and QA render paths use the shared `report_common/render.py` exporter. It materializes RTL column order only in a disposable LibreOffice export copy, keeping the editable source PPTX unchanged. Verify numbering on the right in every rendered table; an RTL XML property alone is insufficient. Run `tests/check_rendered_pdf.py` on exported PDF/PPTX pairs to check actual numbering coordinates, fonts and page counts.
+The measurement and QA render paths use the shared `report_common/render.py` exporter. It materializes RTL column order only in a disposable LibreOffice export copy, keeping the editable source PPTX unchanged. Verify numbering on the right in every rendered table; an RTL XML property alone is insufficient. Run `tests/check_rendered_pdf.py` on exported PDF/PPTX pairs to check actual numbering coordinates, fonts and page counts.
 
 First smoke-test one sector through `uv run` with `--only <name>`. Then run the full build and `qa_report.py` through `uv run` using the commands above. Confirm: sector name right on every cover; totals match the
 
@@ -316,6 +312,6 @@ Apply horizontal alignment to the column headers and body paragraphs:
 - Right-align المهمة, المشروع / اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه.
 - Preserve merged title alignment, numbering and unspecified columns, vertical alignment, RTL, Abar, bold emphasis, bullets and colors.
 
-The splitter applies the shared `report_common/table_typography.py` rules before refinement, and QA rejects a different font size or specified column alignment. Install this skill with the sibling `skills/report_common/` directory, or use the standalone bundle from `tools/package_skills.py`, which carries `scripts/report_common/` and the weekly master in `assets/`. Measure/refine and repaginate at 11 pt; never shrink text to fit.
+The splitter applies the shared `report_common/table_typography.py` rules before measuring, and QA rejects a different font size or specified column alignment. Install this skill with the sibling `skills/report_common/` directory, or use the standalone bundle from `tools/package_skills.py`, which carries `scripts/report_common/` and the weekly master in `assets/`. Measure and repaginate at 11 pt; never shrink text to fit.
 
 Acceptance: test a 10 pt source with incorrect alignment and a current 11 pt source; both must produce 11 pt tables with the above alignment, reconcile all source records/counts/statuses/planned dates, and pass native visual review for clipping/overlap/footer clearance. Deliberately changing an output to 10 pt or right-aligning a centered column must fail QA. Templates and source workbooks remain unchanged.

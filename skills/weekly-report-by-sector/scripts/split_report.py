@@ -22,7 +22,6 @@ from lxml import etree
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]))
 from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
-from report_common.render import export_pdf
 
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
@@ -36,10 +35,9 @@ TOP_Y    = 1780255              # first table starts where the comparison chart 
 GAP      = 200000               # vertical gap between stacked tables
 KPI_ZONE = 1700000              # everything below this y on a section slide is body
 FOOTER_Y = 12687759
-NAV_XS   = (5741129, 5741130, 3970297, 2199462)   # nav tabs that stay
-NAV_DROP_X = 428628                                # the التفاصيل tab
-NAV_SHIFT  = 1012345            # shift left so the 3 remaining tabs are page-centred
-NAV_TOPS   = (-1, -2, -3, 137425, 194575)
+NAV_KEEP_LABELS = ('ملخص المهام', 'ملخص مشاريع سهيل', 'المعاملات')   # nav tabs that stay
+NAV_ZONE = 700000               # the nav strip sits above this y on every layout
+NAV_TOL  = 1000                 # EMU tolerance when matching tab x / width
 
 # ---- palette (read off the master's KPI cards) ---------------------------
 STATUS_FILL = {'مكتملة':'DCE6F2', 'على المخطط':'EBF1DE', 'متأخرة':'F2DCDB',
@@ -259,46 +257,55 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
         tbl.append(tr)
     return gf
 
-# ---- first-pass height estimate (refine_positions corrects it later) -----
+# ---- row heights: LibreOffice measurement when available, else estimate ---
 CPI, LINE, PAD = 15.5 * 10 / 11, 14 / 72, 0.12
+# (cell texts, column widths) -> needed row height in EMU, filled by measure_pass().
+MEASURED = {}
+
 def header_height(widths):
     # Narrow date/status columns need up to three 14 pt lines at 11 pt type.
     if len(widths) in (4, 5): return 0.75
     return 0.60 if len(widths)>=4 else 0.30
 
+def row_key(values, widths):
+    # The leading '#' cell is left out: a project row copied from the consolidated
+    # deck keeps its consolidated number until the sector deck renumbers it, and a
+    # one-line number never decides the row height.
+    return tuple(norm(v) for v in values[1:]), tuple(int(w) for w in widths[1:])
+
+def estimated_row_height(values, widths):
+    lines = 1
+    for value, width in zip(values, widths):
+        cpl = max(6, (width / EMU - 0.12) * CPI)
+        lines = max(lines, sum(max(1, math.ceil(len(part) / cpl))
+                               for part in str(value).split('\n')))
+    return int((PAD + lines * LINE) * EMU)
+
+def row_height(values, widths):
+    return MEASURED.get(row_key(values, widths)) or estimated_row_height(values, widths)
+
 def preserved_row_height(row, widths):
-    # A row copied from a 10 pt source must still fit the approved 11 pt output.
     values=['\n'.join(''.join(t.text or '' for t in p.iter(q('t'))) for p in tc.iter(q('p'))) for tc in row['tr'].findall(q('tc'))]
-    return max(int(row['tr'].get('h',152400)), int(est_table([values],widths)-(0.28+header_height(widths))*EMU))
+    measured = MEASURED.get(row_key(values, widths))
+    if measured: return measured
+    # Unmeasured: a row copied from a 10 pt source must still fit the 11 pt output.
+    return max(int(row['tr'].get('h',152400)), estimated_row_height(values, widths))
 
 def est_rows(rows, widths):
     if rows and isinstance(rows[0], dict):
         return (0.28+header_height(widths)) * EMU + sum(preserved_row_height(r,widths) for r in rows)
     return est_table(rows, widths)
+
 def est_table(rows, widths):
-    h = 0.28 + header_height(widths)
-    for r in rows:
-        lines = 1
-        for txt, w in zip(r, widths):
-            cpl = max(6, (w / EMU - 0.12) * CPI)
-            n = sum(max(1, math.ceil(len(seg) / cpl)) for seg in str(txt).split('\n'))
-            lines = max(lines, n)
-        h += PAD + lines * LINE
-    return h * EMU
+    return (0.28 + header_height(widths)) * EMU + sum(row_height(r, widths) for r in rows)
 
 def set_estimated_row_heights(gf, rows, widths, frame_height):
-    """Keep editable PowerPoint row geometry consistent before PDF refinement."""
+    """Write the per-row heights used for pagination into the table."""
     heights = [int(0.28 * EMU), int(header_height(widths) * EMU)]
     if rows and isinstance(rows[0], dict):
         heights.extend(preserved_row_height(row,widths) for row in rows)
     else:
-        for row in rows:
-            lines = 1
-            for value, width in zip(row, widths):
-                cpl = max(6, (width / EMU - 0.12) * CPI)
-                lines = max(lines, sum(max(1, math.ceil(len(part) / cpl))
-                                       for part in str(value).split('\n')))
-            heights.append(int((PAD + lines * LINE) * EMU))
+        heights.extend(row_height(row, widths) for row in rows)
     heights[-1] += int(frame_height) - sum(heights)
     for tr, height in zip(gf_tbl(gf).findall(q('tr')), heights):
         tr.set('h', str(height))
@@ -339,6 +346,39 @@ def summary_records(slides, title, text_key):
                             'text': row[head.index(detail_key)]})
     return out
 
+def _identity_xfrm(xfrm):
+    """True when a group's transform maps children onto themselves."""
+    if xfrm is None or xfrm.attrib:            # rot / flipH / flipV present
+        return False
+    v = {etree.QName(c).localname: dict(c.attrib) for c in xfrm}
+    return (v.get('off') is not None and v.get('off') == v.get('chOff')
+            and v.get('ext') is not None and v.get('ext') == v.get('chExt'))
+
+def flatten_kpi_groups(prs):
+    """Ungroup identity-transform groups above KPI_ZONE so KPI text boxes are top-level.
+
+    The splitter's KPI, body-clearing and continuation code paths only look at
+    top-level shapes. Groups with a real transform are left alone, since moving
+    their children out would change where they render."""
+    for slide in prs.slides:
+        tree = slide.shapes._spTree
+        for g in list(tree.iterchildren(qp('grpSp'))):
+            xfrm = g.find(qp('grpSpPr')).find(q('xfrm'))
+            if not _identity_xfrm(xfrm) or int(xfrm.find(q('off')).get('y')) >= KPI_ZONE:
+                continue
+            idx = tree.index(g)
+            for k in [k for k in g if k.tag not in (qp('nvGrpSpPr'), qp('grpSpPr'))]:
+                tree.insert(idx, k); idx += 1
+            tree.remove(g)
+    return prs
+
+def open_master(path):
+    """Open the master deck normalised for the splitter (KPI groups flattened)."""
+    return flatten_kpi_groups(Presentation(path))
+
+def has_column(rows, name):
+    return len(rows) > 1 and name in [norm(x) for x in rows[1]]
+
 def locate(prs):
     """Identify slide roles by content, not by fixed slide numbers."""
     slides = list(prs.slides)
@@ -358,10 +398,13 @@ def locate(prs):
         if any('رقم المعاملة' in [norm(x) for x in r[1]] for _, r in tables if len(r) > 1):
             role['trans_slides'].append(i)
             if role['trans'] is None: role['trans'] = i
+        # Summary tables carry a القطاع column; same-titled tables elsewhere
+        # (e.g. the digital-experience التحديات) do not and are not split.
         task_summary = any(table_title(r) in {'طلبات الدعم', 'المهام المعلقة',
-            'المهام المكتملة', 'المهام المتأخرة', 'المهام على المخطط'} for _, r in tables)
+            'المهام المكتملة', 'المهام المتأخرة', 'المهام على المخطط'}
+            and has_column(r, 'القطاع') for _, r in tables)
         project_summary = any(table_title(r) in {'أبرز التحديثات', 'التحديات',
-            'المشاريع المتأخرة'} for _, r in tables)
+            'المشاريع المتأخرة'} and has_column(r, 'القطاع') for _, r in tables)
         if task_summary:
             role['task_summaries'].append(i)
         if project_summary:
@@ -563,14 +606,77 @@ def _xfrm(el):
 def _font_size(sp):
     return max([int(r.get('sz', 0)) for r in sp.iter(q('rPr'))] + [0])
 
-def strip_and_centre_nav(prs):
+def _nav_label(sh):
+    return re.sub(r'\s+', ' ', sh.text_frame.text).strip() if sh.has_text_frame else ''
+
+R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+SLIDE_RT = R_NS + '/slide'
+JUMP = 'ppaction://hlinksldjump'
+
+def _nav_strip(layout):
+    return [sh for sh in layout.shapes if sh.top is not None and sh.top < NAV_ZONE
+            and sh.left is not None and sh.width is not None]
+
+def _shape_texts(sh):
+    if sh.has_text_frame: return [_nav_label(sh)]
+    return [t for c in getattr(sh, 'shapes', []) for t in _shape_texts(c)]
+
+def nav_columns(layout):
+    """Group the nav strip into tab columns: [(label, [shapes]), ...] right to left.
+
+    A column is every top-strip shape (or group) one tab wide at the same x as a
+    labelled shape. Returns [] for layouts without a nav bar."""
+    strip = _nav_strip(layout)
+    labelled = [(t, sh) for sh in strip for t in _shape_texts(sh) if t]
+    widths = [sh.width for t, sh in labelled if t in NAV_KEEP_LABELS]
+    if not widths: return []
+    tab_w = widths[0]
+    tabs = [sh for sh in strip if abs(sh.width - tab_w) <= NAV_TOL]
+    cols = []
+    for t, sh in labelled:
+        if abs(sh.width - tab_w) > NAV_TOL: continue
+        cols.append((t, [o for o in tabs if abs(o.left - sh.left) <= NAV_TOL]))
+    return sorted(cols, key=lambda c: -c[1][0].left)
+
+def _set_jump(layout, shape, target_part):
+    """Point every shape in the tab (group children included) at one slide,
+    or remove its links when ``target_part`` is None."""
+    rid = layout.part.relate_to(target_part, SLIDE_RT) if target_part is not None else None
+    for c in shape._element.iter(qp('cNvPr')):
+        for old in c.findall(q('hlinkClick')): c.remove(old)
+        if rid is None: continue
+        link = etree.SubElement(c, q('hlinkClick'))
+        link.set('{%s}id' % R_NS, rid); link.set('action', JUMP)
+        c.remove(link); c.insert(0, link)
+
+def strip_and_centre_nav(prs, targets=None):
+    """Keep only the tasks / Suhail / transactions tabs, link them, centre them.
+
+    Tabs are found by label text, not coordinates. Columns without a kept label
+    (التفاصيل, التجربة الرقمية, ...) are removed. The three kept tabs always stay
+    visible. With ``targets`` ({label: slide part or None}) every shape of a tab
+    whose section is in this deck — label and background — jumps to that section;
+    a tab whose section is absent (usually المعاملات) keeps no link at all."""
+    page_w = prs.slide_width
     for layout in prs.slide_masters[0].slide_layouts:
-        for sh in list(layout.shapes):
-            if sh.left == NAV_DROP_X and sh.top in NAV_TOPS:
-                layout.shapes._spTree.remove(sh._element)
-        for sh in layout.shapes:
-            if sh.left in NAV_XS and sh.top in NAV_TOPS:
-                sh.left = Emu(sh.left - NAV_SHIFT)
+        cols = nav_columns(layout)
+        if sorted(t for t, _ in cols if t in NAV_KEEP_LABELS) != sorted(NAV_KEEP_LABELS):
+            continue                                   # layout has no nav bar
+        keep = [(t, shapes) for t, shapes in cols if t in NAV_KEEP_LABELS]
+        kept_ids = {id(sh._element) for _, shapes in keep for sh in shapes}
+        for _, shapes in cols:
+            for sh in shapes:
+                if id(sh._element) not in kept_ids and sh._element.getparent() is not None:
+                    layout.shapes._spTree.remove(sh._element)
+        if not keep: continue
+        tabs = [sh for _, shapes in keep for sh in shapes]
+        if targets is not None:
+            for t, shapes in keep:
+                for sh in shapes: _set_jump(layout, sh, targets.get(t))
+        lo, hi = min(sh.left for sh in tabs), max(sh.left + sh.width for sh in tabs)
+        shift = lo - (page_w - (hi - lo)) // 2
+        for sh in tabs:
+            sh.left = Emu(sh.left - shift)
 
 def clear_body(slide):
     """Drop the cross-sector chart, its card and the template table."""
@@ -680,7 +786,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
     os.makedirs(outdir, exist_ok=True)
     full_dir = os.path.join(outdir, '_full'); os.makedirs(full_dir, exist_ok=True)
 
-    src = Presentation(master)
+    src = open_master(master)
     role = locate(src)
     tasks, projs, trans, ups, support, challenges = read_data(src, role)
     attach_transaction_sectors(trans, transactions)
@@ -753,14 +859,19 @@ def build(master, outdir, aliases, transactions=None, only=None):
         if only and only not in sec: continue
         d = sectors[sec]
         if not any(d.values()): continue
-        prs = Presentation(master)
-        strip_and_centre_nav(prs)
+        prs = open_master(master)
         fix_cover(prs, sec)
         keep = [role['cover']]
         if d['tasks'] or d['support']: keep.append(role['tasks'])
         if d['projs'] or d['ups'] or d['challenges']: keep.append(role['projects'])
         if d['trans']: keep.append(role['trans'])
         keep.append(role['thanks'])
+        # Tabs jump to the first slide of their section; continuation slides
+        # are inserted after it, so the target stays right.
+        strip_and_centre_nav(prs, {
+            'ملخص المهام': prs.slides[role['tasks']].part if role['tasks'] in keep else None,
+            'ملخص مشاريع سهيل': prs.slides[role['projects']].part if role['projects'] in keep else None,
+            'المعاملات': prs.slides[role['trans']].part if role['trans'] in keep else None})
 
         if d['tasks'] or d['support']:
             s = prs.slides[role['tasks']]
@@ -856,114 +967,36 @@ def build(master, outdir, aliases, transactions=None, only=None):
         set_table_directions(prs)
         prs.save(path)
         manifest.append({'sector': sec, 'file': path, 'keep': keep,
-                         'edited': [i for i in keep if i in (role['tasks'], role['projects'], role['trans'])
-                                    or i >= len(sl)],
                          'n': [len(d['tasks']), len(d['projs']), len(d['trans']), len(d['ups']),
-                               len(d['support']), len(d['challenges'])],
-                         'nslides': len(sl)})
+                               len(d['support']), len(d['challenges'])]})
     return manifest
 
-# ================== pass 2: measure, then reflow ==========================
-SAFETY = 1.12
-OFFPAGE = 40_000_000
-
-def _row_bands(page, x0, x1, y0):
-    """Row rectangles of the one table rendered on this page, top to bottom (points)."""
-    rs = [r for r in page.rects if r['x0'] > x0 - 3 and r['x1'] < x1 + 3
-          and r['top'] > y0 - 3 and r['height'] > 2]
-    bands = []
-    for r in sorted(rs, key=lambda r: (r['top'], r['bottom'])):
-        if bands and r['top'] < bands[-1][1] - 1:
-            bands[-1][1] = max(bands[-1][1], r['bottom'])
-        else:
-            bands.append([r['top'], r['bottom']])
-    return bands
-
-def _frames(slide):
-    return sorted([sh for sh in slide.shapes if sh.has_table], key=lambda s: s.top)
-
-def split_rows(frame, room):
-    """Keep the data rows that fit in `room` EMU; return a copy of the frame holding
-    the title, header and remaining rows, or None when no data row fits."""
-    trs = frame._element.find('.//' + q('tbl')).findall(q('tr'))
-    hs = [int(tr.get('h')) for tr in trs]
-    n, used = 2, hs[0] + hs[1]
-    while n < len(trs) and used + hs[n] <= room:
-        used += hs[n]; n += 1
-    if n == 2: return None
-    rest = deepcopy(frame._element)
-    for tr in trs[n:]: tr.getparent().remove(tr)
-    for tr in rest.find('.//' + q('tbl')).findall(q('tr'))[2:n]: tr.getparent().remove(tr)
-    frame.height = Emu(used)
-    return rest
-
-def refine_positions(manifest):
-    """Measure every row and write the real height back, so a table's declared
-    geometry matches what it occupies. Stacked tables overlap each other in the
-    render, which would corrupt the measurement, so each pass sends every table
-    but the one being measured off the page."""
-    import pdfplumber
+# ================== pass 2: measure every record row ======================
+def measure_pass(manifest):
+    """Measure the height each record row needs (LibreOffice, see
+    report_common.measure) and record it in MEASURED for the rebuild.
+    Returns the number of rows measured."""
+    from report_common.measure import measure_rows
+    found = 0
     for item in manifest:
         prs = Presentation(item['file'])
-        nmax = max((len(_frames(prs.slides[si])) for si in item['edited']), default=0)
-        heights = {}
-        for k in range(nmax):
-            probe = Presentation(item['file'])
-            for si in item['edited']:
-                for j, sh in enumerate(_frames(probe.slides[si])):
-                    if j != k: sh.top = Emu(OFFPAGE + j * 100000)
-            probe.save('_probe.pptx')
-            pdf_path = export_pdf('_probe.pptx', '_m.pdf')
-            with pdfplumber.open(pdf_path) as pdf:
-                for si in item['edited']:
-                    fr = _frames(prs.slides[si])
-                    if k >= len(fr): continue
-                    sh = fr[k]
-                    ntr = len(sh._element.find('.//' + q('tbl')).findall(q('tr')))
-                    bands = _row_bands(pdf.pages[si], sh.left / EMU * 72,
-                                       (sh.left + sh.width) / EMU * 72, sh.top / EMU * 72)
-                    if len(bands) != ntr - 1:
-                        print('  ! row-band mismatch on slide %d of %s (%d bands, %d rows)'
-                              % (si + 1, item['sector'], len(bands), ntr))
-                        continue
-                    title_h = max(0.0, bands[0][0] - sh.top / EMU * 72)
-                    heights[(si, k)] = [int(h / 72 * EMU * SAFETY)
-                                        for h in [title_h] + [b[1] - b[0] for b in bands]]
-            os.remove(pdf_path); os.remove('_probe.pptx')
-        pending = list(item['edited'])
-        while pending:
-            si = pending.pop(0)
-            fr = _frames(prs.slides[si])
-            y = fr[0].top if fr else 0
-            for k, sh in enumerate(fr):
-                hs = heights.get((si, k))
-                if hs:
-                    for tr, h in zip(sh._element.find('.//' + q('tbl')).findall(q('tr')), hs):
-                        tr.set('h', str(h))
-                    sh.height = Emu(sum(hs))
-            for k, sh in enumerate(fr):
-                # Measured rows can be taller than the estimate. Rows that no longer fit move
-                # to a continuation page placed directly after this one: whole tables when
-                # none of their rows fit, otherwise the overflowing rows of this table.
-                if y + sh.height > FOOTER_Y:
-                    rest = split_rows(sh, FOOTER_Y - y)
-                    if rest is None and not k:
-                        continue  # a single row taller than a page; QA rejects it
-                    spill, new = continuation_slide(prs, si, item['keep'], item['nslides'])
-                    item['keep'].remove(new); item['keep'].insert(item['keep'].index(si) + 1, new)
-                    item['edited'].append(new); pending.insert(0, new)
-                    if rest is not None:
-                        sh.top = Emu(int(y))
-                        spill.shapes._spTree.append(rest)
-                    for moved in fr[k + (rest is not None):]:
-                        spill.shapes._spTree.append(moved._element)
-                    first = next(f for f in spill.shapes if f._element is (fr[k]._element if rest is None else rest))
-                    first.top = Emu(TOP_Y)
-                    first.height = Emu(sum(int(tr.get('h')) for tr in first._element.find('.//' + q('tbl')).findall(q('tr'))))
-                    break
-                sh.top = Emu(int(y))
-                y += sh.height + GAP
-        prs.save(item['file'])
+        targets, rows = [], {}
+        slides = list(prs.slides)
+        for si in item['keep']:            # dropped master slides are not measured
+            for sh in slides[si].shapes:
+                if not sh.has_table: continue
+                tbl = gf_tbl(sh._element)
+                trs = tbl.findall(q('tr'))
+                if len(trs) < 3: continue
+                widths = tbl_colwidths(tbl)
+                targets.append((si, sh.shape_id, range(2, len(trs))))
+                for ri in range(2, len(trs)):
+                    rows[(si, sh.shape_id, ri)] = [cell_text_el(tc) for tc in trs[ri].findall(q('tc'))], widths
+        for key, height in measure_rows(item['file'], targets).items():
+            values, widths = rows[key]
+            MEASURED[row_key(values, widths)] = height
+            found += 1
+    return found
 
 # ============ pass 3: drop unused slides at the XML level =================
 def shrink_media(wd):
@@ -1040,7 +1073,10 @@ def main():
     aliases = json.load(open(a.aliases, encoding='utf-8')) if os.path.exists(a.aliases) else {}
     man = build(a.master, a.outdir, aliases, a.transactions, a.only)
     if not a.no_refine:
-        refine_positions(man)
+        # Rebuild with measured row heights so pagination uses what each row
+        # really needs: no clipped rows, no oversized rows, no premature breaks.
+        print('  measured %d rows; rebuilding' % measure_pass(man))
+        man = build(a.master, a.outdir, aliases, a.transactions, a.only)
     man = slim(man, a.outdir)
     with open(os.path.join(a.outdir, 'manifest.json'), 'w', encoding='utf-8') as stream:
         json.dump(man, stream, ensure_ascii=False, indent=1)

@@ -5,6 +5,7 @@ from pathlib import Path
 from pptx import Presentation
 from pptx.oxml.ns import qn
 import run_weekly_workflow as workflow
+from report_common import pptx_helpers as helpers
 
 class TemplateAcceptanceTests(unittest.TestCase):
     def test_summary_continuations_remove_kpi_dividers(self):
@@ -53,10 +54,10 @@ class TemplateAcceptanceTests(unittest.TestCase):
             for shape in prs.slides[index].shapes:
                 if not shape.has_table:continue
                 count=len(shape.table.rows)+1
-                workflow.builder.resize_table(shape.table,count)
+                helpers.resize_table(shape.table,count)
                 for row in list(shape.table.rows)[2:]:
                     for cell in row.cells:
-                        workflow.builder.set_cell_text(cell,'ملاحظات تجريبية 123')
+                        helpers.set_cell_text(cell,'ملاحظات تجريبية 123')
                         run=cell.text_frame.paragraphs[0].runs[0]
                         for script in ('latin','cs'):
                             font=run._r.find(qn('a:rPr')).find(qn('a:'+script))

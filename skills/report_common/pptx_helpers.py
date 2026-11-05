@@ -9,10 +9,15 @@ SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المت�
 MONTHS=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
 
 
+ISO_DATETIME_TEXT = re.compile(r'(\d{4})-(\d{2})-(\d{2})(?: 00:00:00)?')
+
 def val(v):
     if v is None: return ''
     if isinstance(v, (dt.datetime, dt.date)): return v.strftime('%d-%m-%Y')
     if isinstance(v, float) and v.is_integer(): return str(int(v))
+    # A date stored as text by str(datetime) upstream: show it like every other date.
+    m = ISO_DATETIME_TEXT.fullmatch(str(v).strip())
+    if m: return '%s-%s-%s' % (m.group(3), m.group(2), m.group(1))
     return str(v)
 
 
@@ -204,12 +209,6 @@ def detail_tables(slide,kind):
 
 def detail_pattern_slides(prs,kind):
     return [sl for sl in prs.slides if detail_tables(sl,kind)]
-
-
-def first_table(slide,cols):
-    xs=tables(slide,cols)
-    if not xs: raise ValueError(f'{cols}-column table pattern missing')
-    return xs[0]
 
 
 def find_slide_with_text(prs,text,require_table=None):
