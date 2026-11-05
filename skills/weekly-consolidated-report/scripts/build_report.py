@@ -103,7 +103,36 @@ def update_chart(shape,records,statuses):
     chart=shape.chart._chartSpace
     blank=chart.find('.//'+qn('c:dispBlanksAs'))
     if blank is not None:blank.set('val','gap')
+    show_all_labels(chart)
     return records
+
+def show_all_labels(chart):
+    """Label every bar segment.
+
+    The master hides labels on individual points (``c:dLbl`` with
+    ``c:delete``) chosen for its sample data, and turns them off for the
+    delayed and suspended series altogether.  Once the data is replaced
+    those switches land on arbitrary bars, so every series gets the
+    template's visible label style with no per-point overrides.
+    """
+    series=chart.findall('.//'+qn('c:ser'))
+    pattern=None
+    for ser in series:
+        labels=ser.find(qn('c:dLbls'))
+        if labels is not None and labels.find(qn('c:showVal')) is not None and labels.find(qn('c:showVal')).get('val')=='1':
+            pattern=deepcopy(labels);break
+    if pattern is None:raise ValueError('chart has no visible data-label pattern')
+    for point in pattern.findall(qn('c:dLbl')):pattern.remove(point)
+    delete=pattern.find(qn('c:delete'))
+    if delete is not None:pattern.remove(delete)
+    for ser in series:
+        old=ser.find(qn('c:dLbls'))
+        fresh=deepcopy(pattern)
+        if old is not None:old.addprevious(fresh);ser.remove(old)
+        else:
+            # Schema order: dLbls precedes trendline/errBars/cat/val.
+            anchor=next((ser.find(qn(t)) for t in ('c:trendline','c:errBars','c:cat','c:val') if ser.find(qn(t)) is not None),None)
+            anchor.addprevious(fresh)
 
 def build_candidate(args):
     if args.model=='digital':

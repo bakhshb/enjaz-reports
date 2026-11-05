@@ -142,6 +142,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
         order={str(c.label):j for j,c in enumerate(next(sh for sh in original.shapes if sh.has_chart).chart.plots[0].categories)}
         rows=sorted([r for r in rows if any(v for v in r[1:])],key=lambda r:order.get(str(r[0]),len(order)))
         validation.chart_metrics(report,str(charts[0].chart.part.partname).lstrip('/'),rows,statuses,errors)
+        validation.chart_labels_visible(report,str(charts[0].chart.part.partname).lstrip('/'),errors)
     if sum(sh.has_chart for sl in final.slides for sh in sl.shapes)!=(8 if model=='digital' else 3):
         errors.append('Unexpected native chart count')
     patterns={helpers.table_title(sh):sh.table for sl in master.slides for sh in helpers.tables(sl,4) if not is_digital_detail_table(sh)}
