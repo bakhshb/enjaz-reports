@@ -103,13 +103,15 @@ def fill_titled_table(shape, rows, title=None, weights=None):
     shape.height=sum((r.height or 0) for r in t.rows)
 
 
-def estimate_lines(text,width_inches,font_pt):
+def estimate_lines(text,width_inches,font_pt,chars_per_inch=None):
     text=val(text).strip()
     if not text: return 1
     # Arabic at the approved font sizes is typically around 10-13 visible
     # characters per inch; use a conservative estimate so long records move
-    # to a continuation page before they become cramped.
-    chars_per_line=max(6,int(width_inches*(12 if font_pt<=11 else 10)))
+    # to a continuation page before they become cramped. Callers whose layout
+    # was calibrated against a native render may pass their own density.
+    if chars_per_inch is None:chars_per_inch=12 if font_pt<=11 else 10
+    chars_per_line=max(6,int(width_inches*chars_per_inch))
     return sum(max(1,math.ceil(len(part)/chars_per_line)) for part in text.splitlines() or [''])
 
 
@@ -125,8 +127,29 @@ def slide_index(prs,target):
     raise ValueError('slide is not in presentation')
 
 
+def unique_slide_partname(prs,slide):
+    """Give `slide` a part name no other saved part uses.
+
+    python-pptx names a new slide after the current slide count, so after a
+    slide is removed the next one can reuse a name still held by a later
+    slide; the package would then contain two members with the same name.
+    """
+    from pptx.opc.packuri import PackURI
+    part=slide.part
+    used={str(p.partname) for p in prs.part.package.iter_parts() if p is not part}
+    if str(part.partname) not in used:return slide
+    n=len(prs.slides._sldIdLst)
+    while f'/ppt/slides/slide{n}.xml' in used:n+=1
+    part.partname=PackURI(f'/ppt/slides/slide{n}.xml')
+    return slide
+
+
+def add_slide(prs,layout):
+    return unique_slide_partname(prs,prs.slides.add_slide(layout))
+
+
 def clone_slide(prs,source,after=None,shape_predicate=None):
-    dest=prs.slides.add_slide(source.slide_layout)
+    dest=add_slide(prs,source.slide_layout)
     # Preserve the source root and shape-tree metadata/namespaces as a unit.
     # Rebuilding only its shapes can discard Office compatibility metadata.
     root=copy.deepcopy(source._element)
