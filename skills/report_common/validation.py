@@ -174,3 +174,17 @@ def chart_metrics(path, chart_name, records, statuses, errors):
             wb.close()
     except Exception as exc:errors.append(f'{chart_name}: {exc}')
 
+
+
+def chart_labels_visible(path, chart_name, errors):
+    """Every series must show its values, with no per-bar label hidden."""
+    try:
+        with zipfile.ZipFile(path) as z:root=ET.fromstring(z.read(chart_name))
+        for i,ser in enumerate(root.findall('.//c:ser',CHART_NS)):
+            labels=ser.find('c:dLbls',CHART_NS)
+            show=None if labels is None else labels.find('c:showVal',CHART_NS)
+            if show is None or show.get('val')!='1' or labels.find('c:delete',CHART_NS) is not None:
+                errors.append(f'{chart_name} series {i}: value labels are hidden')
+            elif any(p.find('c:delete',CHART_NS) is not None for p in labels.findall('c:dLbl',CHART_NS)):
+                errors.append(f'{chart_name} series {i}: some bars hide their value label')
+    except Exception as exc:errors.append(f'{chart_name}: {exc}')
