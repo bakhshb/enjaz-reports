@@ -13,6 +13,7 @@ Usage:
 Auto-detects the highest-numbered "Wxx" week for both the status column
 («الحالة الفعلية Wxx») and the progress column («ما تم حتى تاريخه Wxx»).
 """
+import datetime
 import re
 import sys
 from pathlib import Path
@@ -71,6 +72,15 @@ SZ = 10
 def norm(v):
     return re.sub(r'\s+', ' ', str(v)).strip() if v is not None else ''
 
+def date_text(v):
+    """Project dates as dd-mm-yyyy text, like the rest of the export.
+
+    The raw export mixes text dates with real Excel dates; str() of the latter
+    would leak '2026-12-11 00:00:00' into the report."""
+    if isinstance(v, (datetime.datetime, datetime.date)):
+        return v.strftime('%d-%m-%Y')
+    return norm(v)
+
 src = openpyxl.load_workbook(SRC, data_only=True)
 proj_sheet = next((s for s in src.sheetnames if 'سهيل' in s and 'ملخص' not in s), src.sheetnames[0])
 ws = src[proj_sheet]
@@ -127,8 +137,8 @@ for r in range(2, ws.max_row + 1):
     rows.append({
         'sector': SECT.get(sec, sec),
         'name': name,
-        'start': norm(ws.cell(r, c_start).value),
-        'end': norm(ws.cell(r, c_end).value),
+        'start': date_text(ws.cell(r, c_start).value),
+        'end': date_text(ws.cell(r, c_end).value),
         'status': status,
         'done': ws.cell(r, i_done + 1).value or '',
         'notes': ws.cell(r, c_notes).value if c_notes else None,

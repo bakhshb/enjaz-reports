@@ -71,10 +71,12 @@ class NavTests(unittest.TestCase):
         prs=Presentation(master);splitter.strip_and_centre_nav(prs)
         seen=0
         for layout in prs.slide_masters[0].slide_layouts:
-            names,span=splitter.nav_tabs(layout)
-            if not names:continue
+            cols=splitter.nav_columns(layout)
+            if not cols:continue
             seen+=1
-            self.assertEqual(sorted(names),sorted(splitter.NAV_KEEP_LABELS),layout.name)
+            tabs=[sh for _,shapes in cols for sh in shapes]
+            span=min(sh.left for sh in tabs),max(sh.left+sh.width for sh in tabs)
+            self.assertEqual(sorted(name for name,_ in cols),sorted(splitter.NAV_KEEP_LABELS),layout.name)
             self.assertLessEqual(abs(span[0]+span[1]-prs.slide_width),2,layout.name)
         self.assertGreater(seen,0)
         # Links are wired per sector deck in build(); see test_navigation_links.py.

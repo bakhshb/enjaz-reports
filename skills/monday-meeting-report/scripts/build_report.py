@@ -17,7 +17,7 @@ import monday_status_styles as status_styles
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from report_common.pptx_helpers import (val, set_text, clear_cell_bullets, set_cell_text, shape_by_id, recursive_text, slide_texts, resize_table, fill_titled_table, slide_index, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, first_table, find_slide_with_text, find_header, read_block, detail_sections, summary_records, task_data, suhail_data, read_sector_counts)
+from report_common.pptx_helpers import (val, set_text, shape_by_id, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, find_slide_with_text, task_data, suhail_data)
 
 import monday_layout as layout
 from report_common.table_typography import set_table_sizes, set_table_directions
@@ -257,7 +257,7 @@ def build_candidate(a):
 
     # Task details are data-driven. The master contributes one approved detail
     # pattern; every source and overflow page is generated from it.
-    task_generated,task_unused=build_dynamic_detail_section(prs,task_patterns,tdetails,'task','تفاصيل المهام',approved_styles=approved,measurements=measurements,bullets=bullets)
+    _,task_unused=build_dynamic_detail_section(prs,task_patterns,tdetails,'task','تفاصيل المهام',approved_styles=approved,measurements=measurements,bullets=bullets)
 
     # Suhail summary and updates.
     for sid,x in zip([5,8,11,17,13],sk):set_text(shape_by_id(suhail_summary,sid),x)
@@ -266,7 +266,7 @@ def build_candidate(a):
 
     # Suhail details are also data-driven: new sectors and any amount of projects
     # simply create more pages from the approved six-column detail pattern.
-    suhail_generated,suhail_unused=build_dynamic_detail_section(prs,suhail_patterns,sdetails,'suhail',None,approved_styles=approved,measurements=measurements,bullets=bullets)
+    _,suhail_unused=build_dynamic_detail_section(prs,suhail_patterns,sdetails,'suhail',None,approved_styles=approved,measurements=measurements,bullets=bullets)
 
     # Only after every dynamic page has been allocated do we remove the unused
     # seed-pattern slides from the master.

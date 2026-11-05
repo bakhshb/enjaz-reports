@@ -125,11 +125,11 @@ bold — a visible regression the user will ask about. Never retype these cells.
 
 ## Table geometry must be self-consistent
 
-Every `<a:tr>` carries its measured height and the frame's `cy` equals their sum.
+Every `<a:tr>` carries its measured height (see the measurement pass in SKILL.md) and the frame's `cy` equals their sum.
 This isn't cosmetic: PowerPoint recomputes row heights with the real Abar Mid
 metrics, and a frame that claims to be shorter than its content ends up under the
 next table, whose frame then swallows the clicks — the user can no longer put the
-cursor in the lower rows. `refine_positions` handles it; anything you add that
+cursor in the lower rows. The splitter's measure-and-rebuild pass handles it; anything you add that
 touches heights must preserve `sum(row h) == frame cy`.
 
 ## Text handling
