@@ -48,7 +48,7 @@ FIELDS={**{t:TASK_FIELDS for t in splitter.TASK_TITLE.values()},
 
 
 def expected_records(master,transactions=None,aliases=None,only=None):
-    src=Presentation(master)
+    src=splitter.open_master(master)
     tasks,projects,trans,updates,support,challenges=splitter.read_data(src,splitter.locate(src))
     splitter.attach_transaction_sectors(trans,transactions)
     alias_path=aliases or Path(__file__).resolve().parents[1]/'references'/'sector-aliases.json'
@@ -148,6 +148,7 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
         record_errors=[]
         check_table_typography(prs,record_errors)
         record_errors.extend(identity_errors(prs,it['sector'],source_tables,master))
+        record_errors.extend(nav_errors(prs))
         try:
             actual=actual_records(prs)
             for title in set(actual)|set(source_tables):
@@ -168,6 +169,23 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
     return ok
 
 
+def nav_errors(prs):
+    """Every layout used by an output slide that shows a nav bar must show exactly
+    the three kept tabs, centred on the page within one tab gap."""
+    errors=[]
+    for layout in {id(s.slide_layout):s.slide_layout for s in prs.slides}.values():
+        names,span=splitter.nav_tabs(layout)
+        if not names:continue
+        if sorted(names)!=sorted(splitter.NAV_KEEP_LABELS):
+            errors.append(f'{layout.name}: nav tabs {names} are not {list(splitter.NAV_KEEP_LABELS)}');continue
+        lo,hi=span;width=(hi-lo)/len(names)
+        lefts=sorted(sh.left for sh in layout.shapes if sh.has_text_frame and splitter._nav_label(sh) in names)
+        gap=max(min(b-a for a,b in zip(lefts,lefts[1:]))-width,splitter.NAV_TOL) if len(lefts)>1 else width
+        if abs((lo+hi)/2-prs.slide_width/2)>gap:
+            errors.append(f'{layout.name}: nav tabs are not centred')
+    return errors
+
+
 def identity_errors(prs,sector,records,master):
     """Check cover and approved summary identifiers independently of the manifest."""
     def walk(shapes):
@@ -178,7 +196,7 @@ def identity_errors(prs,sector,records,master):
     if not any(getattr(sh,'has_text_frame',False) and sh.text.strip()==sector
                for sh in walk(prs.slides[0].shapes)):
         errors.append('Cover sector differs from source')
-    source=Presentation(master)
+    source=splitter.open_master(master)
     specs=[('إجمالي المهام',[11,14,16,7,6],['المهام المكتملة','المهام على المخطط','المهام المتأخرة','المهام المعلقة']),
            ('إجمالي مشاريع سهيل',[10,12,14,8,7],['المشاريع المكتملة','المشاريع على المخطط','المشاريع المتأخرة','المشاريع لم تبدأ'])]
     for label,ids,titles in specs:

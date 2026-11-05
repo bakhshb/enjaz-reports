@@ -25,13 +25,21 @@ The transactions table starts at the same `1780255` EMU top as task and project 
 
 ## Navigation
 
-The master has four tabs; sector decks keep three (المهام / مشاريع سهيل /
-المعاملات) and drop التفاصيل. The tabs live in the slide **layouts**, not the
-slides, so edit `1_Title Slide`, `2_Title Slide`, `5_Title Slide`.
+Sector decks keep three tabs (ملخص المهام / ملخص مشاريع سهيل / المعاملات) and
+drop every other tab (التفاصيل, and التجربة الرقمية on newer masters). The tabs
+live in the slide **layouts**, not the slides. Tabs are found by label text, never
+by coordinates — the master's tab count, widths and x positions change between
+weeks:
 
-* the التفاصيل tab sits at x `428628` — delete both its shapes
-* the remaining three sit at x `5741129`, `3970297`, `2199462`
-* shift each left by `1012345` so the group is centred on the page
+* on each layout, look only at shapes above y `700000` (the nav strip)
+* a layout has a nav bar when all three kept labels are present (whitespace
+  collapsed: the master spells `ملخص مشاريع  سهيل` with a double space)
+* every shape (or group) one tab wide (±1000 EMU) is part of a tab column;
+  delete the columns whose x is not a kept label's x
+* shift the kept columns so their bounding box is centred on the slide width
+
+QA rejects any output layout whose nav bar shows other tabs or is off-centre by
+more than one tab gap.
 
 Keep the active-tab colours as they are: black on المهام, green on سهيل, navy on
 المعاملات. Hyperlinks pointing at deleted slides must be stripped, not retargeted.

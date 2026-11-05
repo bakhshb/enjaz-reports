@@ -36,10 +36,9 @@ TOP_Y    = 1780255              # first table starts where the comparison chart 
 GAP      = 200000               # vertical gap between stacked tables
 KPI_ZONE = 1700000              # everything below this y on a section slide is body
 FOOTER_Y = 12687759
-NAV_XS   = (5741129, 5741130, 3970297, 2199462)   # nav tabs that stay
-NAV_DROP_X = 428628                                # the التفاصيل tab
-NAV_SHIFT  = 1012345            # shift left so the 3 remaining tabs are page-centred
-NAV_TOPS   = (-1, -2, -3, 137425, 194575)
+NAV_KEEP_LABELS = ('ملخص المهام', 'ملخص مشاريع سهيل', 'المعاملات')   # nav tabs that stay
+NAV_ZONE = 700000               # the nav strip sits above this y on every layout
+NAV_TOL  = 1000                 # EMU tolerance when matching tab x / width
 
 # ---- palette (read off the master's KPI cards) ---------------------------
 STATUS_FILL = {'مكتملة':'DCE6F2', 'على المخطط':'EBF1DE', 'متأخرة':'F2DCDB',
@@ -339,6 +338,39 @@ def summary_records(slides, title, text_key):
                             'text': row[head.index(detail_key)]})
     return out
 
+def _identity_xfrm(xfrm):
+    """True when a group's transform maps children onto themselves."""
+    if xfrm is None or xfrm.attrib:            # rot / flipH / flipV present
+        return False
+    v = {etree.QName(c).localname: dict(c.attrib) for c in xfrm}
+    return (v.get('off') is not None and v.get('off') == v.get('chOff')
+            and v.get('ext') is not None and v.get('ext') == v.get('chExt'))
+
+def flatten_kpi_groups(prs):
+    """Ungroup identity-transform groups above KPI_ZONE so KPI text boxes are top-level.
+
+    The splitter's KPI, body-clearing and continuation code paths only look at
+    top-level shapes. Groups with a real transform are left alone, since moving
+    their children out would change where they render."""
+    for slide in prs.slides:
+        tree = slide.shapes._spTree
+        for g in list(tree.iterchildren(qp('grpSp'))):
+            xfrm = g.find(qp('grpSpPr')).find(q('xfrm'))
+            if not _identity_xfrm(xfrm) or int(xfrm.find(q('off')).get('y')) >= KPI_ZONE:
+                continue
+            idx = tree.index(g)
+            for k in [k for k in g if k.tag not in (qp('nvGrpSpPr'), qp('grpSpPr'))]:
+                tree.insert(idx, k); idx += 1
+            tree.remove(g)
+    return prs
+
+def open_master(path):
+    """Open the master deck normalised for the splitter (KPI groups flattened)."""
+    return flatten_kpi_groups(Presentation(path))
+
+def has_column(rows, name):
+    return len(rows) > 1 and name in [norm(x) for x in rows[1]]
+
 def locate(prs):
     """Identify slide roles by content, not by fixed slide numbers."""
     slides = list(prs.slides)
@@ -358,10 +390,13 @@ def locate(prs):
         if any('رقم المعاملة' in [norm(x) for x in r[1]] for _, r in tables if len(r) > 1):
             role['trans_slides'].append(i)
             if role['trans'] is None: role['trans'] = i
+        # Summary tables carry a القطاع column; same-titled tables elsewhere
+        # (e.g. the digital-experience التحديات) do not and are not split.
         task_summary = any(table_title(r) in {'طلبات الدعم', 'المهام المعلقة',
-            'المهام المكتملة', 'المهام المتأخرة', 'المهام على المخطط'} for _, r in tables)
+            'المهام المكتملة', 'المهام المتأخرة', 'المهام على المخطط'}
+            and has_column(r, 'القطاع') for _, r in tables)
         project_summary = any(table_title(r) in {'أبرز التحديثات', 'التحديات',
-            'المشاريع المتأخرة'} for _, r in tables)
+            'المشاريع المتأخرة'} and has_column(r, 'القطاع') for _, r in tables)
         if task_summary:
             role['task_summaries'].append(i)
         if project_summary:
@@ -563,14 +598,48 @@ def _xfrm(el):
 def _font_size(sp):
     return max([int(r.get('sz', 0)) for r in sp.iter(q('rPr'))] + [0])
 
+def _nav_label(sh):
+    return re.sub(r'\s+', ' ', sh.text_frame.text).strip() if sh.has_text_frame else ''
+
 def strip_and_centre_nav(prs):
+    """Keep only the tasks / Suhail / transactions tabs and centre them.
+
+    Tabs are found by label text, not coordinates: every shape in the top strip
+    that is one tab wide belongs to a tab column; columns without a kept label
+    (التفاصيل, التجربة الرقمية, ...) are removed."""
+    page_w = prs.slide_width
     for layout in prs.slide_masters[0].slide_layouts:
-        for sh in list(layout.shapes):
-            if sh.left == NAV_DROP_X and sh.top in NAV_TOPS:
+        strip = [sh for sh in layout.shapes if sh.top is not None and sh.top < NAV_ZONE
+                 and sh.left is not None and sh.width is not None]
+        labels = [sh for sh in strip if _nav_label(sh) in NAV_KEEP_LABELS]
+        if sorted(_nav_label(sh) for sh in labels) != sorted(NAV_KEEP_LABELS):
+            continue                                   # layout has no nav bar
+        tab_w = labels[0].width
+        keep_x = [sh.left for sh in labels]
+        tabs = [sh for sh in strip if abs(sh.width - tab_w) <= NAV_TOL]
+        kept = lambda sh: any(abs(sh.left - x) <= NAV_TOL for x in keep_x)
+        for sh in tabs:
+            if not kept(sh):
                 layout.shapes._spTree.remove(sh._element)
-        for sh in layout.shapes:
-            if sh.left in NAV_XS and sh.top in NAV_TOPS:
-                sh.left = Emu(sh.left - NAV_SHIFT)
+        tabs = [sh for sh in tabs if kept(sh)]
+        lo, hi = min(sh.left for sh in tabs), max(sh.left + sh.width for sh in tabs)
+        shift = lo - (page_w - (hi - lo)) // 2
+        for sh in tabs:
+            sh.left = Emu(sh.left - shift)
+
+def nav_tabs(layout):
+    """(labels, (left, right)) of the nav tabs on a layout, for QA."""
+    strip = [sh for sh in layout.shapes if sh.top is not None and sh.top < NAV_ZONE
+             and sh.left is not None and sh.width is not None]
+    def texts(sh):
+        if sh.has_text_frame: return [_nav_label(sh)]
+        return [t for c in getattr(sh, 'shapes', []) for t in texts(c)]
+    labelled = [(t, sh) for sh in strip for t in texts(sh) if t]
+    if not labelled: return [], None
+    tab_w = labelled[0][1].width
+    tabs = [sh for sh in strip if abs(sh.width - tab_w) <= NAV_TOL]
+    names = [t for t, sh in labelled if abs(sh.width - tab_w) <= NAV_TOL]
+    return names, (min(sh.left for sh in tabs), max(sh.left + sh.width for sh in tabs))
 
 def clear_body(slide):
     """Drop the cross-sector chart, its card and the template table."""
@@ -680,7 +749,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
     os.makedirs(outdir, exist_ok=True)
     full_dir = os.path.join(outdir, '_full'); os.makedirs(full_dir, exist_ok=True)
 
-    src = Presentation(master)
+    src = open_master(master)
     role = locate(src)
     tasks, projs, trans, ups, support, challenges = read_data(src, role)
     attach_transaction_sectors(trans, transactions)
@@ -753,7 +822,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
         if only and only not in sec: continue
         d = sectors[sec]
         if not any(d.values()): continue
-        prs = Presentation(master)
+        prs = open_master(master)
         strip_and_centre_nav(prs)
         fix_cover(prs, sec)
         keep = [role['cover']]

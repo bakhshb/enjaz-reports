@@ -37,6 +37,16 @@ the source rather than trusting manifest totals. It also rejects broken internal
 relationships, external links, and unused slide parts left in the package.
 Programmatic success does not replace the mandatory render and visual review.
 
+Both scripts normalise the master in memory (`open_master`): identity-transform
+groups in the KPI zone (for example a grouped ملخص المهام KPI card) are ungrouped
+so the KPI boxes can be found and rewritten. Groups with a real transform are left
+alone. Summary tables are recognised by title **and** a `القطاع` column, so
+same-titled tables elsewhere (the التجربة الرقمية `التحديات` tables) are ignored.
+Never pre-process the master by hand.
+
+Behind a corporate TLS proxy, `uv` may fail with `invalid peer certificate:
+UnknownIssuer`; add `--system-certs` to each `uv run` command.
+
 `--only <name>` builds a single sector, which is the fast way to test a change
 
 before rebuilding all ten.
@@ -201,7 +211,7 @@ every table, row and KPI element is cloned from a shape that already exists in
 
 the master; only text, status fills, accent colour and geometry change. The three
 
-nav tabs (التفاصيل removed) sit centred on the page as one group. Title rows carry
+nav tabs (التفاصيل and التجربة الرقمية removed) sit centred on the page as one group. Title rows carry
 
 no border and no fill — only a small accent bar coloured by table type.
 
