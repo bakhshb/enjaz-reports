@@ -38,11 +38,20 @@ weeks:
   delete the columns whose x is not a kept label's x
 * shift the kept columns so their bounding box is centred on the slide width
 
-QA rejects any output layout whose nav bar shows other tabs or is off-centre by
-more than one tab gap.
+The three tabs always stay visible, even when the sector has no slide for one of
+them. Links are rewritten per sector deck, never inherited from the master:
+
+* a tab whose section is in the deck jumps to that section's first slide — both
+  its label and its background (the master's المعاملات label has no link)
+* a tab whose section is absent (usually المعاملات: most weeks have no delayed
+  transactions) keeps no link at all
+
+QA rejects any output layout whose nav bar shows other tabs, is off-centre by
+more than one tab gap, has a tab that does not jump to its section, or links a
+tab whose section is absent.
 
 Keep the active-tab colours as they are: black on المهام, green on سهيل, navy on
-المعاملات. Hyperlinks pointing at deleted slides must be stripped, not retargeted.
+المعاملات.
 
 ## Status colours
 

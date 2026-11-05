@@ -601,27 +601,70 @@ def _font_size(sp):
 def _nav_label(sh):
     return re.sub(r'\s+', ' ', sh.text_frame.text).strip() if sh.has_text_frame else ''
 
-def strip_and_centre_nav(prs):
-    """Keep only the tasks / Suhail / transactions tabs and centre them.
+R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+SLIDE_RT = R_NS + '/slide'
+JUMP = 'ppaction://hlinksldjump'
 
-    Tabs are found by label text, not coordinates: every shape in the top strip
-    that is one tab wide belongs to a tab column; columns without a kept label
-    (التفاصيل, التجربة الرقمية, ...) are removed."""
+def _nav_strip(layout):
+    return [sh for sh in layout.shapes if sh.top is not None and sh.top < NAV_ZONE
+            and sh.left is not None and sh.width is not None]
+
+def _shape_texts(sh):
+    if sh.has_text_frame: return [_nav_label(sh)]
+    return [t for c in getattr(sh, 'shapes', []) for t in _shape_texts(c)]
+
+def nav_columns(layout):
+    """Group the nav strip into tab columns: [(label, [shapes]), ...] right to left.
+
+    A column is every top-strip shape (or group) one tab wide at the same x as a
+    labelled shape. Returns [] for layouts without a nav bar."""
+    strip = _nav_strip(layout)
+    labelled = [(t, sh) for sh in strip for t in _shape_texts(sh) if t]
+    widths = [sh.width for t, sh in labelled if t in NAV_KEEP_LABELS]
+    if not widths: return []
+    tab_w = widths[0]
+    tabs = [sh for sh in strip if abs(sh.width - tab_w) <= NAV_TOL]
+    cols = []
+    for t, sh in labelled:
+        if abs(sh.width - tab_w) > NAV_TOL: continue
+        cols.append((t, [o for o in tabs if abs(o.left - sh.left) <= NAV_TOL]))
+    return sorted(cols, key=lambda c: -c[1][0].left)
+
+def _set_jump(layout, shape, target_part):
+    """Point every shape in the tab (group children included) at one slide,
+    or remove its links when ``target_part`` is None."""
+    rid = layout.part.relate_to(target_part, SLIDE_RT) if target_part is not None else None
+    for c in shape._element.iter(qp('cNvPr')):
+        for old in c.findall(q('hlinkClick')): c.remove(old)
+        if rid is None: continue
+        link = etree.SubElement(c, q('hlinkClick'))
+        link.set('{%s}id' % R_NS, rid); link.set('action', JUMP)
+        c.remove(link); c.insert(0, link)
+
+def strip_and_centre_nav(prs, targets=None):
+    """Keep only the tasks / Suhail / transactions tabs, link them, centre them.
+
+    Tabs are found by label text, not coordinates. Columns without a kept label
+    (التفاصيل, التجربة الرقمية, ...) are removed. The three kept tabs always stay
+    visible. With ``targets`` ({label: slide part or None}) every shape of a tab
+    whose section is in this deck — label and background — jumps to that section;
+    a tab whose section is absent (usually المعاملات) keeps no link at all."""
     page_w = prs.slide_width
     for layout in prs.slide_masters[0].slide_layouts:
-        strip = [sh for sh in layout.shapes if sh.top is not None and sh.top < NAV_ZONE
-                 and sh.left is not None and sh.width is not None]
-        labels = [sh for sh in strip if _nav_label(sh) in NAV_KEEP_LABELS]
-        if sorted(_nav_label(sh) for sh in labels) != sorted(NAV_KEEP_LABELS):
+        cols = nav_columns(layout)
+        if sorted(t for t, _ in cols if t in NAV_KEEP_LABELS) != sorted(NAV_KEEP_LABELS):
             continue                                   # layout has no nav bar
-        tab_w = labels[0].width
-        keep_x = [sh.left for sh in labels]
-        tabs = [sh for sh in strip if abs(sh.width - tab_w) <= NAV_TOL]
-        kept = lambda sh: any(abs(sh.left - x) <= NAV_TOL for x in keep_x)
-        for sh in tabs:
-            if not kept(sh):
-                layout.shapes._spTree.remove(sh._element)
-        tabs = [sh for sh in tabs if kept(sh)]
+        keep = [(t, shapes) for t, shapes in cols if t in NAV_KEEP_LABELS]
+        kept_ids = {id(sh._element) for _, shapes in keep for sh in shapes}
+        for _, shapes in cols:
+            for sh in shapes:
+                if id(sh._element) not in kept_ids and sh._element.getparent() is not None:
+                    layout.shapes._spTree.remove(sh._element)
+        if not keep: continue
+        tabs = [sh for _, shapes in keep for sh in shapes]
+        if targets is not None:
+            for t, shapes in keep:
+                for sh in shapes: _set_jump(layout, sh, targets.get(t))
         lo, hi = min(sh.left for sh in tabs), max(sh.left + sh.width for sh in tabs)
         shift = lo - (page_w - (hi - lo)) // 2
         for sh in tabs:
@@ -629,17 +672,10 @@ def strip_and_centre_nav(prs):
 
 def nav_tabs(layout):
     """(labels, (left, right)) of the nav tabs on a layout, for QA."""
-    strip = [sh for sh in layout.shapes if sh.top is not None and sh.top < NAV_ZONE
-             and sh.left is not None and sh.width is not None]
-    def texts(sh):
-        if sh.has_text_frame: return [_nav_label(sh)]
-        return [t for c in getattr(sh, 'shapes', []) for t in texts(c)]
-    labelled = [(t, sh) for sh in strip for t in texts(sh) if t]
-    if not labelled: return [], None
-    tab_w = labelled[0][1].width
-    tabs = [sh for sh in strip if abs(sh.width - tab_w) <= NAV_TOL]
-    names = [t for t, sh in labelled if abs(sh.width - tab_w) <= NAV_TOL]
-    return names, (min(sh.left for sh in tabs), max(sh.left + sh.width for sh in tabs))
+    cols = nav_columns(layout)
+    if not cols: return [], None
+    tabs = [sh for _, shapes in cols for sh in shapes]
+    return [t for t, _ in cols], (min(sh.left for sh in tabs), max(sh.left + sh.width for sh in tabs))
 
 def clear_body(slide):
     """Drop the cross-sector chart, its card and the template table."""
@@ -823,13 +859,18 @@ def build(master, outdir, aliases, transactions=None, only=None):
         d = sectors[sec]
         if not any(d.values()): continue
         prs = open_master(master)
-        strip_and_centre_nav(prs)
         fix_cover(prs, sec)
         keep = [role['cover']]
         if d['tasks'] or d['support']: keep.append(role['tasks'])
         if d['projs'] or d['ups'] or d['challenges']: keep.append(role['projects'])
         if d['trans']: keep.append(role['trans'])
         keep.append(role['thanks'])
+        # Tabs jump to the first slide of their section; continuation slides
+        # are inserted after it, so the target stays right.
+        strip_and_centre_nav(prs, {
+            'ملخص المهام': prs.slides[role['tasks']].part if role['tasks'] in keep else None,
+            'ملخص مشاريع سهيل': prs.slides[role['projects']].part if role['projects'] in keep else None,
+            'المعاملات': prs.slides[role['trans']].part if role['trans'] in keep else None})
 
         if d['tasks'] or d['support']:
             s = prs.slides[role['tasks']]

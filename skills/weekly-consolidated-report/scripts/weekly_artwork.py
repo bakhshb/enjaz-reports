@@ -89,11 +89,23 @@ def buttons(layout, names=None):
             raise ValueError('Missing/duplicate navigation background: ' + name)
         yield name, (text, backgrounds[0])
 
+def has_navigation(layout):
+    """True when the layout carries the nav bar (any known tab label)."""
+    names = set(NAVIGATION) | {DIGITAL_NAME}
+    return any(getattr(sh, 'has_text_frame', False) and label(sh.text) in names
+               for shapes in shape_collections(layout.shapes) for sh in shapes)
+
+def navigation_layouts(prs):
+    """Every layout used by a slide of this deck that shows the nav bar."""
+    return {sl.slide_layout.part: sl.slide_layout for sl in prs.slides
+            if has_navigation(sl.slide_layout)}
+
 def prepare_navigation(prs):
+    # Rewire every nav layout (summaries, divider, digital and details): the
+    # master's own links are not trusted, e.g. its المعاملات label has none and
+    # its التجربة الرقمية label jumps to the divider.
     destinations = targets(prs)
-    layouts = {sl.slide_layout.part: sl.slide_layout for sl in prs.slides
-               if detail_kind(sl) or (DIGITAL_NAME in destinations and sl.part == destinations[DIGITAL_NAME])}
-    for layout in layouts.values():
+    for layout in navigation_layouts(prs).values():
         for name, shapes in buttons(layout, destinations):
             rid = layout.part.relate_to(destinations[name], RT.SLIDE)
             for shape in shapes:
@@ -135,6 +147,25 @@ def layer_signature(layer):
                 node.set(key, value)
     root.attrib.pop('showMasterSp', None)
     return etree.tostring(root, method='c14n')
+
+def check_navigation_links(prs, errors):
+    """Every tab (label and background) on every nav layout jumps to its section."""
+    try:
+        destinations = targets(prs)
+    except ValueError as exc:
+        errors.append('Navigation destinations: ' + str(exc)); return
+    for layout in navigation_layouts(prs).values():
+        try:
+            for name, shapes in buttons(layout, destinations):
+                for shape in shapes:
+                    links = list(shape.element.iter(qn('a:hlinkClick')))
+                    rel = layout.part.rels.get(links[0].get(qn('r:id'))) if len(links) == 1 else None
+                    if (rel is None or rel.is_external or rel.target_part != destinations[name]
+                            or links[0].get('action') != 'ppaction://hlinksldjump'):
+                        errors.append(f'Layout {layout.name}: {name} tab does not jump to its section')
+                        break
+        except ValueError as exc:
+            errors.append(f'Layout {layout.name}: invalid navigation: {exc}')
 
 def check_detail_artwork(prs, master, errors):
     patterns = {}

@@ -169,17 +169,51 @@ def check(outdir,master=None,transactions=None,aliases=None,only=None):
     return ok
 
 
+NAV_SECTIONS={'ملخص المهام':lambda txt:'إجمالي المهام' in txt,
+              'ملخص مشاريع سهيل':lambda txt:'إجمالي مشاريع سهيل' in txt,
+              'المعاملات':lambda txt:'رقم المعاملة' in txt or 'إجمالي المعاملات المتأخرة' in txt}
+
+
 def nav_errors(prs):
-    """Every layout used by an output slide that shows a nav bar must show exactly
-    the three kept tabs, centred on the page within one tab gap."""
+    """Every nav bar shows exactly the three kept tabs, centred within one tab gap.
+    Every shape of a tab whose section is in this deck jumps to that section's first
+    slide; a tab whose section is absent carries no link."""
     errors=[]
-    for layout in {id(s.slide_layout):s.slide_layout for s in prs.slides}.values():
-        names,span=splitter.nav_tabs(layout)
-        if not names:continue
+    slides=list(prs.slides)
+    def texts(slide):
+        out=[]
+        def walk(shapes):
+            for sh in shapes:
+                if getattr(sh,'has_text_frame',False):out.append(splitter.norm(sh.text_frame.text))
+                if getattr(sh,'has_table',False):out.extend(splitter.norm(c.text) for r in sh.table.rows for c in r.cells)
+                if hasattr(sh,'shapes'):walk(sh.shapes)
+        walk(slide.shapes);return out
+    first={}
+    for slide in slides:
+        txt=texts(slide)
+        for name,test in NAV_SECTIONS.items():
+            if name not in first and test(txt):first[name]=slide.part
+    for layout in {id(s.slide_layout):s.slide_layout for s in slides}.values():
+        cols=splitter.nav_columns(layout)
+        if not cols:continue
+        names=[name for name,_ in cols]
         if sorted(names)!=sorted(splitter.NAV_KEEP_LABELS):
             errors.append(f'{layout.name}: nav tabs {names} are not {list(splitter.NAV_KEEP_LABELS)}');continue
-        lo,hi=span;width=(hi-lo)/len(names)
-        lefts=sorted(sh.left for sh in layout.shapes if sh.has_text_frame and splitter._nav_label(sh) in names)
+        for name,shapes in cols:
+            for sh in shapes:
+                for c in sh._element.iter(splitter.qp('cNvPr')):
+                    links=c.findall(splitter.q('hlinkClick'))
+                    if name not in first:
+                        if links:errors.append(f'{layout.name}: {name} tab links although its section is absent');break
+                        continue
+                    rid=links[0].get('{%s}id'%splitter.R_NS) if len(links)==1 else None
+                    rel=layout.part.rels.get(rid) if rid else None
+                    if rel is None or rel.is_external or rel.target_part is not first[name] \
+                            or links[0].get('action')!=splitter.JUMP:
+                        errors.append(f'{layout.name}: {name} tab does not jump to its section');break
+        tabs=[sh for _,shapes in cols for sh in shapes]
+        lo,hi=min(sh.left for sh in tabs),max(sh.left+sh.width for sh in tabs)
+        lefts=sorted(shapes[0].left for _,shapes in cols);width=cols[0][1][0].width
         gap=max(min(b-a for a,b in zip(lefts,lefts[1:]))-width,splitter.NAV_TOL) if len(lefts)>1 else width
         if abs((lo+hi)/2-prs.slide_width/2)>gap:
             errors.append(f'{layout.name}: nav tabs are not centred')
