@@ -76,6 +76,9 @@ CODE_IN_TEXT = re.compile(r'\b[A-Z]{1,5}-\d{2,3}(?:\.\.\d{2,3})?\b')
 MIRRORED = str.maketrans('()[]', ')(][')
 PERCENT_FIRST = re.compile(r'%(\d+(?:[.,]\d+)?)')
 GAP = TABLE_GAP
+# Calibrated against a native PowerPoint render of the approved 11 pt detail cells;
+# the shared default (12) roughly doubles the deck length for this model.
+CHARS_PER_INCH = 18
 
 
 BRACKETS = {'(': ')', '[': ']'}
@@ -224,12 +227,29 @@ def _check_page(page, number):
         raise ValueError(f'Digital-maturity PDF page {number} is not the approved landscape source layout')
 
 
+PERCENT_TOKEN = re.compile(r'%\s*[\d.,]+|[\d.,]+\s*%')
+
+
 def _one_percent(page, box):
-    text = page.within_bbox(box).extract_text() or ''
-    matches = re.findall(r'%\s*[\d.,]+|[\d.,]+\s*%', text)
-    if len(matches) != 1:
-        raise ValueError('Expected one percentage in a digital-maturity card')
-    return _percent(matches[0])
+    """Read a summary card's headline percentage.
+
+    A card may also carry a smaller weekly-change line (e.g. «+2% عن الأسبوع
+    الماضي»), so only percentages set in the card's largest type count.
+    """
+    region = page.within_bbox(box)
+    sizes = defaultdict(list)
+    for char in region.chars:
+        if char['text'].strip():
+            sizes[round(char['size'], 1)].append(char)
+    for size in sorted(sizes, reverse=True):
+        text = region.filter(lambda obj, size=size: obj.get('object_type') != 'char'
+                             or round(obj['size'], 1) == size).extract_text() or ''
+        matches = PERCENT_TOKEN.findall(text)
+        if matches:
+            if len(matches) != 1:
+                raise ValueError('Expected one headline percentage in a digital-maturity card')
+            return _percent(matches[0])
+    raise ValueError('Expected one percentage in a digital-maturity card')
 
 
 def _axis_from_fill(color):
@@ -244,6 +264,15 @@ def _axis_from_fill(color):
     if max(values) - min(values) < .02 and .72 <= values[0] <= .95:
         return 'note'
     return None
+
+
+def split_sector_note(name):
+    """Split «sector (note)» from a landscape label; some exports keep the
+    parentheses in visual (mirrored) order, i.e. «sector )note(»."""
+    match = re.fullmatch(r'(.*?)\s*\((.+)\)', name) or re.fullmatch(r'(.*?)\s*\)(.+)\(', name)
+    if not match:
+        raise ValueError('Digital-maturity sector note is missing: ' + name)
+    return match.group(1).strip(), match.group(2).strip()
 
 
 def split_title(title):
@@ -324,10 +353,7 @@ def _extract_summary(page):
                 values[axis] = _percent(label)
         if any(axis == 'note' for axis, _ in segments) and not note:
             # The landscape source keeps the note inside the label's parentheses.
-            match = re.fullmatch(r'(.*?)\s*\((.+)\)', name)
-            if not match:
-                raise ValueError('Digital-maturity sector note is missing: ' + name)
-            name, note = match.group(1).strip(), match.group(2).strip()
+            name, note = split_sector_note(name)
         if note and any(value is not None for value in values.values()):
             raise ValueError('Digital-maturity sector has both a note and percentages')
         sectors.append({'name': name, 'metrics': values, 'note': note})
@@ -596,32 +622,46 @@ def _detail_columns(table, row):
     return range(3, -1, -1)
 
 
-def _protect_codes(value):
-    """Keep Latin task IDs readable inside the master's RTL table cells."""
-    return CODE_IN_TEXT.sub(lambda match: '‭' + match.group() + '‬', value)
-
-
 def _plain(value):
-    return value.replace('‭', '').replace('‬', '')
+    # Older candidates wrapped codes in LRO/PDF marks; keep reading them.
+    return value.replace('\u202d', '').replace('\u202c', '')
+
+
+def _set_code_text(cell, value, pattern=CODE_IN_TEXT):
+    """Write `value`, giving each Latin code its own run tagged English.
+
+    PowerPoint lays out an Arabic-tagged run right-to-left, so a code such as
+    «U-01..09» or «INF-02» inside one is shown reversed («U-09..01», «02INF-»).
+    Bidi control characters are not honoured reliably, so the language tag of
+    the run carries the direction instead.
+    """
+    set_cell_exact(cell, value)
+    for paragraph, line in zip(cell.text_frame.paragraphs, value.replace('\r\n', '\n').split('\n')):
+        parts = re.split(f'({pattern.pattern})', line)
+        if len(parts) == 1 or not paragraph.runs:
+            continue
+        first = paragraph.runs[0]
+        template = deepcopy(first._r.get_or_add_rPr())
+        for run in paragraph.runs[1:]:
+            run._r.getparent().remove(run._r)
+        first.text = parts[0]
+        for index, part in enumerate(parts[1:], 1):
+            if not part:
+                continue
+            run = paragraph.add_run()
+            run.text = part
+            props = deepcopy(template)
+            props.attrib.pop('rtl', None)
+            if index % 2:
+                props.set('lang', 'en-US')
+                props.attrib.pop('altLang', None)
+            run._r.insert(0, props)
+        if not first.text:
+            first._r.getparent().remove(first._r)
 
 
 def _set_challenge_text(cell, value):
-    set_cell_exact(cell, value)
-    parts = re.split(f'({CODE_IN_TEXT.pattern})', value)
-    if len(parts) == 1:
-        return
-    paragraph = cell.text_frame.paragraphs[0]
-    first = paragraph.runs[0]
-    template = deepcopy(first._r.get_or_add_rPr())
-    first.text = parts[0]
-    for index, part in enumerate(parts[1:], 1):
-        run = paragraph.add_run()
-        run.text = part
-        props = deepcopy(template)
-        if index % 2:
-            props.set('rtl', '0')
-            props.set('lang', 'en-US')
-        run._r.insert(0, props)
+    _set_code_text(cell, value)
 
 
 def _axis_of(heading):
@@ -669,11 +709,11 @@ class DetailPattern:
     def row_height(self, row):
         if is_heading(row):
             return self.heading_height
-        lines = max(helpers.estimate_lines(cell, width, 11) for cell, width in zip(row, self.widths))
+        lines = max(helpers.estimate_lines(cell, width, 11, CHARS_PER_INCH) for cell, width in zip(row, self.widths))
         return self.body_height + (lines - 1) * self.line_height
 
     def challenge_row_height(self, text):
-        lines = helpers.estimate_lines(text, self.challenge_width, 11)
+        lines = helpers.estimate_lines(text, self.challenge_width, 11, CHARS_PER_INCH)
         return self.challenge_height + max(0, lines - 2) * self.line_height
 
     def challenges_height(self, challenges):
@@ -756,10 +796,10 @@ def _fill_detail_table(slide, pattern, title, rows):
             row = _append_row(table, pattern.body_row)
             columns = list(_detail_columns(table, row))
             for column, value in zip(columns, values):
-                set_cell_exact(row.cells[column], _protect_codes(value))
+                _set_code_text(row.cells[column], value)
             code_cell = row.cells[columns[3]]
             if CODE.fullmatch(values[3]):
-                set_cell_exact(code_cell, values[3])
+                _set_code_text(code_cell, values[3], CODE)
                 code_cell.text_frame.paragraphs[0]._p.get_or_add_pPr().set('rtl', '0')
         row.height = pattern.row_height(values)
     shape.height = sum(row.height for row in table.rows)

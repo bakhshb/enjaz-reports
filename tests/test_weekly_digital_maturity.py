@@ -426,6 +426,23 @@ class DigitalMaturityTests(unittest.TestCase):
         code = next(row.cells[list(digital._detail_columns(table, row))[3]] for s in group for table in [digital._detail_table(s)]
                     for row in list(table.rows)[2:] if digital._plain(row.cells[list(digital._detail_columns(table, row))[3]].text) == 'U-01..09')
         self.assertEqual(code.text_frame.paragraphs[0]._p.get_or_add_pPr().get('rtl'), '0')
+        # PowerPoint lays out Arabic-tagged runs RTL; each code must be its own English run.
+        self.assertEqual([(r.text, r._r.get_or_add_rPr().get('lang')) for p in code.text_frame.paragraphs for r in p.runs],
+                         [('U-01..09', 'en-US')])
+        for row in list(challenges.rows)[2:]:
+            runs = [r for p in row.cells[1].text_frame.paragraphs for r in p.runs]
+            codes = [r.text for r in runs if r._r.get_or_add_rPr().get('lang') == 'en-US']
+            self.assertEqual(len(codes), 1)
+            self.assertRegex(codes[0], r'^[WS]-0[23]$')
+            self.assertTrue(all(r._r.get_or_add_rPr().get('rtl') is None for r in runs),
+                            'rtl is not a valid run attribute')
+            self.assertNotIn('\u202d', row.cells[1].text)
+        mixed = next(row.cells[c] for s in group for table in [digital._detail_table(s)]
+                     for row in list(table.rows)[2:] for c in digital._detail_columns(table, row)
+                     if digital.CODE_IN_TEXT.search(row.cells[c].text) and not digital.CODE.fullmatch(row.cells[c].text))
+        for run in (r for p in mixed.text_frame.paragraphs for r in p.runs):
+            lang = run._r.get_or_add_rPr().get('lang')
+            self.assertEqual(lang == 'en-US', bool(digital.CODE_IN_TEXT.fullmatch(run.text)), run.text)
 
     def test_all_indicator_details_appear_in_their_section(self):
         for number, sector in enumerate(self.data['detail_sectors'], 2):

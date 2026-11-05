@@ -8,7 +8,7 @@ param(
  [string]$DigitalData
 )
 # Read native row heights after rendering reveals a layout correction is needed.
-# No changes are made to the presentation, inputs, or template.
+# No changes are made to the presentation, inputs, or template (a temporary copy is measured).
 $ErrorActionPreference='Stop'
 $hashes=@{}
 foreach($entry in @{report=$Report;tasks=$Tasks;suhail=$Suhail;transactions=$Transactions;template=$Template}.GetEnumerator()) {
@@ -19,14 +19,36 @@ if($DigitalPdf){
  $hashes.digital_pdf=(Get-FileHash -LiteralPath $DigitalPdf -Algorithm SHA256).Hash
  $hashes.digital_data=(Get-FileHash -LiteralPath $DigitalData -Algorithm SHA256).Hash
 }
+# Row.Height reports max(stored height, text height), so reading the candidate
+# directly echoes the generator's own estimates. Measure a disposable copy whose
+# rows are first collapsed to the minimum, letting PowerPoint size them to text.
+$copy=Join-Path ([IO.Path]::GetTempPath()) ('weekly-measure-'+[guid]::NewGuid().ToString('N')+'.pptx')
+Copy-Item -LiteralPath $Report -Destination $copy
 $ppt=New-Object -ComObject PowerPoint.Application
 $doc=$null;$tables=@{}
+# The digital header text (asas al-taqyim) is built from code points so the script needs no BOM.
+$digitalHeader=-join ([char[]]@(0x0623,0x0633,0x0627,0x0633,0x0020,0x0627,0x0644,0x062A,0x0642,0x064A,0x064A,0x0645))
+function Test-DigitalSlide($slide) {
+ # Digital-maturity slides are laid out by their own model and must not feed
+ # (or collide by title with) the weekly flow measurements.
+ if(@($slide.Shapes | Where-Object {$_.HasChart -eq -1}).Count -ge 5){return $true}
+ foreach($shape in @($slide.Shapes | Where-Object {$_.HasTable -eq -1})) {
+  $table=$shape.Table
+  if($table.Columns.Count -eq 4 -and $table.Rows.Count -gt 1) {
+   for($c=1;$c -le 4;$c++){if($table.Cell(2,$c).Shape.TextFrame.TextRange.Text.Trim() -eq $digitalHeader){return $true}}
+  }
+ }
+ return $false
+}
 try {
- $doc=$ppt.Presentations.Open((Resolve-Path -LiteralPath $Report).Path,-1,0,0)
+ $doc=$ppt.Presentations.Open($copy,0,0,0)
  foreach($slide in $doc.Slides) {
+  if(Test-DigitalSlide $slide){continue}
   foreach($shape in @($slide.Shapes | Where-Object {$_.HasTable -eq -1})) {
    $table=$shape.Table
    foreach($row in $table.Rows){foreach($cell in $row.Cells){if($cell.Shape.TextFrame.TextRange.Text.Trim() -and $cell.Shape.TextFrame.TextRange.Font.Size -ne 11){throw 'Generate an 11 pt candidate before measuring'}}}
+   # Header rows keep their approved fixed height; only records are re-fitted.
+   for($r=3;$r -le $table.Rows.Count;$r++){$table.Rows.Item($r).Height=1}
    $title=$table.Cell(1,1).Shape.TextFrame.TextRange.Text.Trim()
    if(-not $tables.ContainsKey($title)) {
     $tables[$title]=@{header=@([double]$table.Rows.Item(1).Height,[double]$table.Rows.Item(2).Height);body=@()}
@@ -35,8 +57,9 @@ try {
   }
  }
 } finally {
- if($doc){$doc.Close()}
+ if($doc){$doc.Saved=-1;$doc.Close()}
  if($ppt.Presentations.Count -eq 0){$ppt.Quit()}
+ Remove-Item -LiteralPath $copy -ErrorAction SilentlyContinue
 }
 if($hashes.report -ne (Get-FileHash -LiteralPath $Report).Hash){throw 'Measuring changed the source presentation'}
 $output=[IO.Path]::ChangeExtension($Report,'.layout.json')
