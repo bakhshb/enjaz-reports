@@ -10,11 +10,9 @@ uses stale/current-input-mismatched data, loses table titles/headers, or contain
 external PowerPoint relationships.
 """
 from __future__ import annotations
-import argparse, collections, hashlib, io, os, posixpath, re, shutil, tempfile, zipfile
-from pathlib import Path, PurePosixPath
-from xml.etree import ElementTree as ET
+import argparse, collections, io, os, re, shutil, tempfile
+from pathlib import Path
 from openpyxl import load_workbook
-from openpyxl.utils.cell import range_boundaries
 from pptx import Presentation
 import sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
@@ -23,7 +21,7 @@ from pptx.util import Pt
 from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from report_common.table_typography import check_table_typography
-from report_common.validation import (norm, sha, header_row, read_tasks, read_suhail, package, source_metrics, formula_values, cached_values, chart_metrics)
+from report_common.validation import (norm, sha, header_row, read_tasks, read_suhail, package, source_metrics, chart_metrics)
 
 from report_common.update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
@@ -45,8 +43,6 @@ FONT="Abar Mid"; ALLOWED={"Abar Mid","Abar Mid SemiBold"}
 AGENDA_PT=14; TABLE_PT=11.0
 
 
-
-
 def read_agenda(path):
     wb=load_workbook(io.BytesIO(Path(path).read_bytes()),read_only=True,data_only=False); ws=wb["Sheet1"]
     req={"الترتيب","الموضوع","المتحدث","الوقت المطلوب من المالك"}; hr,c=header_row(ws,req)
@@ -63,7 +59,6 @@ def read_agenda(path):
         if topic=="ملخص الاجتماع":stop=True;break
     if not stop:raise RuntimeError("topics workbook missing final item ملخص الاجتماع")
     return out
-
 
 
 def normalize_typography(prs):
@@ -233,14 +228,6 @@ def cmp(label,exp,act,errors):
 
 CHART_NS={'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
 RID='{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
-
-
-
-
-
-
-
-
 
 
 def verify_metrics(path, prs, tasks_path, suhail_path, errors):

@@ -21,7 +21,7 @@ Do not use old Library files or template text as weekly data. If an input workbo
 
 - Runtime master: `assets/monday-meeting-master.pptx`
 - Approved SHA-256: `1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255`
-- `scripts/restore_template.py` verifies the checksum and restores a working copy when needed.
+- `scripts/build_report.py` verifies this checksum before every build and reads the master directly from `assets/`.
 - Visual reference: `assets/monday-meeting-reference.pdf`. Use it to inspect the approved design, never as weekly data or a slide-count limit.
 
 Treat the master as a library of approved patterns:
