@@ -114,5 +114,43 @@ class MondayMeasurementTests(unittest.TestCase):
             self.measure('native')
 
 
+    def test_wrapping_moves_whole_words_and_counts_paragraphs(self):
+        self.assertEqual(layout.wrapped_lines('', 100, 5), 1)
+        self.assertEqual(layout.wrapped_lines('اا اا', 100, 5), 1)
+        # Two 10-character words (50 pt each plus a space) cannot share 100 pt.
+        self.assertEqual(layout.wrapped_lines('ا' * 10 + ' ' + 'ا' * 10, 100, 5), 2)
+        self.assertEqual(layout.wrapped_lines('ا' * 50, 100, 5), 3)
+
+    def test_estimate_covers_abar_width_and_bold_dates(self):
+        prs = Presentation(self.template)
+        shape = next(sh for sl in prs.slides for sh in sl.shapes
+                     if sh.has_table and len(sh.table.columns) == 6 and sh.table.cell(1, 1).text == 'اسم المشروع')
+        text = 'تاريخ التحديث 29 سبتمبر 2026\n' + '\n'.join(['متابعة تنفيذ المبادرة مع الجهات ذات العلاقة ' * 3] * 2)
+        heights = layout.measure([('s', shape, [['1', 'مشروع', '01/01/1448', '01/02/1448', 'مكتمل', text]],
+                                   'قطاع', 'suhail')], self.template,
+                                 __import__('monday_status_styles').examples(self.template),
+                                 self.bullets, engine='estimate')['s'][1]
+        # Date line, then two bullet points of about 135 characters each. At
+        # Abar widths each point needs two lines in the update column.
+        self.assertGreaterEqual(heights[0], int(Pt(5 * 14)))
+
+    def test_libreoffice_engine_uses_measured_rows_and_falls_back(self):
+        def fake(path, targets):
+            return {(slide, shape_id, row): int(Pt(40)) for slide, shape_id, rows in targets for row in rows}
+        with patch('report_common.measure.measure_rows', side_effect=fake):
+            result = self.measure('libreoffice')
+        self.assertEqual(result['agenda'][1], [int(Pt(40))] * 2)
+        self.assertEqual(result['agenda'][0], self.estimates['agenda'][0])
+        with patch('report_common.measure.measure_rows', side_effect=RuntimeError('no soffice')):
+            with self.assertRaisesRegex(RuntimeError, 'LibreOffice'):
+                self.measure('libreoffice')
+            with patch.object(layout, 'libreoffice_ready', return_value=True), \
+                    patch.object(layout, 'os', SimpleNamespace(name='posix')), \
+                    warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                self.assertEqual(self.measure('auto'), self.estimates)
+            self.assertTrue(any('LibreOffice' in str(w.message) for w in caught))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -52,4 +52,13 @@ if __name__ == '__main__':
     parser.add_argument('--report', required=True)
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
+    try:
+        fonts = subprocess.run(['fc-list', ':family'], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        fonts = ''
+    if 'abar mid' not in fonts.lower():
+        print('WARNING: the Abar Mid font is not installed for LibreOffice. The PDF uses substitute '
+              'fonts with different widths, so table rows can look clipped or overlapping although '
+              'they fit in PowerPoint with Abar. Install Abar before judging row heights or fonts.',
+              file=sys.stderr)
     print(export_pdf(args.report, args.output))

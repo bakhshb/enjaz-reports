@@ -4,18 +4,17 @@
 # dependencies = [
 #   "lxml>=5.3",
 #   "openpyxl>=3.1",
+#   "pdfplumber>=0.11",
 #   "python-pptx>=1.0",
 # ]
 # ///
-import argparse, copy, datetime as dt, hashlib, math, re, shutil, statistics, tempfile, zipfile, os, subprocess, sys
+import argparse, copy, datetime as dt, hashlib, re, shutil, tempfile, zipfile, os, subprocess, sys
 from pathlib import Path
 from lxml import etree
 import openpyxl
 from pptx import Presentation
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import monday_status_styles as status_styles
-from pptx.oxml.xmlchemy import OxmlElement
-from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 from report_common.pptx_helpers import (val, set_text, shape_by_id, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, find_slide_with_text, task_data, suhail_data)
 
@@ -28,24 +27,6 @@ MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يون
 MASTER_SHA256='1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255'
 TASK_SUMMARY_TITLES=('المهام المكتملة','المهام المتأخرة','المهام المعلقة','طلبات الدعم')
 SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المتأخرة','التحديات')
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def fill_summary_tables(prs,source_slide,sections,titles,section_title,measurements,bullets=None):
@@ -107,20 +88,6 @@ def agenda_rows(path):
         if re.sub(r'\s+',' ',topic)=='ملخص الاجتماع': found=True; break
     if not found: raise ValueError('ملخص الاجتماع is missing from topics workbook')
     return out
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def save_chart_payload(rows,path):
@@ -199,7 +166,7 @@ def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=N
 
 
 def parse_args(argv=None):
-    ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template'); ap.add_argument('--layout-engine',choices=['auto','native','estimate'],default=os.environ.get('MONDAY_LAYOUT_ENGINE','auto'))
+    ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template'); ap.add_argument('--layout-engine',choices=['auto','native','libreoffice','estimate'],default=os.environ.get('MONDAY_LAYOUT_ENGINE','auto'))
     ap.add_argument('--meeting-date',type=dt.date.fromisoformat,help='Meeting date YYYY-MM-DD; defaults to this/next Monday in Riyadh')
     return ap.parse_args(argv)
 

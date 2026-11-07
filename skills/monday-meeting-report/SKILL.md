@@ -21,7 +21,7 @@ Do not use old Library files or template text as weekly data. If an input workbo
 
 - Runtime master: `assets/monday-meeting-master.pptx`
 - Approved SHA-256: `1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255`
-- `scripts/restore_template.py` verifies the checksum and restores a working copy when needed.
+- `scripts/build_report.py` verifies this checksum before every build and reads the master directly from `assets/`.
 - Visual reference: `assets/monday-meeting-reference.pdf`. Use it to inspect the approved design, never as weekly data or a slide-count limit.
 
 Treat the master as a library of approved patterns:
@@ -61,7 +61,7 @@ Apply every rule in [the report-specific reference](references/business-rules.md
 uv run scripts/build_report.py --topics "<topics.xlsx>" --tasks "<tasks.xlsx>" --suhail "<suhail.xlsx>" --output "<candidate.pptx>"
 ```
 
-On Windows, the builder measures a disposable populated copy in native PowerPoint. In `auto` mode, recoverable PowerPoint/PowerShell failures, timeouts, and missing or invalid measurement results produce a visible warning and use fresh conservative estimates for every table. The bundled measurement script runs with a process-only execution-policy override; no machine policy changes. `--layout-engine native` requires valid PowerPoint measurements and stops with the failure reason; `--layout-engine estimate` explicitly selects estimates. Every engine still requires programmatic checks and final visual verification before delivery. `MONDAY_LAYOUT_ENGINE` selects the same engine in automated tests. No measurement cache is reused. The master and inputs are unchanged.
+On Windows, the builder measures a disposable populated copy in native PowerPoint. In `auto` mode, recoverable PowerPoint/PowerShell failures, timeouts, and missing or invalid measurement results produce a visible warning and use fresh conservative estimates for every table. The bundled measurement script runs with a process-only execution-policy override; no machine policy changes. On other hosts, `auto` measures every body row in LibreOffice when LibreOffice and the Abar Mid font are both installed; without Abar it uses the estimate, because substitute fonts have different widths. Estimates wrap each paragraph word by word at Abar Mid widths calibrated on the approved reference PDF (5.2 pt per character regular, 5.6 pt bold, 14 pt line pitch at 11 pt, scaled for 14 pt topics), including bullet indents. `--layout-engine native` requires valid PowerPoint measurements and stops with the failure reason; `--layout-engine libreoffice` requires LibreOffice measurements; `--layout-engine estimate` explicitly selects estimates. Every engine still requires programmatic checks and final visual verification before delivery. `MONDAY_LAYOUT_ENGINE` selects the same engine in automated tests. No measurement cache is reused. The master and inputs are unchanged.
 
 3. The builder includes the programmatic gate, including typography normalization. Do not repeat the gate for unchanged bytes. After a layout correction, rerun the gate once and render its resulting bytes.
 
@@ -73,7 +73,7 @@ The candidate is saved only after programmatic checks pass. Failed builds preser
 
 ## Visual review
 
-For LibreOffice PDF previews, use `uv run ../report_common/render.py --report "<candidate.pptx>" --output "<candidate.pdf>"`. The shared exporter materializes the RTL visual column order in a disposable copy because LibreOffice ignores the native DrawingML RTL table setting. It leaves the editable PPTX unchanged. Inspect every rendered table: numbering must be on the right, followed by the task/project and remaining fields to its left. An RTL flag alone is not visual acceptance. `tests/check_rendered_pdf.py` verifies numbering from actual PDF coordinates as well as fonts and page counts.
+Judge row heights only in a render that really uses Abar Mid; the renderer warns when Abar is not installed, because substitute fonts make fitting rows look clipped or overlapping. For LibreOffice PDF previews, use `uv run ../report_common/render.py --report "<candidate.pptx>" --output "<candidate.pdf>"`. The shared exporter materializes the RTL visual column order in a disposable copy because LibreOffice ignores the native DrawingML RTL table setting. It leaves the editable PPTX unchanged. Inspect every rendered table: numbering must be on the right, followed by the task/project and remaining fields to its left. An RTL flag alone is not visual acceptance. `tests/check_rendered_pdf.py` verifies numbering from actual PDF coordinates as well as fonts and page counts.
 
 Render the validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.
 
