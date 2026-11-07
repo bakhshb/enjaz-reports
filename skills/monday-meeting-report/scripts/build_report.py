@@ -4,6 +4,7 @@
 # dependencies = [
 #   "lxml>=5.3",
 #   "openpyxl>=3.1",
+#   "pdfplumber>=0.11",
 #   "python-pptx>=1.0",
 # ]
 # ///
@@ -199,7 +200,7 @@ def build_dynamic_detail_section(prs,pattern_slides,sections,kind,title_prefix=N
 
 
 def parse_args(argv=None):
-    ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template'); ap.add_argument('--layout-engine',choices=['auto','native','estimate'],default=os.environ.get('MONDAY_LAYOUT_ENGINE','auto'))
+    ap=argparse.ArgumentParser(); ap.add_argument('--topics',required=True); ap.add_argument('--tasks',required=True); ap.add_argument('--suhail',required=True); ap.add_argument('--output',required=True); ap.add_argument('--template'); ap.add_argument('--layout-engine',choices=['auto','native','libreoffice','estimate'],default=os.environ.get('MONDAY_LAYOUT_ENGINE','auto'))
     ap.add_argument('--meeting-date',type=dt.date.fromisoformat,help='Meeting date YYYY-MM-DD; defaults to this/next Monday in Riyadh')
     return ap.parse_args(argv)
 

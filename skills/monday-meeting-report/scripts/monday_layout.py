@@ -4,6 +4,7 @@ import json
 import math
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import warnings
@@ -77,13 +78,95 @@ def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
     apply_table(shape.table,font_pt)
 
 
+# Abar Mid advance per character at 11 pt, calibrated on the approved reference
+# PDF (regular 4.6-5.2 pt, bold about 5.4 pt) with a small safety margin, and its
+# 13.2 pt line pitch rounded up. Wrapping is simulated per word, so a word that
+# does not fit moves to the next line as it does in PowerPoint.
+CHAR_PT = {False: 5.2, True: 5.6}
+LINE_PT = 14
+EMU_PT = 12700
+
+
+def wrapped_lines(text, width, advance):
+    """Lines a paragraph needs in ``width`` points, wrapping on spaces."""
+    lines, used = 1, 0.0
+    for word in text.split():
+        size = len(word) * advance
+        needed = size if not used else used + advance + size
+        if needed <= width:
+            used = needed
+            continue
+        if used:
+            lines += 1
+        # A word wider than the column breaks across lines.
+        extra = max(0, math.ceil(size / width) - 1)
+        lines += extra
+        used = size - extra * width
+    return lines
+
+
+def estimate_row(table, row, font_pt=11):
+    """Conservative content height (EMU) of one body row at ``font_pt``."""
+    scale = font_pt / 11
+    height = 20 * scale
+    for j, cell in enumerate(row.cells):
+        if cell.is_spanned:
+            continue
+        span = cell.span_width if cell.is_merge_origin else 1
+        width = sum(table.columns[k].width for k in range(j, j + span)) / EMU_PT
+        width -= (cell.margin_left + cell.margin_right) / EMU_PT
+        lines = 0
+        for p in cell.text_frame.paragraphs:
+            props = p._p.pPr
+            indent = int(props.get('marL', 0)) / EMU_PT if props is not None else 0
+            bold = any(r.font.bold for r in p.runs if r.text.strip())
+            lines += wrapped_lines(p.text, max(20, width - indent), CHAR_PT[bold] * scale)
+        height = max(height, lines * LINE_PT * scale + (cell.margin_top + cell.margin_bottom) / EMU_PT + 2)
+    return int(Pt(height))
+
+
+def libreoffice_ready():
+    """LibreOffice measures faithfully only when it can use the real Abar font."""
+    if not shutil.which('soffice') or not shutil.which('fc-list'):
+        return False
+    try:
+        fonts = subprocess.run(['fc-list', ':family'], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return 'abar mid' in fonts.lower()
+
+
+def libreoffice_heights(probe, estimates, positions, engine):
+    """Measure every body row with LibreOffice; fall back to estimates in auto mode."""
+    from report_common.measure import measure_rows
+    try:
+        with tempfile.TemporaryDirectory(prefix='monday-layout-') as temporary:
+            path = Path(temporary) / 'probe.pptx'
+            probe.save(path)
+            measured = measure_rows(path, [(slide, shape_id, range(fixed, count))
+                                           for slide, shape_id, fixed, count in positions.values()])
+        result = {}
+        for key, (header, heights) in estimates.items():
+            slide, shape_id, fixed, _ = positions[key]
+            # Rows without text keep their estimate (the minimum row height).
+            result[key] = (header, [max(int(Pt(20)), measured.get((slide, shape_id, fixed + i), h))
+                                    for i, h in enumerate(heights)])
+        return result
+    except (ImportError, OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
+        message = 'LibreOffice row measurement failed: ' + str(exc)
+        if engine == 'libreoffice':
+            raise RuntimeError(message) from exc
+        warnings.warn(message + '; using conservative estimates. Render and inspect before delivery.', RuntimeWarning)
+        return estimates
+
+
 def measure(specs, template, styles, bullets, engine='auto'):
     """Measure fresh disposable tables; no reusable/stale measurement cache."""
     native = engine == 'native' or (engine == 'auto' and os.name == 'nt')
     probe = Presentation(template)
     for slide in list(probe.slides):
         remove_slide(probe, slide)
-    estimates = {}
+    estimates, positions = {}, {}
     for key, shape, rows, title, kind in specs:
         if not rows:
             continue
@@ -101,19 +184,18 @@ def measure(specs, template, styles, bullets, engine='auto'):
         sh.name = key
         populate(sh, rows, title, kind, styles, bullets)
         fixed=1 if kind=='agenda' else 2
-        scale=(AGENDA_PT if kind=='agenda' else 11)/11
-        heights = []
-        for row in list(sh.table.rows)[fixed:]:
-            height = 20*scale
-            for j, cell in enumerate(row.cells):
-                width = max(20, sh.table.columns[j].width / 12700 - (cell.margin_left + cell.margin_right) / 12700)
-                lines = sum(max(1, math.ceil(len(line) * 4.8 * scale / width)) for line in cell.text.splitlines())
-                height = max(height, lines * 14 * scale + (cell.margin_top + cell.margin_bottom) / 12700 + 2)
-            heights.append(int(Pt(height)))
-            row.height = Pt(1) if native else Pt(height)
+        font_pt=AGENDA_PT if kind=='agenda' else 11
+        heights=[estimate_row(sh.table, row, font_pt) for row in list(sh.table.rows)[fixed:]]
+        for row,height in zip(list(sh.table.rows)[fixed:],heights):
+            row.height = Pt(1) if native else height
         sh.height = sum(r.height for r in sh.table.rows)
         estimates[key] = ([r.height for r in list(sh.table.rows)[:fixed]], heights)
-    if not native or not estimates:
+        positions[key] = (len(probe.slides)-1, sh.shape_id, fixed, len(sh.table.rows))
+    if not estimates:
+        return estimates
+    if not native:
+        if engine == 'libreoffice' or (engine == 'auto' and libreoffice_ready()):
+            return libreoffice_heights(probe, estimates, positions, engine)
         return estimates
     try:
         with tempfile.TemporaryDirectory(prefix='monday-layout-') as temporary:
