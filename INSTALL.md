@@ -19,11 +19,17 @@ claude plugin list
 
 `enjaz-reports` must show as enabled. The skills load in the next session; tell the user to start a new one.
 
-To update later:
+To update later, refresh the marketplace first, then update the plugin, then reload (or start a new session):
 
 ```bash
 claude plugin marketplace update enjaz-reports
 ```
+
+```bash
+claude plugin update enjaz-reports@enjaz-reports
+```
+
+The plugin has no `version` field, so Claude Code tracks the commit of `main`. If `update` reports `already at the latest version`, the marketplace was not refreshed first. Do not add a `version` to `plugin.json` or the marketplace entry: users would then stay on the old copy until someone bumps it.
 
 ## Codex
 
