@@ -54,7 +54,7 @@ claude plugin update enjaz-reports@enjaz-reports
 
 لمعرفة هل النسخة المثبتة هي الأحدث، قارن رمزين: رقم النسخة عندك، وآخر تعديل في المستودع. لا يوجد رقم نسخة مثل «11»؛ رقم النسخة هو رمز آخر تعديل (commit) في `main`.
 
-- عندك: شغّل الأمر التالي وانظر إلى `Version` بجانب `enjaz-reports`:
+- عندك: شغّل الأمر التالي وانظر إلى رقم النسخة الظاهر بجانب `enjaz-reports`:
 
   ```bash
   claude plugin list
