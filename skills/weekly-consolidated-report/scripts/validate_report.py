@@ -167,9 +167,10 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
             if len(table.rows)<3:errors.append('Empty table retained');continue
             rows=[[c.text for c in row.cells] for row in table.rows]
             title=helpers.table_title(sh);headers=rows[1]
-            if model=='digital' and len(headers)==3 and title=='التحديات':
+            if model=='digital' and len(headers)==3 and title=='أبرز التحديثات':
+                # The master's summary table is relabelled «أبرز التحديثات / التحديث» at build time.
                 pattern=next(x.table for x in helpers.tables(master.slides[4]) if len(x.table.columns)==3)
-                if headers!=[c.text for c in pattern.rows[1].cells]:errors.append('Digital challenge headers changed')
+                if headers!=[c.text for c in pattern.rows[1].cells][:2]+['التحديث']:errors.append('Digital summary update headers changed')
             elif digital_pattern and is_digital_detail(sl) and len(headers) in (2,4):
                 # Structure only; header text and content reconcile against the reviewed data in check_digital.
                 pattern=digital_pattern[0 if len(headers)==4 else 1]

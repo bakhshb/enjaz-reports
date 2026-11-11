@@ -65,8 +65,15 @@ CARDS = {
     'complaints': (73, 77, 89, 91),
     'tools': (51, 55, 67, 69),
 }
+# Titles the landscape source may give a sector's notes table.
 CHALLENGE_TITLES = ('التحديات', 'أبرز التحديثات')
 CHALLENGE_HEADERS = ('التحدي', 'التحديث')
+# Output tables: the reviewer classifies every source note as an update or a
+# challenge; each non-empty list becomes its own table, updates first.
+UPDATES_TABLE = ('أبرز التحديثات', 'التحديث')
+CHALLENGES_TABLE = ('التحديات', 'التحدي')
+NOTE_TABLES = (('updates',) + UPDATES_TABLE, ('challenges',) + CHALLENGES_TABLE)
+SUMMARY_TABLE = UPDATES_TABLE
 TASK_HEADERS = ('المهمة', 'المؤشر')
 CARD_STATUSES = ('معلق', 'لا ينطبق')
 CONTINUATION = '(تتمة)'
@@ -428,8 +435,7 @@ def _extract_detail_page(page, number):
                 raise ValueError(f'Digital-maturity challenge numbering is inconsistent on PDF page {number}')
             challenges.append(row[0])
     return {'page': number, 'title': title, 'cards': cards, 'rows': draft_rows,
-            'challenge_title': challenge_title, 'challenge_header': challenge_header,
-            'challenges': challenges}
+            'note_title': challenge_title, 'notes': challenges}
 
 
 def merge_detail_pages(pages):
@@ -456,19 +462,16 @@ def merge_detail_pages(pages):
             if index not in (None, 1):
                 raise ValueError(f'Digital-maturity PDF page {page["page"]} starts {base} at page {index}')
             current = {'title': base, 'source_pages': [], 'cards': page['cards'], 'rows': [],
-                       'challenge_title': None, 'challenge_header': None, 'challenges': []}
+                       'source_notes': [], 'updates': [], 'challenges': []}
             sectors.append(current)
             declared[base] = total
         if any(is_continuation(row) for row in rows):
             raise ValueError(f'Digital-maturity PDF page {page["page"]} repeats a heading mid-page')
         current['rows'].extend(rows)
         current['source_pages'].append(page['page'])
-        if page['challenges']:
-            for key in ('challenge_title', 'challenge_header'):
-                if current[key] not in (None, page[key]):
-                    raise ValueError(f'Digital-maturity challenge headings differ within {base}')
-                current[key] = page[key]
-            current['challenges'].extend(page['challenges'])
+        # Source notes are review evidence only: the reviewer rewrites each one and
+        # files it under `updates` or `challenges` before the report is built.
+        current['source_notes'].extend({'title': page['note_title'], 'text': text} for text in page['notes'])
     for sector in sectors:
         if declared[sector['title']] not in (None, len(sector['source_pages'])):
             raise ValueError(f'Digital-maturity sector {sector["title"]} is missing source pages')
@@ -487,7 +490,8 @@ def extract_pdf(path):
         pages = [_extract_detail_page(page, number) for number, page in enumerate(pdf.pages[1:], 2)]
     return {'source_pdf_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
             'source_date_hijri': date, 'metrics': metrics,
-            'sectors': sectors, 'challenges': challenges,
+            'sectors': sectors, 'source_updates': challenges,
+            'updates': [dict(item) for item in challenges],
             'detail_sectors': merge_detail_pages(pages), 'reviewed': False}
 
 
@@ -513,12 +517,15 @@ def load_reviewed(path, pdf):
             raise ValueError('Invalid digital-maturity sector percentage')
         if sector.get('note') and any(v is not None for v in numbers):
             raise ValueError('A digital-maturity sector note cannot have percentages')
-    if not 1 <= len(data.get('challenges', [])) <= 4:
-        raise ValueError('Digital-maturity challenges exceed the approved table')
-    if any(not c.get('perspective') or not c.get('text') for c in data['challenges']):
-        raise ValueError('Incomplete digital-maturity challenge')
+    updates = data.get('updates')
+    if not isinstance(updates, list) or not 1 <= len(updates) <= 4:
+        raise ValueError('Digital-maturity updates must hold 1-4 rows for the summary table')
+    if any(not isinstance(u, dict) or not u.get('perspective') or not _text_ok(u.get('text')) for u in updates):
+        raise ValueError('Incomplete digital-maturity summary update')
+    for update in updates:
+        _no_codes(update['text'], 'summary')
     details = data.get('detail_sectors')
-    if 'detail_pages' in data or not isinstance(details, list) or not details:
+    if not isinstance(details, list) or not details:
         raise ValueError('Reviewed digital-maturity data must contain merged detail_sectors, one per sector')
     if len({d.get('title') for d in details}) != len(details):
         raise ValueError('Digital-maturity detail sectors must be unique')
@@ -548,15 +555,25 @@ def load_reviewed(path, pdf):
                 raise ValueError('Reviewed rows must not carry source continuation headings: ' + title)
         if is_heading(rows[-1]):
             raise ValueError('Digital-maturity section heading has no records: ' + title)
-        challenges = detail.get('challenges')
-        if not isinstance(challenges, list) or any(not isinstance(c, str) or not c.strip() for c in challenges):
-            raise ValueError('Digital-maturity detail challenges are incomplete: ' + title)
-        if challenges:
-            if detail.get('challenge_title') not in CHALLENGE_TITLES or detail.get('challenge_header') not in CHALLENGE_HEADERS:
-                raise ValueError('Digital-maturity challenge table heading is unapproved: ' + title)
-        elif detail.get('challenge_title') or detail.get('challenge_header'):
-            raise ValueError('Digital-maturity challenge heading without challenges: ' + title)
+        for key, _, _ in NOTE_TABLES:
+            items = detail.get(key)
+            if not isinstance(items, list) or any(not _text_ok(item) for item in items):
+                raise ValueError(f'Digital-maturity detail {key} are incomplete: ' + title)
+            for item in items:
+                _no_codes(item, title)
+        if detail.get('source_notes') and not (detail['updates'] or detail['challenges']):
+            raise ValueError('Source notes are not classified into updates or challenges: ' + title)
     return data
+
+
+def _text_ok(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _no_codes(text, where):
+    found = CODE_IN_TEXT.search(text)
+    if found:
+        raise ValueError(f'Remove the task code {found.group()} from the rewritten note ({where}); keep dates')
 
 
 def _chart(shape, categories, series, percent_labels=False):
@@ -605,14 +622,28 @@ def _detail_table(slide):
     return _detail_shape(slide).table
 
 
+def _note_shapes(slide):
+    return sorted((sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 2
+                   and sh.table.cell(0, 0).text in CHALLENGE_TITLES), key=lambda sh: sh.top)
+
+
 def _challenge_shape(slide):
-    return next((sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 2
-                 and sh.table.cell(0, 0).text in CHALLENGE_TITLES), None)
+    shapes = _note_shapes(slide)
+    return shapes[0] if shapes else None
 
 
 def _challenge_table(slide):
     shape = _challenge_shape(slide)
     return None if shape is None else shape.table
+
+
+def _note_tables(slide):
+    return [shape.table for shape in _note_shapes(slide)]
+
+
+def sector_notes(sector):
+    """The sector's output note tables in order: (title, header, items), empty lists omitted."""
+    return [(title, header, list(sector[key])) for key, title, header in NOTE_TABLES if sector.get(key)]
 
 
 def _detail_columns(table, row):
@@ -662,6 +693,32 @@ def _set_code_text(cell, value, pattern=CODE_IN_TEXT):
 
 def _set_challenge_text(cell, value):
     _set_code_text(cell, value)
+    _bullet_lines(cell)
+
+
+BULLET_INDENT = 171450
+
+
+def _bullet_lines(cell):
+    """A note written on several lines is shown as native right-to-left bullets, one per line."""
+    paragraphs = cell.text_frame.paragraphs
+    if len(paragraphs) < 2:
+        return
+    a = '{http://schemas.openxmlformats.org/drawingml/2006/main}'
+    for paragraph in paragraphs:
+        ppr = paragraph._p.get_or_add_pPr()
+        for old in ppr.findall(a + 'buNone') + ppr.findall(a + 'buFont') + ppr.findall(a + 'buChar') + ppr.findall(a + 'buAutoNum'):
+            ppr.remove(old)
+        ppr.set('marL', str(BULLET_INDENT))
+        ppr.set('indent', str(-BULLET_INDENT))
+        font = ppr.makeelement(a + 'buFont', {'typeface': 'Arial'})
+        char = ppr.makeelement(a + 'buChar', {'char': '\u2022'})
+        anchor = next((child for child in ppr if child.tag in (a + 'tabLst', a + 'defRPr', a + 'extLst')), None)
+        for element in (font, char):
+            if anchor is None:
+                ppr.append(element)
+            else:
+                anchor.addprevious(element)
 
 
 def _axis_of(heading):
@@ -719,6 +776,10 @@ class DetailPattern:
     def challenges_height(self, challenges):
         return self.challenge_fixed + sum(self.challenge_row_height(text) for text in challenges)
 
+    def notes_height(self, notes):
+        """Gap plus table height for every note table that follows the last records."""
+        return sum(GAP + self.challenges_height(items) for _, _, items in notes)
+
 
 def paginate_sector(pattern, sector):
     """Flow one sector into slide pages using the approved pattern's row heights.
@@ -727,7 +788,7 @@ def paginate_sector(pattern, sector):
     begin with a synthetic continuation heading.  Headings never end a page,
     records are never split, and the challenge table follows the last records.
     """
-    rows, challenges = sector['rows'], sector['challenges']
+    rows, challenges = sector['rows'], sector_notes(sector)
     pages, index = [], 0
     while index < len(rows):
         used = pattern.title_height + pattern.header_height
@@ -750,7 +811,7 @@ def paginate_sector(pattern, sector):
             index += 1
         page_challenges = []
         if index == len(rows) and challenges:
-            if pattern.top + used + GAP + pattern.challenges_height(challenges) <= pattern.bottom:
+            if pattern.top + used + pattern.notes_height(challenges) <= pattern.bottom:
                 page_challenges = list(challenges)
             else:
                 # Only the trailing record (with its heading) moves to the next page with the challenges.
@@ -806,12 +867,13 @@ def _fill_detail_table(slide, pattern, title, rows):
     return shape
 
 
-def _fill_challenge_table(slide, pattern, top, sector):
+def _fill_challenge_table(slide, pattern, top, note):
+    title, header, items = note
     shape = _place_table(slide, pattern.challenge_element, top)
     table = shape.table
-    set_cell_exact(table.cell(0, 0), sector['challenge_title'])
-    set_cell_exact(table.cell(1, 1), sector['challenge_header'])
-    for index, challenge in enumerate(sector['challenges'], 1):
+    set_cell_exact(table.cell(0, 0), title)
+    set_cell_exact(table.cell(1, 1), header)
+    for index, challenge in enumerate(items, 1):
         row = _append_row(table, pattern.challenge_body)
         set_cell_exact(row.cells[0], str(index))
         _set_challenge_text(row.cells[1], challenge)
@@ -848,8 +910,8 @@ def populate_details(prs, data):
             _set_cards(slide, sector['cards'])
             title = sector['title'] if len(pages) == 1 else f'{sector["title"]} ({number}/{len(pages)})'
             shape = _fill_detail_table(slide, pattern, title, rows)
-            if challenges:
-                _fill_challenge_table(slide, pattern, shape.top + shape.height + GAP, sector)
+            for note in challenges:
+                shape = _fill_challenge_table(slide, pattern, shape.top + shape.height + GAP, note)
     for slide in extras:
         helpers.remove_slide(prs, slide)
 
@@ -893,11 +955,14 @@ def populate(prs, data):
                 paragraph.font.name = 'Abar Mid'
                 paragraph.font.color.rgb = RGBColor(55, 55, 55)
     table = next(sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
-    for index, challenge in enumerate(data['challenges'], 2):
+    set_cell_exact(table.cell(0, 0), SUMMARY_TABLE[0])
+    set_cell_exact(table.cell(1, 2), SUMMARY_TABLE[1])
+    for index, update in enumerate(data['updates'], 2):
         for cell, value in zip(table.rows[index].cells,
-                               (str(index-1), challenge['perspective'], challenge['text'])):
+                               (str(index-1), update['perspective'], update['text'])):
             set_cell_exact(cell, value)
-    for row in list(table.rows)[2+len(data['challenges']):]:
+        _bullet_lines(table.rows[index].cells[2])
+    for row in list(table.rows)[2+len(data['updates']):]:
         row._tr.getparent().remove(row._tr)
     populate_details(prs, data)
     set_table_directions(prs)
@@ -917,7 +982,7 @@ class _DetailSlide:
         self.table = _detail_table(slide)
         self.base, self.index, self.total = split_title(self.table.cell(0, 0).text)
         self.rows = _slide_rows(self.table)
-        self.challenges = _challenge_table(slide)
+        self.notes = _note_tables(slide)
         self.bottom = max(sh.top + sh.height for sh in slide.shapes if sh.has_table)
 
     def card(self, axis):
@@ -959,8 +1024,8 @@ def check_details(prs, data, errors, master=None):
             for axis in AXES:
                 if detail.card(axis) != sector['cards'][axis]:
                     errors.append(f'Digital-maturity detail card differs: {base}: {axis}')
-            if position < count and detail.challenges is not None:
-                errors.append(f'Digital-maturity challenge table must follow the last records of {base}')
+            if position < count and detail.notes:
+                errors.append(f'Digital-maturity update/challenge tables must follow the last records of {base}')
             slide_rows = detail.rows
             if position > 1:
                 if slide_rows and is_continuation(slide_rows[0]):
@@ -974,13 +1039,11 @@ def check_details(prs, data, errors, master=None):
             rows.extend(slide_rows)
         if rows != sector['rows']:
             errors.append(f'Digital-maturity detail rows differ from the reviewed PDF data: {base}')
-        challenge = members[-1].challenges
-        actual = [] if challenge is None else [_plain(row.cells[1].text) for row in list(challenge.rows)[2:]]
-        if actual != sector['challenges']:
-            errors.append(f'Digital-maturity detail challenges differ from the reviewed PDF data: {base}')
-        if challenge is not None and sector['challenges'] and (
-                challenge.cell(0, 0).text != sector['challenge_title'] or challenge.cell(1, 1).text != sector['challenge_header']):
-            errors.append(f'Digital-maturity challenge table heading differs from the source: {base}')
+        notes = sector_notes(sector)
+        actual = [(t.cell(0, 0).text, t.cell(1, 1).text, [_plain(row.cells[1].text) for row in list(t.rows)[2:]])
+                  for t in members[-1].notes]
+        if actual != notes:
+            errors.append(f'Digital-maturity detail updates/challenges differ from the reviewed data: {base}')
         for position, (detail, following) in enumerate(zip(members, members[1:]), 2):
             following_rows = following.rows
             if following_rows and is_continuation(following_rows[0]):
@@ -988,9 +1051,9 @@ def check_details(prs, data, errors, master=None):
             next_record = next((row for row in following_rows if not is_heading(row)), None)
             if next_record is None:
                 continue
-            if position == count and following.challenges is not None:
-                # The last records may move only together with the challenge table.
-                need = sum(pattern.row_height(row) for row in following_rows) + GAP + pattern.challenges_height(sector['challenges'])
+            if position == count and following.notes:
+                # The last records may move only together with the update/challenge tables.
+                need = sum(pattern.row_height(row) for row in following_rows) + pattern.notes_height(notes)
             else:
                 need = sum(pattern.row_height(row) for row in following_rows[:following_rows.index(next_record) + 1])
             if detail.bottom + need <= pattern.bottom:
@@ -1023,9 +1086,11 @@ def check(prs, report_path, data, errors, master=None):
     validation.chart_metrics(report_path, str(sector_chart.chart.part.partname).lstrip('/'), rows, LABELS, errors)
     table = next(sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
     actual = [[c.text for c in row.cells] for row in list(table.rows)[2:]]
-    expected = [[str(i), c['perspective'], c['text']] for i, c in enumerate(data['challenges'], 1)]
+    expected = [[str(i), u['perspective'], u['text']] for i, u in enumerate(data['updates'], 1)]
     if actual != expected:
-        errors.append('Digital-maturity challenges differ from reviewed PDF data')
+        errors.append('Digital-maturity summary updates differ from the reviewed data')
+    if (table.cell(0, 0).text, table.cell(1, 2).text) != SUMMARY_TABLE:
+        errors.append('Digital-maturity summary table must be titled «أبرز التحديثات»')
     notes = {s.name: s.text for s in slide.shapes if s.name.startswith('Digital sector note ')}
     expected_notes = {f'Digital sector note {i}': s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
     if notes != expected_notes:
