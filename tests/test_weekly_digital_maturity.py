@@ -342,18 +342,7 @@ class DigitalMaturityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'continuation headings'):
             self.load()
         del self.data['detail_sectors'][0]['rows'][2]
-        self.data['detail_sectors'][0]['challenge_title'] = 'التحديات'
-        with self.assertRaisesRegex(ValueError, 'no longer used'):
-            self.load()
-        del self.data['detail_sectors'][0]['challenge_title']
-        legacy_summary = dict(self.data, challenges=self.data['updates'])
-        self.review.write_text(json.dumps(legacy_summary, ensure_ascii=False), encoding='utf-8')
-        with self.assertRaisesRegex(ValueError, 'updates'):
-            digital.load_reviewed(self.review, self.pdf)
-        legacy = dict(self.data, detail_pages=[])
-        self.review.write_text(json.dumps(legacy, ensure_ascii=False), encoding='utf-8')
-        with self.assertRaisesRegex(ValueError, 'detail_sectors'):
-            digital.load_reviewed(self.review, self.pdf)
+        self.load()
 
     def test_charts_and_challenges_match_reviewed_data(self):
         data, prs, report = self.build()

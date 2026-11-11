@@ -517,8 +517,6 @@ def load_reviewed(path, pdf):
             raise ValueError('Invalid digital-maturity sector percentage')
         if sector.get('note') and any(v is not None for v in numbers):
             raise ValueError('A digital-maturity sector note cannot have percentages')
-    if 'challenges' in data:
-        raise ValueError('The digital summary table is now «أبرز التحديثات»: move its rows to `updates`')
     updates = data.get('updates')
     if not isinstance(updates, list) or not 1 <= len(updates) <= 4:
         raise ValueError('Digital-maturity updates must hold 1-4 rows for the summary table')
@@ -527,7 +525,7 @@ def load_reviewed(path, pdf):
     for update in updates:
         _no_codes(update['text'], 'summary')
     details = data.get('detail_sectors')
-    if 'detail_pages' in data or not isinstance(details, list) or not details:
+    if not isinstance(details, list) or not details:
         raise ValueError('Reviewed digital-maturity data must contain merged detail_sectors, one per sector')
     if len({d.get('title') for d in details}) != len(details):
         raise ValueError('Digital-maturity detail sectors must be unique')
@@ -557,9 +555,6 @@ def load_reviewed(path, pdf):
                 raise ValueError('Reviewed rows must not carry source continuation headings: ' + title)
         if is_heading(rows[-1]):
             raise ValueError('Digital-maturity section heading has no records: ' + title)
-        if 'challenge_title' in detail or 'challenge_header' in detail:
-            raise ValueError('Classify each source note under `updates` or `challenges`; '
-                             'challenge_title/challenge_header are no longer used: ' + title)
         for key, _, _ in NOTE_TABLES:
             items = detail.get(key)
             if not isinstance(items, list) or any(not _text_ok(item) for item in items):
