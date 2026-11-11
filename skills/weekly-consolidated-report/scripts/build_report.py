@@ -163,7 +163,7 @@ def build_candidate(args):
         from digital_maturity import populate
         populate(prs,digital_data)
     # Discover roles first; IDs are checked within the identified summary role.
-    summary=[builder.find_slide_with_text(prs,label) for label in ('إجمالي المهام','إجمالي مشاريع سهيل','إجمالي العاملات')]
+    summary=[builder.find_slide_with_text(prs,label) for label in ('إجمالي المهام','إجمالي مشاريع سهيل','إجمالي المعاملات')]
     task_patterns=builder.detail_pattern_slides(prs,'task')
     project_patterns=builder.detail_pattern_slides(prs,'project')
     if not task_patterns or not project_patterns:raise ValueError('Missing weekly detail patterns')
