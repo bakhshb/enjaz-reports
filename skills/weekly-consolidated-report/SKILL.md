@@ -28,9 +28,9 @@ When the user sends the Excel files without choosing a model, ask: **«أي نم
 - Primary output: `تقرير الإنجاز الأسبوعي بتاريخ الإنشاء.pptx`, saved as a new file. Create a matching PDF only when requested. Never modify the inputs or overwrite the original template.
 
 
-Verify the bundled master size `9540223` bytes and SHA-256 `f9feac31a8307d5b070806166709709c7b8c521d25fe7aca4f960ba7b4cae20f` before use. Never fall back to an earlier master.
+Verify the bundled master size `9540224` bytes and SHA-256 `173d48ace27661a4900cc1d6428826e41515d6d4a764a26385171701ead5d96a` before use. Never fall back to an earlier master.
 
-For `digital`, verify SHA-256 `8d90c3da68ba0ef8042c0949eeab96f60bfaeda28ef13a34c37f17278056131e` for its bundled master. Do not use the current model's master for this choice.
+For `digital`, verify SHA-256 `4f44e50242617b4448ff4f9dcde2b29e609a3a37e89132a05ef41ee47aafef98` for its bundled master. Do not use the current model's master for this choice.
 
 ## Table typography
 

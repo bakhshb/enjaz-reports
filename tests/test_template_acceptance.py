@@ -11,9 +11,11 @@ class TemplateAcceptanceTests(unittest.TestCase):
     def test_transactions_kpi_label_is_spelled_correctly(self):
         digital=workflow.MASTER.with_name('weekly-report-digital-master.pptx')
         for master in (workflow.MASTER,digital):
-            labels=[sh.text_frame.text for sh in Presentation(master).slides[3].shapes
+            labels=[sh for sh in Presentation(master).slides[3].shapes
                     if sh.has_text_frame and sh.name=='TextBox 26']
-            self.assertEqual(labels,['إجمالي المعاملات'],master.name)
+            self.assertEqual([sh.text_frame.text for sh in labels],['إجمالي المعاملات'],master.name)
+            ppr=labels[0].text_frame.paragraphs[0]._p.find(qn('a:pPr'))
+            self.assertEqual(ppr.get('rtl'),'1',master.name)
 
     def test_summary_continuations_remove_kpi_dividers(self):
         prs=Presentation(workflow.MASTER)
