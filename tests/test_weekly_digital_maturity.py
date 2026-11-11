@@ -43,7 +43,9 @@ def master_sectors():
     for number, slide in enumerate(digital.detail_slides(master), 2):
         table = digital._detail_table(slide)
         challenge_table = digital._challenge_table(slide)
-        challenges = [] if challenge_table is None else [row.cells[1].text for row in list(challenge_table.rows)[2:]]
+        # Reviewed notes carry no task codes, so the master samples lose theirs.
+        challenges = [] if challenge_table is None else [
+            ' '.join(digital.CODE_IN_TEXT.sub('', row.cells[1].text).split()) for row in list(challenge_table.rows)[2:]]
         title = digital.split_title(table.cell(0, 0).text)[0]
         rows = [[cell.text for cell in row.cells] for row in list(table.rows)[2:]]
         if sectors and sectors[-1]['title'] == title:
@@ -60,12 +62,21 @@ def master_sectors():
             'cards': {axis: digital.helpers.shape_by_id(slide, shape_id).text_frame.paragraphs[1].text
                       for axis, shape_id in digital.DETAIL_CARD_IDS.items()},
             'rows': rows,
+            'source_notes': [],
+            'updates': [],
             'challenges': challenges,
         })
-    for sector in sectors:
-        sector['challenge_title'] = 'التحديات' if sector['challenges'] else None
-        sector['challenge_header'] = 'التحدي' if sector['challenges'] else None
     return sectors
+
+
+def classify_as_source(data):
+    """A minimal review: file each source note under its source table, without task codes."""
+    strip = lambda text: ' '.join(digital.CODE_IN_TEXT.sub('', text).split())
+    for update in data['updates']:
+        update['text'] = strip(update['text'])
+    for sector in data['detail_sectors']:
+        sector['updates'] = [strip(n['text']) for n in sector['source_notes'] if n['title'] == 'أبرز التحديثات']
+        sector['challenges'] = [strip(n['text']) for n in sector['source_notes'] if n['title'] == 'التحديات']
 
 
 class VisualTextTests(unittest.TestCase):
@@ -113,12 +124,14 @@ class LandscapeFixtureTests(unittest.TestCase):
         self.assertEqual(data['sectors'][2]['note'], 'ستدمج في نسك وبالتالي لن تقيم بشكل مستقل')
         self.assertTrue(all(v is None for v in data['sectors'][2]['metrics'].values()))
         self.assertEqual(data['sectors'][4]['metrics'], {'experience': 65, 'satisfaction': 15, 'complaints': 35, 'tools': 75})
-        self.assertEqual([c['perspective'] for c in data['challenges']],
+        self.assertEqual([c['perspective'] for c in data['source_updates']],
                          ['جميع المناظير', 'تجربة المستخدم ورضا المستفيد', 'التعامل مع الشكاوى', 'جميع المناظير'])
-        self.assertIn('nusuk.sa وتطبيق نسك', data['challenges'][1]['text'])
-        self.assertIn('(15 نوفمبر)', data['challenges'][2]['text'])
+        # The summary table is «أبرز التحديثات»; the draft starts from the source rows for rewriting.
+        self.assertEqual(data['updates'], data['source_updates'])
+        self.assertIn('nusuk.sa وتطبيق نسك', data['updates'][1]['text'])
+        self.assertIn('(15 نوفمبر)', data['updates'][2]['text'])
         # Glyphs the text layer cannot map stay visible for the reviewer instead of being invented.
-        self.assertIn('(cid:', data['challenges'][3]['text'])
+        self.assertIn('(cid:', data['updates'][3]['text'])
 
     def test_sectors_merge_source_pages(self):
         sectors = self.data['detail_sectors']
@@ -139,7 +152,9 @@ class LandscapeFixtureTests(unittest.TestCase):
         self.assertEqual([row[3] for row in first['rows'] if not digital.is_heading(row)],
                          [f'INF-{i:02d}' for i in range(1, 8)] + ['S-03'] + ['CS-25', 'CS-28', 'CS-34', 'CS-36', 'CS-43', 'CS-55', 'CS-59']
                          + [f'INF-{i:02d}' for i in range(8, 15)])
-        self.assertEqual((first['challenge_title'], first['challenge_header'], len(first['challenges'])), ('أبرز التحديثات', 'التحديث', 2))
+        self.assertEqual([n['title'] for n in first['source_notes']], ['أبرز التحديثات'] * 2)
+        # Classification into updates and challenges is the reviewer's job.
+        self.assertEqual((first['updates'], first['challenges']), ([], []))
         hajj = sectors[1]
         self.assertEqual(hajj['cards']['tools'], 'لا ينطبق')
         self.assertIn(['جاهزية + تحديد التواريخ', '15%', 'معالجة ملاحظات إمكانية الوصول التقنية في منصة نسك حج (18 ملاحظة)', 'TD-01..18'], hajj['rows'])
@@ -154,13 +169,13 @@ class LandscapeFixtureTests(unittest.TestCase):
         self.assertIn('نسبة إشغال الدائرة الهاتفية SIP Trunk (CS-33..34)', tasks)
         self.assertIn('حل المشكلة من أول تواصل FCR (CS-58..63)', tasks)
         self.assertIn('دليل الشروط والأحكام لكل قناة (CS-01..09)', tasks)
-        self.assertEqual(len(business['challenges']), 3)
+        self.assertEqual(len(business['source_notes']), 3)
         nusuk = sectors[4]
         self.assertEqual(nusuk['cards'], {'experience': '65%', 'satisfaction': '15%', 'complaints': '35%', 'tools': '75%'})
         self.assertEqual(len([row for row in nusuk['rows'] if not digital.is_heading(row)]), 48)
         self.assertIn(['رضا المستفيد: 15% (10 مهام)', '', '', ''], nusuk['rows'])
         self.assertIn(['تقدم فعلي في التنفيذ', '85%', 'ملاحظات إمكانية الوصول التقنية في منصة نسك (15 ملاحظة، 499 حالة)', 'TD-01..15'], nusuk['rows'])
-        self.assertEqual((nusuk['challenge_title'], nusuk['challenge_header'], len(nusuk['challenges'])), ('التحديات', 'التحدي', 3))
+        self.assertEqual([n['title'] for n in nusuk['source_notes']], ['التحديات'] * 3)
 
     def test_reviewed_fixture_builds_and_reconciles(self):
         """The fixture, once reviewed, flows into the portrait master without source pagination."""
@@ -170,13 +185,20 @@ class LandscapeFixtureTests(unittest.TestCase):
             for old, new in fixes.items():
                 text = text.replace(old, new)
             return text
-        for challenge in data['challenges']:
-            challenge['text'] = fix(challenge['text'])
+        for update in data['updates']:
+            update['text'] = fix(update['text'])
         for sector in data['detail_sectors']:
-            sector['challenges'] = [fix(c) for c in sector['challenges']]
+            for note in sector['source_notes']:
+                note['text'] = fix(note['text'])
+        unclassified = json.loads(json.dumps(data, ensure_ascii=False))
+        classify_as_source(data)
         data['reviewed'] = True
+        unclassified['reviewed'] = True
         with tempfile.TemporaryDirectory() as temp:
             review = Path(temp) / 'review.json'
+            review.write_text(json.dumps(unclassified, ensure_ascii=False), encoding='utf-8')
+            with self.assertRaisesRegex(ValueError, 'task code|not classified'):
+                digital.load_reviewed(review, self.FIXTURE)
             review.write_text(json.dumps(data, ensure_ascii=False), encoding='utf-8')
             reviewed = digital.load_reviewed(review, self.FIXTURE)
             prs = Presentation(digital.MASTER)
@@ -198,10 +220,12 @@ class LandscapeFixtureTests(unittest.TestCase):
                 self.assertEqual(index is None, groups.count(base) == 1, title)
                 if total:
                     self.assertEqual(total, groups.count(base), title)
-            challenge_slides = [slide for slide in slides if digital._challenge_table(slide) is not None]
-            self.assertEqual(len(challenge_slides), 5)
-            for slide in challenge_slides:
+            note_slides = [slide for slide in slides if digital._note_tables(slide)]
+            self.assertEqual(len(note_slides), 5)
+            for slide in note_slides:
                 self.assertEqual(slide, slides_for(prs, sector_of(slide))[-1])
+            summary = next(sh.table for sh in digital.digital_slide(prs).shapes if sh.has_table)
+            self.assertEqual((summary.cell(0, 0).text, summary.cell(1, 2).text), ('أبرز التحديثات', 'التحديث'))
 
 
 class MergeTests(unittest.TestCase):
@@ -210,9 +234,8 @@ class MergeTests(unittest.TestCase):
     def page(self, number, title, rows, challenges=(), cards=None):
         return {'page': number, 'title': title, 'rows': rows,
                 'cards': cards or {axis: '15%' for axis in digital.AXES},
-                'challenge_title': 'التحديات' if challenges else None,
-                'challenge_header': 'التحدي' if challenges else None,
-                'challenges': list(challenges)}
+                'note_title': 'التحديات' if challenges else None,
+                'notes': list(challenges)}
 
     def test_pages_merge_and_continuation_headings_drop(self):
         pages = [
@@ -227,9 +250,9 @@ class MergeTests(unittest.TestCase):
         self.assertEqual([row[0] for row in sectors[0]['rows'] if digital.is_heading(row)],
                          ['تجربة المستخدم: 15%', 'رضا المستفيد: 15%'])
         self.assertEqual([row[3] for row in sectors[0]['rows'] if not digital.is_heading(row)], ['X-01', 'X-02', 'X-03'])
-        self.assertEqual(sectors[0]['challenges'], ['تحد 1', 'تحد 2'])
-        self.assertEqual(sectors[1]['challenges'], [])
-        self.assertIsNone(sectors[1]['challenge_title'])
+        self.assertEqual([n['text'] for n in sectors[0]['source_notes']], ['تحد 1', 'تحد 2'])
+        self.assertEqual(sectors[1]['source_notes'], [])
+        self.assertEqual((sectors[0]['updates'], sectors[0]['challenges']), ([], []))
 
     def test_broken_sequences_and_card_conflicts_rejected(self):
         with self.assertRaisesRegex(ValueError, 'page sequence'):
@@ -266,7 +289,7 @@ class DigitalMaturityTests(unittest.TestCase):
                 {'name': 'القطاع الرابع', 'metrics': {'experience': 5, 'satisfaction': 15, 'complaints': 30, 'tools': None}, 'note': None},
                 {'name': 'القطاع الخامس', 'metrics': {'experience': 10, 'satisfaction': 20, 'complaints': 25, 'tools': 75}, 'note': None},
             ],
-            'challenges': [{'perspective': 'عام', 'text': 'تحد أول'}, {'perspective': 'تجربة المستخدم', 'text': 'تحد ثان'}],
+            'updates': [{'perspective': 'عام', 'text': 'تحديث أول'}, {'perspective': 'تجربة المستخدم', 'text': 'تحديث ثان'}],
             'detail_sectors': master_sectors(),
         }
         self.review = self.root / 'review.json'
@@ -302,10 +325,10 @@ class DigitalMaturityTests(unittest.TestCase):
             digital.calculation_note(slide)
 
     def test_capacity_and_conflicting_note_rejected(self):
-        self.data['challenges'] *= 3
-        with self.assertRaisesRegex(ValueError, 'exceed'):
+        self.data['updates'] *= 3
+        with self.assertRaisesRegex(ValueError, '1-4 rows'):
             self.load()
-        self.data['challenges'] = self.data['challenges'][:2]
+        self.data['updates'] = self.data['updates'][:2]
         self.data['sectors'][1]['metrics']['experience'] = 5
         with self.assertRaisesRegex(ValueError, 'cannot have percentages'):
             self.load()
@@ -319,11 +342,14 @@ class DigitalMaturityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'continuation headings'):
             self.load()
         del self.data['detail_sectors'][0]['rows'][2]
-        self.data['detail_sectors'][0]['challenge_title'] = 'عنوان آخر'
-        with self.assertRaisesRegex(ValueError, 'unapproved'):
+        self.data['detail_sectors'][0]['challenge_title'] = 'التحديات'
+        with self.assertRaisesRegex(ValueError, 'no longer used'):
             self.load()
-        self.data['detail_sectors'][0]['challenge_title'] = 'أبرز التحديثات'
-        self.data['detail_sectors'][0]['challenge_header'] = 'التحديث'
+        del self.data['detail_sectors'][0]['challenge_title']
+        legacy_summary = dict(self.data, challenges=self.data['updates'])
+        self.review.write_text(json.dumps(legacy_summary, ensure_ascii=False), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'updates'):
+            digital.load_reviewed(self.review, self.pdf)
         legacy = dict(self.data, detail_pages=[])
         self.review.write_text(json.dumps(legacy, ensure_ascii=False), encoding='utf-8')
         with self.assertRaisesRegex(ValueError, 'detail_sectors'):
@@ -356,8 +382,8 @@ class DigitalMaturityTests(unittest.TestCase):
         first['rows'] = (long_sector_rows(first)
                          + [['رضا المستفيد: 15%', '', '', '']]
                          + [[row[0], row[1], row[2], f'Y-{i:02d}'] for i, row in enumerate(body, 1)])
-        first['challenge_title'], first['challenge_header'] = 'أبرز التحديثات', 'التحديث'
-        first['challenges'] = ['تحديث أول عن المهمة W-03 وسير العمل', 'تحديث ثان']
+        first['updates'] = ['تحديث أول عن سير العمل', 'تحديث ثان']
+        first['challenges'] = ['تحد قائم']
         data, prs, report = self.build()
         slides = digital.detail_slides(prs)
         group = slides_for(prs, first['title'])
@@ -374,10 +400,11 @@ class DigitalMaturityTests(unittest.TestCase):
         continuation = digital._slide_rows(digital._detail_table(group[1]))[0]
         self.assertTrue(digital.is_heading(continuation))
         self.assertTrue(continuation[0].endswith(digital.CONTINUATION))
-        self.assertEqual([digital._challenge_table(slide) is None for slide in group], [True] * (len(group)-1) + [False])
-        challenges = digital._challenge_table(group[-1])
-        self.assertEqual(challenges.cell(0, 0).text, 'أبرز التحديثات')
-        self.assertEqual(challenges.cell(1, 1).text, 'التحديث')
+        self.assertEqual([bool(digital._note_tables(slide)) for slide in group], [False] * (len(group)-1) + [True])
+        updates, challenges = digital._note_tables(group[-1])
+        self.assertEqual((updates.cell(0, 0).text, updates.cell(1, 1).text), ('أبرز التحديثات', 'التحديث'))
+        self.assertEqual((challenges.cell(0, 0).text, challenges.cell(1, 1).text), ('التحديات', 'التحدي'))
+        self.assertEqual([digital._plain(row.cells[1].text) for row in list(updates.rows)[2:]], first['updates'])
         self.assertEqual([digital._plain(row.cells[1].text) for row in list(challenges.rows)[2:]], first['challenges'])
         # Sector order and the closing slide are preserved; sample master pages are gone.
         self.assertEqual(list(prs.slides).index(slides[-1]), len(prs.slides) - 2)
@@ -414,29 +441,45 @@ class DigitalMaturityTests(unittest.TestCase):
         digital.check(Presentation(report), report, data, errors)
         self.assertTrue(any('suffix' in error or 'differ' in error for error in errors), errors)
 
+    def test_rewritten_notes_drop_task_codes_but_keep_dates(self):
+        self.data['detail_sectors'][4]['challenges'] = ['تحد مرتبط بالمهمة W-03']
+        with self.assertRaisesRegex(ValueError, 'W-03'):
+            self.load()
+        self.data['detail_sectors'][4]['challenges'] = ['تأخر التجاوب: آخر متابعة بتاريخ 4 نوفمبر 2026']
+        self.data['updates'][0]['text'] = 'ترتفع المتطلبات INF-05..07 إلى 80%'
+        with self.assertRaisesRegex(ValueError, 'INF-05'):
+            self.load()
+        self.data['updates'][0]['text'] = 'ترتفع ثلاثة متطلبات إلى 80% بعد اعتماد الدمج\nتأخر اعتماد الشواهد'
+        data, prs, report = self.build()
+        summary = next(sh.table for sh in digital.digital_slide(prs).shapes if sh.has_table)
+        bullets = [p._p.pPr.find(qn('a:buChar')) for p in summary.cell(2, 2).text_frame.paragraphs]
+        self.assertEqual([b is not None and b.get('char') for b in bullets], ['\u2022', '\u2022'])
+        group = slides_for(prs, data['detail_sectors'][4]['title'])
+        (challenges,) = digital._note_tables(group[-1])
+        self.assertEqual([row.cells[1].text for row in list(challenges.rows)[2:]], data['detail_sectors'][4]['challenges'])
+
+    def test_empty_note_list_drops_its_table(self):
+        sector = self.data['detail_sectors'][4]
+        sector['updates'], sector['challenges'] = ['تحديث وحيد'], []
+        data, prs, report = self.build()
+        tables = digital._note_tables(slides_for(prs, sector['title'])[-1])
+        self.assertEqual([t.cell(0, 0).text for t in tables], ['أبرز التحديثات'])
+        sector = self.data['detail_sectors'][4]
+        sector['source_notes'] = [{'title': 'التحديات', 'text': 'ملاحظة'}]
+        sector['updates'] = []
+        with self.assertRaisesRegex(ValueError, 'not classified'):
+            self.load()
+
     def test_latin_codes_keep_direction(self):
-        self.data['detail_sectors'][4]['challenges'] = ['تحد مرتبط بالمهمة W-03', 'تحد ثان مرتبط بالمهمة S-02']
-        self.data['detail_sectors'][4]['challenge_title'] = 'التحديات'
-        self.data['detail_sectors'][4]['challenge_header'] = 'التحدي'
         self.data['detail_sectors'][4]['rows'][1][3] = 'U-01..09'
         data, prs, report = self.build()
         group = slides_for(prs, data['detail_sectors'][4]['title'])
-        challenges = digital._challenge_table(group[-1])
-        self.assertEqual([row.cells[1].text for row in list(challenges.rows)[2:]], data['detail_sectors'][4]['challenges'])
         code = next(row.cells[list(digital._detail_columns(table, row))[3]] for s in group for table in [digital._detail_table(s)]
                     for row in list(table.rows)[2:] if digital._plain(row.cells[list(digital._detail_columns(table, row))[3]].text) == 'U-01..09')
         self.assertEqual(code.text_frame.paragraphs[0]._p.get_or_add_pPr().get('rtl'), '0')
         # PowerPoint lays out Arabic-tagged runs RTL; each code must be its own English run.
         self.assertEqual([(r.text, r._r.get_or_add_rPr().get('lang')) for p in code.text_frame.paragraphs for r in p.runs],
                          [('U-01..09', 'en-US')])
-        for row in list(challenges.rows)[2:]:
-            runs = [r for p in row.cells[1].text_frame.paragraphs for r in p.runs]
-            codes = [r.text for r in runs if r._r.get_or_add_rPr().get('lang') == 'en-US']
-            self.assertEqual(len(codes), 1)
-            self.assertRegex(codes[0], r'^[WS]-0[23]$')
-            self.assertTrue(all(r._r.get_or_add_rPr().get('rtl') is None for r in runs),
-                            'rtl is not a valid run attribute')
-            self.assertNotIn('\u202d', row.cells[1].text)
         mixed = next(row.cells[c] for s in group for table in [digital._detail_table(s)]
                      for row in list(table.rows)[2:] for c in digital._detail_columns(table, row)
                      if digital.CODE_IN_TEXT.search(row.cells[c].text) and not digital.CODE.fullmatch(row.cells[c].text))
