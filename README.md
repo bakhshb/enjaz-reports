@@ -36,13 +36,33 @@ Install the skills from https://github.com/bakhshb/enjaz-reports by following IN
 /plugin install enjaz-reports@enjaz-reports
 ```
 
-للتحديث بعد أي تعديل في `main`:
+للتحديث بعد أي تعديل في `main` نفّذ الخطوات الثلاث بالترتيب. الخطوة الأولى تجلب آخر نسخة من المستودع فقط، والثانية تحدّث الإضافة نفسها، والثالثة تحمّلها في الجلسة:
 
 ```text
 /plugin marketplace update enjaz-reports
 ```
 
-أو فعّل التحديث التلقائي لهذا المصدر من قائمة `/plugin`.
+```bash
+claude plugin update enjaz-reports@enjaz-reports
+```
+
+```text
+/reload-plugins
+```
+
+إذا ظهرت رسالة «already at the latest version» فالخطوة الأولى لم تُنفَّذ قبلها. أعدها ثم كرر التحديث. يمكن أيضًا تفعيل التحديث التلقائي لهذا المصدر من قائمة `/plugin`.
+
+لمعرفة هل النسخة المثبتة هي الأحدث، قارن رمزين: رقم النسخة عندك، وآخر تعديل في المستودع. لا يوجد رقم نسخة مثل «11»؛ رقم النسخة هو رمز آخر تعديل (commit) في `main`.
+
+- عندك: شغّل الأمر التالي وانظر إلى `Version` بجانب `enjaz-reports`:
+
+  ```bash
+  claude plugin list
+  ```
+
+- في المستودع: افتح https://github.com/bakhshb/enjaz-reports/commits/main وانظر إلى الرمز المختصر لأول تعديل في القائمة (7 أحرف مثل `3e44849`).
+
+إذا بدأ رقم النسخة عندك بنفس أحرف الرمز في المستودع فأنت على الأحدث؛ وإلا فنفّذ خطوات التحديث أعلاه.
 
 ### Codex
 
