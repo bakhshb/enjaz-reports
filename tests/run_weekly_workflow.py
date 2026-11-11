@@ -27,7 +27,7 @@ builder=fixtures.load_module('monday_builder',fixtures.MONDAY/'build_report.py')
 gate=fixtures.gate
 splitter=fixtures.sector_qa.splitter
 MASTER=ROOT/'skills/weekly-consolidated-report/assets/weekly-report-master.pptx'
-MASTER_HASH='4944d523075aafb37d38f90d1ee12fd0b2b80e46033f1af81880c646ad5fc689'
+MASTER_HASH='f9feac31a8307d5b070806166709709c7b8c521d25fe7aca4f960ba7b4cae20f'
 
 
 def require(result):

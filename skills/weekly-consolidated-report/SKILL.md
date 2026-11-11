@@ -21,16 +21,16 @@ When the user sends the Excel files without choosing a model, ask: **«أي نم
 - ملخص وتفاصيل المهام الاستراتيجية.xlsx: ورقتا ملخص المهام وتفاصيل المهام.
 - ملخص_مشاريع_سهيل.xlsx: ورقتا ملخص مشاريع سهيل وتفاصيل مشاريع سهيل.
 - تقرير_المعاملات_الموحد.xlsx: ورقة المعاملات.
-- قالب PowerPoint المعتمد الحالي: `assets/weekly-report-master.pptx`، مع PDF الموافق `assets/weekly-report-reference.pdf` مرجعًا بصريًا. هذا القالب هو مصدر التصميم المعتمد الحالي.
+- قالب PowerPoint المعتمد الحالي: `assets/weekly-report-master.pptx`، مع PDF الموافق `assets/weekly-report-reference.pdf` مرجعًا بصريًا (تقرير 8 أكتوبر 2026، مُصدَّر من PowerPoint). عنوان المؤشر الأول في شريحة المعاملات هو «إجمالي المعاملات» على سطرين كما في القالب. هذا القالب هو مصدر التصميم المعتمد الحالي.
 - قالب النموذج الرقمي الإضافي: `assets/weekly-report-digital-master.pptx`. يبقى النموذج الحالي متاحًا دون استبدال. مرجعه البصري المعتمد للمخرج هو `assets/weekly-report-digital-reference.pdf` (تقرير 5 نوفمبر 2026، مُصدَّر من PowerPoint): يبيّن كيف يُعاد صبّ قطاعات ملف التجربة الرقمية الأفقي في شرائح التفاصيل العمودية، وجدول «أبرز التحديثات» في الملخص، وجدولي «أبرز التحديثات» و«التحديات» في نهاية كل قطاع، وهو مرجع تصميم لا مصدر بيانات.
 - عينة المصدر الأفقي المعتمد لملف التجربة الرقمية محفوظة في المستودع: `tests/fixtures/digital-maturity-horizontal.pdf` (تحديث 1448/5/17هـ). يختبرها `tests/test_weekly_digital_maturity.py` استخراجًا ودمجًا وبناءً؛ أي تغيير في المستخرج يجب أن يبقي هذه العينة ناجحة.
 - At runtime, use the new Excel files attached to the request. Restore the approved PowerPoint template from the assets attached to this skill; the user should not need to attach the template again. Ask for the template only if the skill assets are unavailable or fail integrity verification. Never substitute sample values.
 - Primary output: `تقرير الإنجاز الأسبوعي بتاريخ الإنشاء.pptx`, saved as a new file. Create a matching PDF only when requested. Never modify the inputs or overwrite the original template.
 
 
-Verify the bundled master size `9546137` bytes and SHA-256 `4944d523075aafb37d38f90d1ee12fd0b2b80e46033f1af81880c646ad5fc689` before use. Never fall back to an earlier master.
+Verify the bundled master size `9540223` bytes and SHA-256 `f9feac31a8307d5b070806166709709c7b8c521d25fe7aca4f960ba7b4cae20f` before use. Never fall back to an earlier master.
 
-For `digital`, verify SHA-256 `6af842ee98af6f1e4bf44e9e6889e8d9cc206685e22acf2adc88fd3078510819` for its bundled master. Do not use the current model's master for this choice.
+For `digital`, verify SHA-256 `8d90c3da68ba0ef8042c0949eeab96f60bfaeda28ef13a34c37f17278056131e` for its bundled master. Do not use the current model's master for this choice.
 
 ## Table typography
 

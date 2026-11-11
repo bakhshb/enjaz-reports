@@ -19,7 +19,7 @@ from weekly_artwork import check_detail_artwork, check_navigation_links, all_sha
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
-       ('إجمالي العاملات','المعاملات',['مكتملة','على المخطط','متأخر'],['B2','B3','B4','B5'],[24,29,31,26])]
+       ('إجمالي المعاملات','المعاملات',['مكتملة','على المخطط','متأخر'],['B2','B3','B4','B5'],[24,29,31,26])]
 
 def exact(value):
     return helpers.val(value).replace('\r\n','\n').replace('\v','\n')
@@ -250,7 +250,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     if reviewed is not None:
         from digital_maturity import digital_slide
         digital_index=list(final.slides).index(digital_slide(final))
-        transaction_index=next(i for i,sl in enumerate(final.slides) if 'إجمالي العاملات' in helpers.slide_texts(sl))
+        transaction_index=next(i for i,sl in enumerate(final.slides) if 'إجمالي المعاملات' in helpers.slide_texts(sl))
         divider_index=next(i for i,sl in enumerate(final.slides) if {'تفاصيل المهام','تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))
         if digital_index <= transaction_index or digital_index != divider_index-1:
             errors.append('Digital-maturity slide is outside its approved position')

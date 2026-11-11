@@ -37,7 +37,7 @@ from report_common.table_typography import set_table_directions
 
 
 MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
-MASTER_HASH = '6af842ee98af6f1e4bf44e9e6889e8d9cc206685e22acf2adc88fd3078510819'
+MASTER_HASH = '8d90c3da68ba0ef8042c0949eeab96f60bfaeda28ef13a34c37f17278056131e'
 CALCULATION_NOTE = ('آلية الاحتساب: 10% للجاهزية وتشمل المتطلبات والاجتماعات والتنسيق، '
                     'و5% لتحديد التواريخ المستهدفة، والنسبة المتبقية وفق الإنجاز الفعلي لمتطلبات الدليل.')
 CALCULATION_NOTE_ID = 7
