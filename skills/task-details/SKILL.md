@@ -188,13 +188,19 @@ them separate and let the user confirm.
     
     and preferred over truncated task text.
     
-- Dates are kept exactly as formatted in the source (already consistent
+- Planned dates are written as `dd-mm-yyyy` text whatever form the export
     
-    `dd-mm-yyyy` strings in every export seen so far) — don't reparse or
+    uses (real Excel dates, Excel serial numbers, `dd-mm-yyyy`, `dd/mm/yyyy`,
     
-    reformat them unless a future export mixes formats, in which case unify to
+    `dd.mm.yyyy`, `yyyy-mm-dd` with or without `00:00:00`, Arabic month names,
     
-    `dd-mm-yyyy` and say so.
+    Arabic-Indic digits). The shared `report_common/dates.py` does this. A date
+    
+    it cannot read, a Hijri date for example, stops the script with the Excel
+    
+    row number and the value; ask the user for the right date. An empty date
+    
+    stays empty.
     
 - **No formulas.** The numbers are computed once in Python directly from the
     
