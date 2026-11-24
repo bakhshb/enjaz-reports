@@ -22,6 +22,7 @@ from lxml import etree
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]))
 from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
+from report_common.dates import report_date
 
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
@@ -468,16 +469,20 @@ def read_data(prs, role):
 TRANS_FIELDS = ('رقم المعاملة', 'موضوع المعاملة', 'الجهة الوارد منها المعاملة',
                 'تاريخ انشاء المعاملة', 'تاريخ الإنجاز المخطط له')
 
-def transaction_value(value):
+TRANS_DATES = {'تاريخ انشاء المعاملة', 'تاريخ الإنجاز المخطط له'}
+
+def transaction_value(value, name=None):
+    """Date fields go through report_date (Hijri allowed), so a real Excel date
+    and dd-mm-yyyy deck text match. Every other field is plain stripped text."""
+    if name in TRANS_DATES: return report_date(value, hijri=True)
     if value is None: return ''
-    if hasattr(value, 'strftime'): return value.strftime('%d/%m/%Y')
     return str(value).strip()
 
 def field_key(name):
     return norm(name).replace('إنشاء', 'انشاء').replace('الانجاز', 'الإنجاز').replace('المخطط له', 'المخطط')
 
 def transaction_key(values):
-    return tuple(norm(transaction_value(x)) for x in values)
+    return tuple(norm(transaction_value(x, name)) for x, name in zip(values, TRANS_FIELDS))
 
 def attach_transaction_sectors(trans, workbook_path):
     """Join the five displayed PPTX fields to the final Excel's sector column."""

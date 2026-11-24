@@ -100,11 +100,11 @@ def build_scenario(root,name,task_count,project_count,new_names=False):
     sector='قطاع جديد تجريبي' if new_names else 'وكالة شؤون الحج'
     source='مصدر جديد تجريبي' if new_names else 'اجتماع القيادات'
     for i in range(task_count):
-        ws.append([f'مهمة تجريبية {i+1}',sector,source,'01/02/1448',['مكتمل','متأخر','معلق','على المخطط'][i%4],f'ملاحظة تجريبية {i+1}'])
+        ws.append([f'مهمة تجريبية {i+1}',sector,source,'01/02/2026',['مكتمل','متأخر','معلق','على المخطط'][i%4],f'ملاحظة تجريبية {i+1}'])
     wb.save(raw_tasks)
     suhail_source(raw_projects);wb=load_workbook(raw_projects);ws=wb.active;ws.delete_rows(2,ws.max_row)
     for i in range(project_count):
-        ws.append([sector,f'مشروع تجريبي {i+1}','01/01/1448','01/02/1448','مكتمل','قديم',['مكتمل','متأخر','لم يبدأ','على المخطط'][i%4],f'تاريخ التحديث 29 سبتمبر 2026\nتحديث تجريبي {i+1}','ملاحظة',''])
+        ws.append([sector,f'مشروع تجريبي {i+1}','01/01/2026','01/02/2026','مكتمل','قديم',['مكتمل','متأخر','لم يبدأ','على المخطط'][i%4],f'تاريخ التحديث 29 سبتمبر 2026\nتحديث تجريبي {i+1}','ملاحظة',''])
     wb.save(raw_projects)
     tasks=root/'tasks.xlsx';projects=root/'projects.xlsx'
     for script,args in [(TASKS,['--input',raw_tasks,'--output',tasks]),(SUHAIL,[raw_projects,projects])]:
@@ -196,7 +196,7 @@ class MondayGateTests(unittest.TestCase):
         cls.temp=tempfile.TemporaryDirectory();cls.root=Path(cls.temp.name)
         raw_tasks=cls.root/'raw-tasks.xlsx';raw_projects=cls.root/'raw-projects.xlsx'
         task_source(raw_tasks)
-        wb=load_workbook(raw_tasks);wb['المهام'].append(['مهمة ثانية','وكالة شؤون الحج','اجتماع القيادات','02/02/1448','متأخر','ملاحظة ثانية']);wb.save(raw_tasks)
+        wb=load_workbook(raw_tasks);wb['المهام'].append(['مهمة ثانية','وكالة شؤون الحج','اجتماع القيادات','02/02/2026','متأخر','ملاحظة ثانية']);wb.save(raw_tasks)
         suhail_source(raw_projects,'متأخر')
         cls.tasks=cls.root/'tasks.xlsx';cls.projects=cls.root/'projects.xlsx'
         for script,arguments in [(TASKS,['--input',raw_tasks,'--output',cls.tasks]),(SUHAIL,[raw_projects,cls.projects])]:

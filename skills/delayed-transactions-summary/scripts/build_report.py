@@ -33,6 +33,12 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+# report_common sits two levels up in the repo and next to this script in a standalone bundle.
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
+sys.path.insert(0, HERE)
+from report_common.dates import DateError, date_parts, report_date
+
 CTRL = dict.fromkeys(
     map(ord, "\u202a\u202b\u202c\u202d\u202e\u200e\u200f\u061c"), None
 )
@@ -57,13 +63,15 @@ def clean(value):
         return ""
     return re.sub(r"\s+", " ", str(value).translate(CTRL).strip())
 
-def norm_date(value):
-    text = clean(value)
-    match = re.match(r"^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$", text)
-    if match:
-        day, month, year = (int(g) for g in match.groups())
-        return f"{day:02d}/{month:02d}/{year}", (year, month, day)
-    return text, (9999, 99, 99)
+def norm_date(value, where):
+    """dd-mm-yyyy text plus a (year, month, day) sort key; Hijri dates are normal here."""
+    try:
+        parts = date_parts(value, hijri=True)
+    except DateError:
+        sys.exit(f"Unreadable date in {where}: {clean(value)}")
+    if parts is None:
+        return "", (9999, 99, 99)
+    return report_date(value, hijri=True), parts
 
 def read_files(input_dir):
     paths = sorted(
@@ -90,7 +98,7 @@ def read_files(input_dir):
         sector = clean(sheet.iloc[SECTOR_CELL]) or clean(
             os.path.basename(path).rsplit(".", 1)[0].replace("_", " ")
         )
-        for _, row in sheet.iloc[header + 1:].iterrows():
+        for index, row in sheet.iloc[header + 1:].iterrows():
             number = clean(row[COL["number"]])
             if number.endswith(".0"):
                 number = number[:-2]
@@ -100,8 +108,9 @@ def read_files(input_dir):
             status = STATUS_MAP.get(raw_status)
             if status is None:
                 unmapped.add(raw_status)
-            created, _ = norm_date(row[COL["created"]])
-            planned, planned_key = norm_date(row[COL["planned"]])
+            where = f"{os.path.basename(path)} row {index + 1}"
+            created, _ = norm_date(row[COL["created"]], where)
+            planned, planned_key = norm_date(row[COL["planned"]], where)
             rows.append({
                 "num": number,
                 "subject": clean(row[COL["subject"]]),

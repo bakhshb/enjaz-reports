@@ -21,11 +21,17 @@ mapping, missing fields) — only *which column* holds a given field.
 """
 import argparse
 import sys
+from pathlib import Path
 
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+
+# report_common sits two levels up in the repo and next to this script in a standalone bundle.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from report_common.dates import DateError, report_date
 
 COL_ALIASES = {
     "task": ["المهمة"],
@@ -91,6 +97,15 @@ def build(input_path, output_path):
     }.items() if v is None]
     if missing:
         sys.exit(f"أعمدة مفقودة في شيت المهام: {', '.join(missing)}")
+
+    dates = []
+    for i, value in df[c_date].items():
+        try:
+            dates.append(report_date(value))
+        except DateError:
+            # Excel row: pandas index 0 is the row under the header.
+            sys.exit(f"تاريخ غير مقروء في عمود '{c_date}' بالصف {i + 2}: {value}")
+    df[c_date] = dates
 
     df[c_status] = df[c_status].astype(str).str.strip()
     df[c_sector] = df[c_sector].astype(str).str.strip()
@@ -250,7 +265,7 @@ def build(input_path, output_path):
             notes = None if pd.isna(notes) else notes
             related = None if pd.isna(related) else related
             write_row(ws2, r, [
-                i, rec.get(c_task), rec.get(c_sector), rec.get(c_date), rec.get("_status_norm"), notes, related,
+                i, rec.get(c_task), rec.get(c_sector), rec.get(c_date) or None, rec.get("_status_norm"), notes, related,
             ], wrap_cols={2, 3, 6, 7}, center_cols={1, 4, 5})
             r += 1
         r += 1
