@@ -262,10 +262,22 @@ CPI, LINE, PAD = 15.5 * 10 / 11, 14 / 72, 0.12
 # (cell texts, column widths) -> needed row height in EMU, filled by measure_pass().
 MEASURED = {}
 
-def header_height(widths):
-    # Narrow date/status columns need up to three 14 pt lines at 11 pt type.
-    if len(widths) in (4, 5): return 0.75
-    return 0.60 if len(widths)>=4 else 0.30
+# Fixed header row heights (inches) per table type. One-line headers use the
+# weekly-report-master.pptx header rows. A header that wraps to two lines
+# ("تاريخ الإنجاز المخطط", "تاريخ البداية", "تاريخ انشاء المعاملة") needs
+# 0.68 in at 11 pt bold Abar; the master's own 0.52 (projects) and 0.56
+# (transactions) clip the second line in the LibreOffice render.
+TWO_LINE_HEADER = 621792 / EMU     # 0.68 in, checked by rendering
+HEADER_HEIGHT = {
+    'tasks': 439881 / EMU,         # 0.48 in, master summary task tables
+    'updates': 283509 / EMU,       # 0.31 in, master أبرز التحديثات / التحديات
+    'tasks_dated': TWO_LINE_HEADER,  # task tables with تاريخ الإنجاز المخطط
+    'projects': TWO_LINE_HEADER,
+    'transactions': TWO_LINE_HEADER,
+}
+
+def header_height(kind):
+    return HEADER_HEIGHT[kind]
 
 def row_key(values, widths):
     # The leading '#' cell is left out: a project row copied from the consolidated
@@ -291,17 +303,17 @@ def preserved_row_height(row, widths):
     # Unmeasured: a row copied from a 10 pt source must still fit the 11 pt output.
     return max(int(row['tr'].get('h',152400)), estimated_row_height(values, widths))
 
-def est_rows(rows, widths):
+def est_rows(rows, widths, kind):
     if rows and isinstance(rows[0], dict):
-        return (0.28+header_height(widths)) * EMU + sum(preserved_row_height(r,widths) for r in rows)
-    return est_table(rows, widths)
+        return (0.28+header_height(kind)) * EMU + sum(preserved_row_height(r,widths) for r in rows)
+    return est_table(rows, widths, kind)
 
-def est_table(rows, widths):
-    return (0.28 + header_height(widths)) * EMU + sum(row_height(r, widths) for r in rows)
+def est_table(rows, widths, kind):
+    return (0.28 + header_height(kind)) * EMU + sum(row_height(r, widths) for r in rows)
 
-def set_estimated_row_heights(gf, rows, widths, frame_height):
+def set_estimated_row_heights(gf, rows, widths, frame_height, kind):
     """Write the per-row heights used for pagination into the table."""
-    heights = [int(0.28 * EMU), int(header_height(widths) * EMU)]
+    heights = [int(0.28 * EMU), int(header_height(kind) * EMU)]
     if rows and isinstance(rows[0], dict):
         heights.extend(preserved_row_height(row,widths) for row in rows)
     else:
@@ -701,7 +713,7 @@ def continuation_slide(prs, source_index, keep, base_count):
     return slide, new_index
 
 def place_table(prs, slide, y, source_index, keep, base_count, tmpl, title, rows, algns,
-                frame_name, estimate, x=CX, frame_width=CW, page_top=TOP_Y, column_widths=None, **kwargs):
+                frame_name, estimate, kind, x=CX, frame_width=CW, page_top=TOP_Y, column_widths=None, **kwargs):
     """Place whole rows on as many same-design summary pages as required."""
     headers = [norm(cell_text_el(tc)) for tc in gf_tbl(tmpl).findall(q('tr'))[1].findall(q('tc'))]
     omitted = {'القطاع'}
@@ -736,7 +748,7 @@ def place_table(prs, slide, y, source_index, keep, base_count, tmpl, title, rows
     while remaining:
         n = 0
         for count in range(1, len(remaining) + 1):
-            if estimate(remaining[:count], width) + y <= FOOTER_Y - 300000:
+            if estimate(remaining[:count], width, kind) + y <= FOOTER_Y - 300000:
                 n = count
             else:
                 break
@@ -748,8 +760,8 @@ def place_table(prs, slide, y, source_index, keep, base_count, tmpl, title, rows
             continue
         chunk = remaining[:n]
         gf = make_table(tmpl, title, chunk, algns, **kwargs)
-        h = estimate(chunk, width)
-        set_estimated_row_heights(gf, chunk, width, h)
+        h = estimate(chunk, width, kind)
+        set_estimated_row_heights(gf, chunk, width, h, kind)
         gf_set_pos(add_frame(slide.shapes._spTree, gf, frame_name), x, y, frame_width, h)
         y += h + GAP
         remaining = remaining[n:]
@@ -899,7 +911,9 @@ def build(master, outdir, aliases, transactions=None, only=None):
                     rows.append([values.get(field_key(h), '') for h in headers])
                 s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), tmpl,
                                    TASK_TITLE[st], rows, ['ctr' if h == '#' else 'r' for h in headers],
-                                   'tbl_' + st, est_table, accent=ACCENT[st], headers=headers,
+                                   'tbl_' + st, est_table,
+                                   'tasks_dated' if 'تاريخ الإنجاز المخطط' in map(field_key, headers) else 'tasks',
+                                   accent=ACCENT[st], headers=headers,
                                    column_widths=task_column_widths)
             if d['support']:
                 if TMPL_SUPPORT is None: raise ValueError('No support table to clone')
@@ -910,7 +924,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
                     rows.append([values.get(norm(h), '') for h in headers])
                 s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), TMPL_SUPPORT,
                                    'طلبات الدعم', rows, ['ctr' if h == '#' else 'r' for h in headers],
-                                   'tbl_support', est_table, accent=ACCENT['تحديثات'],
+                                   'tbl_support', est_table, 'tasks', accent=ACCENT['تحديثات'],
                                    column_widths=task_column_widths)
 
         if d['projs'] or d['ups'] or d['challenges']:
@@ -926,7 +940,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
                 rows = [[str(i + 1), u['project'], sec, u['text']] for i, u in enumerate(d['ups'])]
                 s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_UPD,
                                    'أبرز التحديثات', rows, ['ctr', 'r', 'ctr', 'r'],
-                                   'tbl_updates', est_table, accent=ACCENT['تحديثات'],
+                                   'tbl_updates', est_table, 'updates', accent=ACCENT['تحديثات'],
                                    bold_update_col=3)
             if d['challenges']:
                 if TMPL_CHALLENGE is None: raise ValueError('No challenges table to clone')
@@ -937,14 +951,14 @@ def build(master, outdir, aliases, transactions=None, only=None):
                     rows.append([values.get(norm(h), '') for h in headers])
                 s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_CHALLENGE,
                                    'التحديات', rows, ['ctr' if h == '#' else 'r' for h in headers],
-                                   'tbl_challenges', est_table, accent=ACCENT['متأخرة'])
+                                   'tbl_challenges', est_table, 'updates', accent=ACCENT['متأخرة'])
             for st in PROJ_ORDER:
                 rows = [{'num': str(i + 1), 'tr': p['tr']}
                         for i, p in enumerate([x for x in d['projs'] if x['status'] == st])]
                 if not rows: continue
                 s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_PROJ,
                                    PROJ_TITLE[st], rows, ['ctr', 'r', 'ctr', 'ctr', 'ctr', 'r'],
-                                   'proj_' + st, est_rows, status_col=4,
+                                   'proj_' + st, est_rows, 'projects', status_col=4,
                                    title_tr=GOLD_TITLE, accent=ACCENT[st])
 
         if d['trans']:
@@ -959,7 +973,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
             place_table(prs, s, TOP_Y, role['trans'], keep, len(sl), TMPL_TRANS,
                         'المعاملات المتأخرة', rows,
                         ['ctr' if 'تاريخ' in h or 'رقم' in h else 'r' for h in d['trans'][0]['head']],
-                        'tbl_trans', est_table, x=tx, frame_width=tw,
+                        'tbl_trans', est_table, 'transactions', x=tx, frame_width=tw,
                         accent=ACCENT['متأخرة'])
 
         path = os.path.join(full_dir, 'تقرير الإنجاز الأسبوعي - %s.pptx' % sec)

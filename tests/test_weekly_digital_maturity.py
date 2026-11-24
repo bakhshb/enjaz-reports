@@ -512,6 +512,16 @@ class DigitalMaturityTests(unittest.TestCase):
         self.assertTrue(all(first.top + first.height < second.top
                             for first, second in zip(tables, tables[1:])))
 
+    def test_support_requests_use_task_table_header_heights(self):
+        for master in (digital.MASTER, weekly_build.MASTER):
+            slide = Presentation(master).slides[1]
+            heights = {weekly_build.builder.table_title(pattern): weekly_build.header_heights(pattern)
+                       for pattern in weekly_build.builder.tables(slide)}
+            self.assertIn('طلبات الدعم', heights)
+            self.assertEqual(set(map(tuple, heights.values())),
+                             {(weekly_build.TASK_HEADER_HEIGHT,) * 2})
+        self.assertEqual(weekly_build.TABLE_GAP, 200000)
+
     def test_full_digital_model_builds_rtl_tables_and_rejects_disabled_direction(self):
         import contextlib
         import io

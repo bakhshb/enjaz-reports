@@ -71,20 +71,25 @@ The candidate is saved only after programmatic checks pass. Failed builds preser
 
 The gate also verifies inherited detail-layout artwork against the chosen master, visible master graphics, unique shape IDs including grouped children, and the chosen model's header buttons and destinations. Keep `scripts/weekly_artwork.py` with the installed generator and validator. A missing logo, footer, button, or layout link is a blocking failure; do not bypass the gate to deliver.
 
-## Visual review
+## Measure and rebuild
 
-For LibreOffice PDF previews, use `uv run ../report_common/render.py --report "<candidate.pptx>" --output "<candidate.pdf>"`. The shared exporter uses a disposable copy with the RTL column order materialized for LibreOffice; the editable PPTX remains unchanged. Inspect every summary, detail, transaction and digital table: numbering must visibly appear on the right. Do not accept the RTL property alone. `tests/check_rendered_pdf.py` checks numbering using actual PDF coordinates, alongside fonts and page counts.
-
-Render the validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.
-
-When a Windows PowerPoint render reveals overlapping tables or premature page breaks, `scripts/measure_layout.ps1 -Report <candidate.pptx> -Tasks <tasks.xlsx> -Suhail <suhail.xlsx> -Transactions <transactions.xlsx>` reads actual row heights without modifying the deck: it measures a temporary copy whose record rows are first collapsed so PowerPoint fits them to their text, and skips the digital-maturity slides, which paginate with their own model. Rerun the same builder with `--measurements <candidate.layout.json>` to repaginate complete records using those heights, then render again. Measurements are bound to the exact input/template hashes. They support the visual decision; they do not establish visual acceptance. Without Windows PowerPoint, use the LibreOffice counterpart, which writes the same `<candidate>.layout.json` (same hashes, same format) from a disposable copy:
+This step is required before delivery. The builder's first-pass row heights are a cautious estimate, and a deck built without measurements must not be delivered. After step 3 passes, run the LibreOffice measurement on the candidate. It writes `<candidate>.layout.json` from a disposable copy and does not modify the deck:
 
 ```bash
 uv run scripts/measure_layout.py --report "<candidate.pptx>" --tasks "<tasks.xlsx>" --suhail "<suhail.xlsx>" --transactions "<transactions.xlsx>"
 ```
 
-For `digital`, add `--digital-pdf "<digital.pdf>" --digital-data "<review.json>"`. It measures every record row through `report_common/measure.py`: LibreOffice draws rows at their declared height and never grows them, so each row is rendered alone in a collapsed one-row table and its glyph extent is measured. Install the template font (Abar Mid) first; with a substitute font the heights are wrong. The builder's first-pass heights are a deliberately cautious estimate, so a measured rebuild is normally much shorter (the 2026-11-05 inputs went from 28 to 15 slides on the standard model and from 38 to 25 on the digital one).
-For the digital model, also pass `-Template <digital-master.pptx> -DigitalPdf <digital.pdf> -DigitalData <review.json>` so the measurement is tied to its PDF and reviewed values.
+For `digital`, add `--digital-pdf "<digital.pdf>" --digital-data "<review.json>"`. It measures every record row through `report_common/measure.py`: LibreOffice draws rows at their declared height and never grows them, so each row is rendered alone in a collapsed one-row table and its glyph extent is measured. Install the template font (Abar Mid) first; with a substitute font the heights are wrong. The digital-maturity slides are skipped; they paginate with their own model.
+
+Then rerun the same builder command into a new candidate path with `--measurements "<candidate.layout.json>"`, rerun `validate_report.py` on the rebuilt candidate, and do the visual review on that rebuilt candidate only. Measurements are bound to the exact input/template hashes, so any input or template change needs a new measurement. A measured rebuild is normally much shorter (the 2026-11-05 inputs went from 28 to 15 slides on the standard model and from 38 to 25 on the digital one). Measurements support the visual decision; they do not establish visual acceptance.
+
+On Windows with PowerPoint, `scripts/measure_layout.ps1 -Report <candidate.pptx> -Tasks <tasks.xlsx> -Suhail <suhail.xlsx> -Transactions <transactions.xlsx>` writes the same `<candidate>.layout.json` (same hashes, same format) and can be used for this step instead. It measures a temporary copy whose record rows are first collapsed so PowerPoint fits them to their text. For the digital model, also pass `-Template <digital-master.pptx> -DigitalPdf <digital.pdf> -DigitalData <review.json>`.
+
+## Visual review
+
+For LibreOffice PDF previews, use `uv run ../report_common/render.py --report "<candidate.pptx>" --output "<candidate.pdf>"`. The shared exporter uses a disposable copy with the RTL column order materialized for LibreOffice; the editable PPTX remains unchanged. Inspect every summary, detail, transaction and digital table: numbering must visibly appear on the right. Do not accept the RTL property alone. `tests/check_rendered_pdf.py` checks numbering using actual PDF coordinates, alongside fonts and page counts.
+
+Render the measured, rebuilt and validated candidate and inspect every slide against this skill's template/reference, including Arabic, actual Abar usage, status fills, notes, chart labels, row continuity, table gaps and footer clearance. Verify native PowerPoint opening without repair and editable embedded charts. Follow [acceptance checks](references/acceptance.md); correct layout using the approved patterns and repeat affected checks. Final visual acceptance follows the last edit and programmatic check.
 
 ## Failure handling
 
@@ -96,6 +101,6 @@ Prefer `uv run` using the declared dependencies. Reuse an existing installation.
 
 ## Delivery
 
-Deliver the editable PPTX bytes that passed data checks and final visual review, using an accessible file link. Deliver PDF only when requested.
+Deliver the editable PPTX bytes that were rebuilt with measurements and passed data checks and final visual review, using an accessible file link. Deliver PDF only when requested.
 
 After delivering the report, always reply with the Arabic summary message to the Minister in one copyable code block, built only from the delivered report's summary slides. Its sections follow the delivered model automatically (`digital` includes مؤشر نضج التجربة الرقمية; `standard` omits it and renumbers). Follow [the minister summary reference](references/minister-summary.md) exactly for wording, structure and the approved model message. Keep QA evidence outside the slides: exact output/input/template hashes, performed checks, renderer, and any limitation. Any edit invalidates affected checks. Do not split sectors, schedule runs, or send reports to others unless requested.

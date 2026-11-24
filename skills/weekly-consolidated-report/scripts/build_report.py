@@ -23,18 +23,14 @@ from weekly_artwork import place_table_copy, prepare_navigation
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
+# Title and header row heights of the summary task tables in the approved
+# masters (frame 1203960 minus the 324198 body row, split over the two rows).
+# The masters leave these rows auto-height; طلبات الدعم uses the same value.
+TASK_HEADER_HEIGHT=439881
+
 def header_heights(pattern):
-    """Resolve auto-height title/header rows from the approved table frame."""
-    rows=list(pattern.table.rows)
-    heights=[row.height or 0 for row in rows[:2]]
-    missing=[index for index,height in enumerate(heights) if not height]
-    if missing:
-        residual=pattern.height-sum(row.height or 0 for row in rows)
-        if residual<=0:raise ValueError('Cannot resolve approved table header heights')
-        share,residue=divmod(residual,len(missing))
-        for index in missing:
-            heights[index]=share+(residue if index==missing[-1] else 0)
-    return heights
+    """Approved title/header heights; auto-height rows are summary task tables."""
+    return [row.height or TASK_HEADER_HEIGHT for row in list(pattern.table.rows)[:2]]
 
 def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     """Initial placement only; final visual acceptance must confirm pagination."""
