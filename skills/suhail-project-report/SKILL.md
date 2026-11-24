@@ -104,7 +104,7 @@ A sector in the data that matches nothing in the fixed lists is appended at the 
 - Exactly two sheets. No dashboard, no charts, no extra sheets, no extra columns, no analysis or recommendations sections.
 - Both sheets right-to-left, Arabic, wrap text on.
 - **Font: `Abar Mid`, size 10, in every single cell** — headers, section titles, KPI figures, table body, all of it. No exceptions and no larger display sizes. Bold and colour carry the hierarchy instead. The constants `F` and `SZ` at the top of the script are the only place this is set.
-- Never invent missing data. Dates are copied as-is from the source (they are text, not date values).
+- Never invent missing data. Start and end dates are written as `dd-mm-yyyy` text whatever form the export uses (real Excel dates, Excel serial numbers, `dd-mm-yyyy`, `dd/mm/yyyy`, `dd.mm.yyyy`, `yyyy-mm-dd` with or without `00:00:00`, Arabic month names, Arabic-Indic digits). The shared `report_common/dates.py` does this. A date it cannot read, a Hijri date for example, stops the script with the row number and the value; ask the user for the right date. An empty date stays empty.
 - Arabic text carries no diacritics.
 
 ## Colours

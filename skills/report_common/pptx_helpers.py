@@ -4,6 +4,7 @@ import openpyxl
 from lxml import etree
 from pptx.oxml.ns import qn
 from pptx.oxml.xmlchemy import OxmlElement
+from .dates import report_date
 TASK_SUMMARY_TITLES=('المهام المكتملة','المهام المتأخرة','المهام المعلقة','طلبات الدعم')
 SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المتأخرة','التحديات')
 MONTHS=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
@@ -13,11 +14,11 @@ ISO_DATETIME_TEXT = re.compile(r'(\d{4})-(\d{2})-(\d{2})(?: 00:00:00)?')
 
 def val(v):
     if v is None: return ''
-    if isinstance(v, (dt.datetime, dt.date)): return v.strftime('%d-%m-%Y')
+    if isinstance(v, (dt.datetime, dt.date)): return report_date(v)
     if isinstance(v, float) and v.is_integer(): return str(int(v))
     # A date stored as text by str(datetime) upstream: show it like every other date.
-    m = ISO_DATETIME_TEXT.fullmatch(str(v).strip())
-    if m: return '%s-%s-%s' % (m.group(3), m.group(2), m.group(1))
+    # Other text passes through, so transaction dates match the Excel text the sector split compares.
+    if ISO_DATETIME_TEXT.fullmatch(str(v).strip()): return report_date(str(v))
     return str(v)
 
 

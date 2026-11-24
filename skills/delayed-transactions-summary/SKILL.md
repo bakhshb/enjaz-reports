@@ -199,13 +199,23 @@ sheet, so this order reads correctly as written):
 
 Sorting: by sector, so a sector's rows are contiguous; within a sector by
 
-`تاريخ الإنجاز المخطط` oldest first. The dates are Hijri text — sort on the
+`تاريخ الإنجاز المخطط` oldest first. The dates are usually Hijri text; sort on the
 
-`(year, month, day)` triple parsed out of `dd/mm/yyyy`, never on the string.
+`(year, month, day)` triple read from the date, never on the string.
 
-Dates keep their original values; only the display form is unified to
+Both date columns are written as `dd-mm-yyyy` text through the shared
 
-`dd/mm/yyyy`. A required field that is missing stays an empty cell — never guess it.
+`report_common/dates.py`. It reads Hijri and Gregorian dates in `dd/mm/yyyy`,
+
+`dd-mm-yyyy`, `dd.mm.yyyy` or `yyyy-mm-dd` form (with or without `00:00:00`),
+
+real Excel dates, Excel serial numbers, Arabic month names and Arabic-Indic
+
+digits. The date values themselves never change. A date it cannot read stops the
+
+script with the file name, row number and value. A required field that is missing
+
+stays an empty cell; never guess it.
 
 Styling that matches the ministry decks: section bands in dark green `0F5C3F`
 
