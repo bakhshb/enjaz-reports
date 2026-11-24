@@ -13,6 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as builder
 from report_common import status_styles
+from report_common import header_heights as shared_heights
 from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
 from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP
@@ -23,14 +24,18 @@ from weekly_artwork import place_table_copy, prepare_navigation
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
-# Title and header row heights of the summary task tables in the approved
-# masters (frame 1203960 minus the 324198 body row, split over the two rows).
-# The masters leave these rows auto-height; طلبات الدعم uses the same value.
-TASK_HEADER_HEIGHT=439881
+# Header heights live in report_common/header_heights.py with the reasons for
+# each value. The summary task tables are auto-height in the masters, and the
+# transactions header wraps to two lines, so both get the shared fixed heights.
+TASK_HEADER_HEIGHT=shared_heights.TASK_HEADER
+TRANSACTION_HEADER_HEIGHT=shared_heights.TWO_LINE_HEADER
+TRANSACTION_TITLE='المعاملات المتأخرة'
 
 def header_heights(pattern):
     """Approved title/header heights; auto-height rows are summary task tables."""
-    return [row.height or TASK_HEADER_HEIGHT for row in list(pattern.table.rows)[:2]]
+    heights=[row.height or TASK_HEADER_HEIGHT for row in list(pattern.table.rows)[:2]]
+    if builder.table_title(pattern)==TRANSACTION_TITLE:heights[1]=TRANSACTION_HEADER_HEIGHT
+    return heights
 
 def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     """Initial placement only; final visual acceptance must confirm pagination."""
@@ -191,7 +196,7 @@ def build_candidate(args):
     tframe=next(sh for sh in builder.tables(summary[2]))
     headings=[field_key(c.text) for c in tframe.table.rows[1].cells]
     xheaders=[field_key(s) for s in ['رقم المعاملة','موضوع المعاملة','القطاع','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط']]
-    flow(prs,summary[2],[('المعاملات المتأخرة',[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],True,measurements)
+    flow(prs,summary[2],[(TRANSACTION_TITLE,[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],True,measurements)
     generated={};unused=[]
     for kind,patterns,sections in [('task',task_patterns,td),('project',project_patterns,pd)]:
         seed=patterns[0];pattern=builder.detail_tables(seed,kind)[0]

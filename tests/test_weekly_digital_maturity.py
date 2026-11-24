@@ -522,6 +522,15 @@ class DigitalMaturityTests(unittest.TestCase):
                              {(weekly_build.TASK_HEADER_HEIGHT,) * 2})
         self.assertEqual(weekly_build.TABLE_GAP, 200000)
 
+    def test_transactions_header_fits_two_lines(self):
+        for master in (digital.MASTER, weekly_build.MASTER):
+            slide = Presentation(master).slides[3]
+            pattern = next(shape for shape in weekly_build.builder.tables(slide)
+                           if weekly_build.builder.table_title(shape) == weekly_build.TRANSACTION_TITLE)
+            title, header = weekly_build.header_heights(pattern)
+            self.assertEqual(title, pattern.table.rows[0].height)
+            self.assertEqual(header, weekly_build.TRANSACTION_HEADER_HEIGHT)
+
     def test_full_digital_model_builds_rtl_tables_and_rejects_disabled_direction(self):
         import contextlib
         import io
