@@ -23,6 +23,7 @@ sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]))
 from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
 from report_common.dates import report_date
+from report_common import header_heights
 
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
@@ -264,13 +265,12 @@ CPI, LINE, PAD = 15.5 * 10 / 11, 14 / 72, 0.12
 MEASURED = {}
 
 # Fixed header row heights (inches) per table type. One-line headers use the
-# weekly-report-master.pptx header rows. A header that wraps to two lines
-# ("تاريخ الإنجاز المخطط", "تاريخ البداية", "تاريخ انشاء المعاملة") needs
-# 0.68 in at 11 pt bold Abar; the master's own 0.52 (projects) and 0.56
-# (transactions) clip the second line in the LibreOffice render.
-TWO_LINE_HEADER = 621792 / EMU     # 0.68 in, checked by rendering
+# weekly-report-master.pptx header rows. The task and two-line header values
+# are shared with the consolidated deck; report_common/header_heights.py
+# explains where each number comes from.
+TWO_LINE_HEADER = header_heights.TWO_LINE_HEADER / EMU     # 0.68 in
 HEADER_HEIGHT = {
-    'tasks': 439881 / EMU,         # 0.48 in, master summary task tables
+    'tasks': header_heights.TASK_HEADER / EMU,  # 0.48 in, master summary task tables
     'updates': 283509 / EMU,       # 0.31 in, master أبرز التحديثات / التحديات
     'tasks_dated': TWO_LINE_HEADER,  # task tables with تاريخ الإنجاز المخطط
     'projects': TWO_LINE_HEADER,

@@ -13,6 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as builder
 from report_common import status_styles
+from report_common import header_heights as shared_heights
 from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
 from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP
@@ -23,14 +24,11 @@ from weekly_artwork import place_table_copy, prepare_navigation
 
 def remove(shape):shape._element.getparent().remove(shape._element)
 
-# Title and header row heights of the summary task tables in the approved
-# masters (frame 1203960 minus the 324198 body row, split over the two rows).
-# The masters leave these rows auto-height; طلبات الدعم uses the same value.
-TASK_HEADER_HEIGHT=439881
-# The transactions header wraps to two lines; the master's 0.557 in (0.46 in
-# on the digital master) clips the second one. 0.68 in matches the sector
-# split's TWO_LINE_HEADER, checked by rendering.
-TRANSACTION_HEADER_HEIGHT=621792
+# Header heights live in report_common/header_heights.py with the reasons for
+# each value. The summary task tables are auto-height in the masters, and the
+# transactions header wraps to two lines, so both get the shared fixed heights.
+TASK_HEADER_HEIGHT=shared_heights.TASK_HEADER
+TRANSACTION_HEADER_HEIGHT=shared_heights.TWO_LINE_HEADER
 TRANSACTION_TITLE='المعاملات المتأخرة'
 
 def header_heights(pattern):
