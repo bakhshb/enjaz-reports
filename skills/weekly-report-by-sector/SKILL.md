@@ -63,7 +63,13 @@ table (which omits sector). Use the **final** `المعاملات` Excel summary
 
 same reporting week. The splitter matches all five visible transaction fields to
 
-the Excel row; it stops if a row is missing or matches multiple sectors. If there
+the Excel row; it stops if a row is missing or matches multiple sectors. The two
+
+date fields are compared through `report_common/dates.py` (`report_date`, Hijri
+
+allowed), so a real Excel date cell matches the same date shown as dd-mm-yyyy in
+
+the deck. The other fields are compared as plain text. If there
 
 are no delayed rows, or an older deck includes a sector column, this argument is
 

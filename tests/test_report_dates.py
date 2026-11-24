@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["pandas>=2.2,<3", "openpyxl>=3.1,<4"]
+# dependencies = ["pandas>=2.2,<3", "openpyxl>=3.1,<4", "python-pptx>=1.0.2", "lxml>=5.3"]
 # ///
 """Every report date comes out as dd-mm-yyyy whatever form the export used."""
 
@@ -162,6 +162,36 @@ class BuilderDateTests(unittest.TestCase):
             self.assertIn('one.xlsx row 5', result.stderr)
             self.assertIn('قريبا', result.stderr)
             self.assertFalse(output.exists())
+
+
+class SectorTransactionMatchTests(unittest.TestCase):
+    """The sector splitter joins deck transactions to FINAL.xlsx by date too."""
+
+    def test_real_excel_date_matches_deck_text(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skills/weekly-report-by-sector/scripts'))
+        import split_report as splitter
+        head = ['#', 'رقم المعاملة', 'موضوع المعاملة', 'الجهة الوارد منها المعاملة',
+                'تاريخ إنشاء المعاملة', 'تاريخ الإنجاز المخطط له']
+        with tempfile.TemporaryDirectory() as td:
+            final = Path(td) / 'FINAL.xlsx'
+            wb = Workbook(); ws = wb.active; ws.title = 'المعاملات'
+            ws.append(['رقم المعاملة', 'موضوع المعاملة', 'الجهة الوارد منها المعاملة',
+                       'تاريخ انشاء المعاملة', 'تاريخ الإنجاز المخطط له', 'القطاع'])
+            ws.append([' 4471 ', 'طلب تصريح', 'إمارة منطقة مكة', dt.datetime(2026, 3, 5),
+                       dt.datetime(2026, 12, 11), 'وكالة شؤون الحج'])
+            ws.append(['4472', 'طلب آخر', 'جهة أخرى', '15/3/1448', '16/3/1448', 'وكالة شؤون العمرة'])
+            wb.save(final)
+            self.assertIsInstance(load_workbook(final).active['D2'].value, dt.datetime)
+            trans = [
+                {'head': head, 'row': ['1', '4471', 'طلب تصريح', 'إمارة منطقة مكة', '05-03-2026', '11-12-2026']},
+                {'head': head, 'row': ['2', '4472', 'طلب آخر', 'جهة أخرى', '15-03-1448', '16-03-1448']},
+            ]
+            splitter.attach_transaction_sectors(trans, str(final))
+            self.assertEqual([t['sector'] for t in trans], ['وكالة شؤون الحج', 'وكالة شؤون العمرة'])
+
+            trans = [{'head': head, 'row': ['1', '4471', 'طلب تصريح', 'إمارة منطقة مكة', '06-03-2026', '11-12-2026']}]
+            with self.assertRaisesRegex(ValueError, 'does not match'):
+                splitter.attach_transaction_sectors(trans, str(final))
 
 
 if __name__ == '__main__':
