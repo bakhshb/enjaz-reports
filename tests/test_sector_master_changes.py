@@ -97,6 +97,25 @@ class NavTests(unittest.TestCase):
         self.assertIn(f'{layout.name}: nav tabs are not centred',sector_qa.nav_errors(prs))
 
 
+class HeaderHeightTests(unittest.TestCase):
+    """Sector header heights are fixed per table type."""
+    def test_one_line_headers_use_master_rows(self):
+        prs=Presentation(CLASSIC)
+        def header(title):
+            sh=next(sh for slide in prs.slides for sh in slide.shapes
+                    if sh.has_table and sh.table.cell(0,0).text.strip()==title)
+            rows=list(sh.table.rows)
+            # Summary task tables leave title/header auto-height: they share the rest of the frame.
+            return rows[1].height or (sh.height-sum(r.height or 0 for r in rows))//2
+        for kind,title in [('tasks','المهام المتأخرة'),('updates','أبرز التحديثات')]:
+            self.assertEqual(round(splitter.header_height(kind)*splitter.EMU),header(title),kind)
+
+    def test_two_line_headers_get_room_for_two_lines(self):
+        for kind in ('tasks_dated','projects','transactions'):
+            self.assertEqual(splitter.header_height(kind),splitter.TWO_LINE_HEADER,kind)
+        self.assertAlmostEqual(splitter.TWO_LINE_HEADER,0.68,places=3)
+
+
 class EndToEndTests(unittest.TestCase):
     def test_digital_master_splits_without_preprocessing(self):
         with tempfile.TemporaryDirectory() as directory:

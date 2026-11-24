@@ -11,7 +11,7 @@ from report_common import status_styles, validation
 
 MASTER=Path(__file__).resolve().parents[1]/'assets/weekly-report-master.pptx'
 MASTER_HASH='173d48ace27661a4900cc1d6428826e41515d6d4a764a26385171701ead5d96a'
-TABLE_GAP=90000  # approved small clearance between stacked tables and above the footer
+TABLE_GAP=200000  # clearance between stacked tables and above the footer
 TRANS_FIELDS=('رقم المعاملة','موضوع المعاملة','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط')
 # User confirmed on 2026-09-29 that Monday status colors apply to weekly too.
 # Weekly typography, margins, alignment and borders still come from weekly cells.
