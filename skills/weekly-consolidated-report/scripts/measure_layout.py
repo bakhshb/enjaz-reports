@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["python-pptx>=1.0.2", "lxml>=5.3", "pdfplumber>=0.11"]
+# dependencies = ["openpyxl>=3.1", "python-pptx>=1.0.2", "lxml>=5.3", "pdfplumber>=0.11"]
 # ///
 """Measure a weekly candidate's record rows through LibreOffice.
 

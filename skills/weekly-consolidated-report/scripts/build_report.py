@@ -27,10 +27,17 @@ def remove(shape):shape._element.getparent().remove(shape._element)
 # masters (frame 1203960 minus the 324198 body row, split over the two rows).
 # The masters leave these rows auto-height; طلبات الدعم uses the same value.
 TASK_HEADER_HEIGHT=439881
+# The transactions header wraps to two lines; the master's 0.557 in (0.46 in
+# on the digital master) clips the second one. 0.68 in matches the sector
+# split's TWO_LINE_HEADER, checked by rendering.
+TRANSACTION_HEADER_HEIGHT=621792
+TRANSACTION_TITLE='المعاملات المتأخرة'
 
 def header_heights(pattern):
     """Approved title/header heights; auto-height rows are summary task tables."""
-    return [row.height or TASK_HEADER_HEIGHT for row in list(pattern.table.rows)[:2]]
+    heights=[row.height or TASK_HEADER_HEIGHT for row in list(pattern.table.rows)[:2]]
+    if builder.table_title(pattern)==TRANSACTION_TITLE:heights[1]=TRANSACTION_HEADER_HEIGHT
+    return heights
 
 def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
     """Initial placement only; final visual acceptance must confirm pagination."""
@@ -191,7 +198,7 @@ def build_candidate(args):
     tframe=next(sh for sh in builder.tables(summary[2]))
     headings=[field_key(c.text) for c in tframe.table.rows[1].cells]
     xheaders=[field_key(s) for s in ['رقم المعاملة','موضوع المعاملة','القطاع','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط']]
-    flow(prs,summary[2],[('المعاملات المتأخرة',[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],True,measurements)
+    flow(prs,summary[2],[(TRANSACTION_TITLE,[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],True,measurements)
     generated={};unused=[]
     for kind,patterns,sections in [('task',task_patterns,td),('project',project_patterns,pd)]:
         seed=patterns[0];pattern=builder.detail_tables(seed,kind)[0]
