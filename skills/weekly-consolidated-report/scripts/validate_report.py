@@ -3,14 +3,14 @@
 # dependencies = ["openpyxl>=3.1", "python-pptx>=1.0.2", "lxml>=5.3", "pdfplumber>=0.11"]
 # ///
 """Read-only weekly source reconciliation; visual acceptance is a separate step."""
-import argparse, collections, re, sys
+import argparse, collections, sys
 from pathlib import Path
 from pptx import Presentation
 from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers, validation, status_styles
-from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom, SUMMARY_SIZES
+from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom, SUMMARY_SIZES, task_source
 
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
@@ -189,9 +189,9 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 if headers!=[c.text for c in pattern.rows[1].cells]:errors.append('Detail headers changed')
                 section=title
                 if kind=='task':
-                    match=re.fullmatch(r'تفاصيل المهام \((.*)\)',title)
-                    if not match:errors.append('Task section title missing')
-                    section=match.group(1) if match else title
+                    source=task_source(title)
+                    if source is None:errors.append('Task section title missing')
+                    section=source if source is not None else title
                 for row in rows[2:]:actual[kind].append([section,*detail_row(row)])
                 for row in list(table.rows)[2:]:
                     cell=row.cells[4];status=status_styles.canonical(cell.text)

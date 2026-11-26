@@ -37,6 +37,11 @@ DIGITAL_MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-dig
 TYPOGRAPHY = '11pt-suhail-paragraph-updates-v3'
 
 
+def points(found, si, shape_id, row, fallback):
+    """A measured row height in points, or the declared `fallback` (EMU) when the row has no text."""
+    return found.get((si, shape_id, row), fallback) / PT
+
+
 def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest().upper()
 
@@ -74,28 +79,27 @@ def measure(report, tasks, suhail, transactions, template=None, digital_pdf=None
                           [r.height for r in list(table.rows)[2:]]))
             targets.append((si, sh.shape_id, rows))
     measured = measure_rows(report, targets)
+    digital_summary = [(si, sh) for si, _, sh in digital if len(sh.table.columns) == 3]
     summary_targets = [(si, sid, rows) for title, si, sid, rows, *_ in order if title in SUMMARY_TITLES]
-    summary_targets += [(si, sh.shape_id, range(2, len(sh.table.rows)))
-                        for si, _, sh in digital if len(sh.table.columns) == 3]
+    summary_targets += [(si, sh.shape_id, range(2, len(sh.table.rows))) for si, sh in digital_summary]
     smaller = measure_sizes(report, summary_targets)
     tables = {}
     for title, si, shape_id, rows, header, declared in order:
         entry = tables.setdefault(title, {'header': [h / PT for h in header], 'body': []})
         for row, fallback in zip(rows, declared):
-            entry['body'].append(measured.get((si, shape_id, row), fallback) / PT)
+            entry['body'].append(points(measured, si, shape_id, row, fallback))
             if title in SUMMARY_TITLES:
                 for size, found in smaller.items():
-                    entry.setdefault('sizes', {}).setdefault(size, []).append(found.get((si, shape_id, row), fallback) / PT)
+                    entry.setdefault('sizes', {}).setdefault(size, []).append(points(found, si, shape_id, row, fallback))
     if sha256(report) != hashes['report']:
         raise ValueError('Measuring changed the source presentation')
     result = {'typography': TYPOGRAPHY, 'hashes': hashes, 'tables': tables,
               'visualAcceptance': 'pending'}
     if digital_pdf:
         result['digital'] = digital_tables(digital, measured)
-        summary = [(si, sh) for si, _, sh in digital if len(sh.table.columns) == 3]
         result['digital']['summary_sizes'] = {
-            size: [found.get((si, sh.shape_id, r), sh.table.rows[r].height) / PT
-                   for si, sh in summary for r in range(2, len(sh.table.rows))]
+            size: [points(found, si, sh.shape_id, r, sh.table.rows[r].height)
+                   for si, sh in digital_summary for r in range(2, len(sh.table.rows))]
             for size, found in smaller.items()}
     return result
 
@@ -120,9 +124,8 @@ def measure_sizes(report, targets):
 
 def digital_tables(found, measured):
     """Group the measured digital rows by what they hold, in reviewed order."""
-    from digital_maturity import split_title, is_continuation, _detail_columns, NOTE_TABLES
-    height = lambda si, shape, row: measured.get((si, shape.shape_id, row), shape.table.rows[row].height) / PT
-    keys = {title: key for key, title, _ in NOTE_TABLES}
+    from digital_maturity import split_title, is_continuation, _detail_columns, NOTE_KEYS as keys
+    height = lambda si, shape, row: points(measured, si, shape.shape_id, row, shape.table.rows[row].height)
     result = {'summary': [], 'sectors': {}}
     sector = None
     for si, slide, shape in found:

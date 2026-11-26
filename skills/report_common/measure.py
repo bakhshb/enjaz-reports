@@ -23,11 +23,11 @@ from pptx import Presentation
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from report_common.render import export_pdf
 from report_common.pptx_helpers import add_slide
+from report_common.table_typography import DEFAULT_INSET
 
 EMU = 914400
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 PROBE_TOP = int(0.25 * EMU)  # the probe row starts here, anchored to the top
-DEFAULT_INSET = 45720      # DrawingML default top/bottom cell margin (0.05")
 MIN_ROW = int(0.22 * EMU)  # one 11 pt line with insets
 
 

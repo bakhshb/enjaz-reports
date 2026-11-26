@@ -16,7 +16,6 @@ PDF inputs, so the messages match what the Minister will see. The output is:
 """
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -26,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers
 from validate_report import SPECS
+from weekly_data import COVER_DATE_ID, task_source
+from update_format import update_parts
 
 # Number–noun agreement: (one, two, 3-10, 11+) for each noun and each status.
 NOUNS = {
@@ -48,8 +49,6 @@ LABELS = {'task': 'المهام', 'project': 'مشاريع سهيل', 'transacti
 # Statuses that close the counts sentence with «ولا توجد …» when they are zero.
 NEGATIVE = {'task': ('متأخرة', 'معلقة'), 'project': ('متأخرة', 'لم تبدأ'), 'transaction': ('متأخرة',)}
 NEGATIVE_TAIL = {'task': ' ضمن جدول متابعة المهام', 'project': '', 'transaction': ''}
-NEGATIVE_WORDS = {'متأخرة': 'متأخرة', 'معلقة': 'معلقة', 'لم تبدأ': 'لم تبدأ'}
-MONTHS = helpers.MONTHS
 DISCLAIMER = ('وتعكس النسب أدناه تقدم استكمال المتطلبات والأدلة، بما يشمل الجاهزية وتحديد تواريخ التنفيذ '
               'والأعمال المنجزة، ولا تمثل نتيجة التقييم النهائي.')
 EMPTY = {
@@ -93,7 +92,7 @@ def counts_sentence(kind, total, statuses):
     sentence = f'بلغ إجمالي {label} {counted(total, kind)}'
     if parts:
         sentence += '، منها ' + ' و'.join(parts)
-    zero = [NEGATIVE_WORDS[s] for s, v in statuses if s in NEGATIVE[kind] and not v]
+    zero = [s for s, v in statuses if s in NEGATIVE[kind] and not v]
     if zero:
         sentence += f'، ولا توجد {PLURALS[kind]} ' + ' أو '.join(zero) + NEGATIVE_TAIL[kind]
     return sentence + '.'
@@ -105,12 +104,8 @@ def sentence(text):
     return text if not text or text[-1] in '.!؟:' else text + '.'
 
 
-def _texts(slide):
-    return helpers.slide_texts(slide)
-
-
 def _kpis(prs, label, ids):
-    slide = next(s for s in prs.slides if label in _texts(s))
+    slide = helpers.find_slide_with_text(prs, label)
     return [int(helpers.shape_by_id(slide, sid).text.strip() or 0) for sid in ids]
 
 
@@ -132,15 +127,13 @@ def _summary_tables(prs, titles, header):
 
 
 def _flat(text):
-    """One paragraph: drop a leading «تاريخ التحديث …» line and join bullet lines."""
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-    if lines and lines[0].startswith('تاريخ التحديث'):
-        lines = lines[1:]
-    return '، '.join(l.rstrip('.،') for l in lines)
+    """One paragraph: drop the leading «تاريخ التحديث …» label and date, and join the update items."""
+    lines = [value[date_end:].strip() for value, date_end, _ in update_parts(text)]
+    return '، '.join(line.rstrip('.،') for line in lines if line)
 
 
 def report_date(prs):
-    return helpers.shape_by_id(prs.slides[0], 19).text.strip()
+    return helpers.shape_by_id(prs.slides[0], COVER_DATE_ID).text.strip()
 
 
 def facts(path):
@@ -154,9 +147,9 @@ def facts(path):
     sources = []
     for slide in prs.slides:
         for shape in helpers.detail_tables(slide, 'task'):
-            found = re.fullmatch(r'تفاصيل المهام \((.*)\)', helpers.table_title(shape))
-            if found and found.group(1) not in sources:
-                sources.append(found.group(1))
+            source = task_source(helpers.table_title(shape))
+            if source is not None and source not in sources:
+                sources.append(source)
     result = {
         'date': report_date(prs),
         'task_sources': sources,
@@ -173,41 +166,37 @@ def facts(path):
     except (ValueError, ImportError):
         return result
     metrics = {axis: helpers.shape_by_id(slide, ids[1]).text.strip() for axis, ids in digital.CARDS.items()}
-    chart = helpers.shape_by_id(slide, 93).chart
+    chart = helpers.shape_by_id(slide, digital.SECTOR_CHART_ID).chart
     names = [str(c) for c in chart.plots[0].categories]
     series = {str(s.name): list(s.values) for s in chart.plots[0].series}
-    notes = {s.name: s.text_frame.text.strip() for s in slide.shapes if s.name.startswith('Digital sector note ')}
+    notes = digital.note_boxes(slide)
     sectors = []
     for index, name in enumerate(names):
         values = {axis: series[label][index] for axis, label in zip(digital.AXES, digital.LABELS)}
-        sectors.append({'name': name, 'note': notes.get(f'Digital sector note {index + 1}'),
+        sectors.append({'name': name, 'note': notes.get(digital.NOTE_BOX.format(index + 1)),
                         'metrics': {a: (round(v * 100) if v is not None else None) for a, v in values.items()}})
-    summary = next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
-    details, rows = {}, {}
-    for detail in digital.detail_slides(prs):
-        title = digital.split_title(digital._detail_table(detail).cell(0, 0).text)[0]
-        entry = details.setdefault(title, {'headings': [], 'updates': [], 'challenges': [], 'rows': {}})
-        cards = {axis: helpers.shape_by_id(detail, sid).text_frame.paragraphs[1].text
-                 for axis, sid in digital.DETAIL_CARD_IDS.items()}
-        rows.setdefault(title, {'cards': cards, 'rows': []})
-        for row in digital._slide_rows(digital._detail_table(detail)):
-            if not digital.is_continuation(row):
-                rows[title]['rows'].append(row)
-            if digital.is_heading(row) and not digital.is_continuation(row):
+    summary = digital.summary_table_shape(slide)
+    details, sector_rows = {}, {}
+    for detail in map(digital._DetailSlide, digital.detail_slides(prs)):
+        entry = details.setdefault(detail.base, {'headings': [], 'updates': [], 'challenges': [], 'rows': {}})
+        rows = sector_rows.setdefault(detail.base, {'cards': {axis: detail.card(axis) for axis in digital.AXES},
+                                                    'rows': []})['rows']
+        for row in detail.rows:
+            if digital.is_continuation(row):
+                continue
+            rows.append(row)
+            if digital.is_heading(row):
                 entry['headings'].append(row[0])
-        for table in digital._note_tables(detail):
-            key = 'updates' if table.cell(0, 0).text.strip() == digital.UPDATES_TABLE[0] else 'challenges'
-            entry[key].extend(digital._plain(r.cells[1].text).strip() for r in list(table.rows)[2:])
-    # Requirement rows by perspective, with the same heading styles the slides use.
-    for title, sector in rows.items():
-        axes = digital.heading_axes(sector)
-        current = None
-        for index, row in enumerate(sector['rows']):
-            if index in axes:
-                current = axes[index]
-            elif current:
+        for table in detail.notes:
+            entry[digital.NOTE_KEYS[table.cell(0, 0).text.strip()]].extend(
+                digital._plain(r.cells[1].text).strip() for r in list(table.rows)[2:])
+    # Requirement rows by perspective, with the same perspective the slides give each row.
+    for title, sector in sector_rows.items():
+        for index, axis in digital.row_axes(sector).items():
+            row = sector['rows'][index]
+            if axis and not digital.is_heading(row):
                 basis, achievement, task, _code = row
-                details[title]['rows'].setdefault(current, []).append(
+                details[title]['rows'].setdefault(axis, []).append(
                     {'task': task, 'achievement': achievement, 'basis': basis})
     result['digital'] = {
         'metrics': metrics, 'labels': dict(zip(digital.AXES, digital.LABELS)), 'sectors': sectors,

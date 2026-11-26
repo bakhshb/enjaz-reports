@@ -4,6 +4,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.oxml.ns import qn
 
 TABLE_PT = 11
+DEFAULT_INSET = 45720  # DrawingML default top/bottom cell margin (0.05 in)
 # Every approved master writes its table text in Abar Mid. A run without its
 # own typeface falls back to the theme font (Aptos/Arial), so every run gets it.
 TABLE_FONT = 'Abar Mid'

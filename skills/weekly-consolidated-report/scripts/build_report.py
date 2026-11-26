@@ -16,7 +16,7 @@ from report_common import status_styles
 from report_common import header_heights as shared_heights
 from report_common.table_typography import set_table_sizes, set_table_directions, apply_table
 from report_common.package_tools import reachable_parts
-from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP, emu, fit_summary, measured_rows
+from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP, emu, fit_summary, measured_rows, COVER_DATE_ID, TASK_DETAIL_TITLE
 
 from update_format import format_update
 from report_common.update_format import format_table_updates
@@ -212,7 +212,7 @@ def build_candidate(args):
                        if p._p.find('./'+qn('a:pPr')+'/'+qn('a:buChar')) is not None),None)
 
     date=dt.datetime.now().astimezone().date()
-    builder.set_text(builder.shape_by_id(slides[0],19),f'{date.day} {builder.MONTHS[date.month-1]} {date.year}')
+    builder.set_text(builder.shape_by_id(slides[0],COVER_DATE_ID),f'{date.day} {builder.MONTHS[date.month-1]} {date.year}')
     chart_specs=[]
     for sl,kpis,ids,records,statuses,chart_name in [
         (summary[0],tk,[11,14,16,7,6],tc,['مكتملة','على المخطط','متأخر','معلق'],'chart1.xml'),
@@ -239,7 +239,7 @@ def build_candidate(args):
     for kind,patterns,sections in [('task',task_patterns,td),('project',project_patterns,pd)]:
         seed=patterns[0];pattern=builder.detail_tables(seed,kind)[0]
         # Remove any additional sample tables before filling a single flowing stream.
-        seq=[((f'تفاصيل المهام ({title})' if kind=='task' else title),[row[:6] for row in rows],pattern) for title,rows in sections]
+        seq=[((TASK_DETAIL_TITLE.format(title) if kind=='task' else title),[row[:6] for row in rows],pattern) for title,rows in sections]
         generated[kind]=flow(prs,seed,seq,measurements=measurements)
         if not any(rows for _,rows in sections):generated[kind]=[]
         for sl in generated[kind]:

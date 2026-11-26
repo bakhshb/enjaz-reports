@@ -73,6 +73,9 @@ CHALLENGE_HEADERS = ('التحدي', 'التحديث')
 UPDATES_TABLE = ('أبرز التحديثات', 'التحديث')
 CHALLENGES_TABLE = ('التحديات', 'التحدي')
 NOTE_TABLES = (('updates',) + UPDATES_TABLE, ('challenges',) + CHALLENGES_TABLE)
+NOTE_KEYS = {title: key for key, title, _ in NOTE_TABLES}  # «أبرز التحديثات» → updates, «التحديات» → challenges
+SECTOR_CHART_ID = 93  # the sector bar chart on the digital summary slide
+NOTE_BOX = 'Digital sector note {}'  # gray bar for a sector shown with a note, numbered from 1
 SUMMARY_TABLE = UPDATES_TABLE
 TASK_HEADERS = ('المهمة', 'المؤشر')
 CARD_STATUSES = ('معلق', 'لا ينطبق')
@@ -302,8 +305,13 @@ def is_continuation(row):
     return is_heading(row) and row[0].endswith(CONTINUATION)
 
 
+def last_heading_index(rows):
+    return next((i for i in range(len(rows) - 1, -1, -1) if is_heading(rows[i])), None)
+
+
 def last_heading(rows):
-    return next((row[0] for row in reversed(rows) if is_heading(row)), None)
+    index = last_heading_index(rows)
+    return None if index is None else rows[index][0]
 
 
 def _card_box(axis, band):
@@ -626,6 +634,16 @@ def digital_slide(prs):
     return matches[0]
 
 
+def summary_table_shape(slide):
+    """The «أبرز التحديثات» table of the digital summary slide (its only 3-column table)."""
+    return next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+
+
+def note_boxes(slide):
+    """The sector note bars on the digital summary slide, by shape name."""
+    return {sh.name: sh.text_frame.text.strip() for sh in slide.shapes if sh.name.startswith(NOTE_BOX.format(''))}
+
+
 def calculation_note(slide):
     note = helpers.shape_by_id(slide, CALCULATION_NOTE_ID)
     if ' '.join(note.text.split()) != ' '.join(CALCULATION_NOTE.split()):
@@ -826,6 +844,15 @@ class DetailPattern:
         return sum(GAP + self.challenges_height(items) for _, _, items in notes)
 
 
+def row_axes(sector):
+    """The perspective of every row of a sector by index: a heading's own, a record's that of its heading."""
+    headings, current, axes = heading_axes(sector), None, {}
+    for index in range(len(sector['rows'])):
+        current = headings.get(index, current)
+        axes[index] = current
+    return axes
+
+
 def sector_heights(pattern, sector, measured=None):
     """Row heights (EMU) for a sector's records and its update/challenge items.
 
@@ -864,12 +891,11 @@ def paginate_sector(pattern, sector, measured=None):
                   for key, title, header in NOTE_TABLES if sector.get(key)
                   for items in [list(sector[key])]]
     notes_height = sum(GAP + pattern.challenge_fixed + sum(item_heights) for *_, item_heights in challenges)
-    heading_index = lambda end: next((i for i in range(end - 1, -1, -1) if is_heading(rows[i])), None)
     pages, index = [], 0
     while index < len(rows):
         used = pattern.title_height + pattern.header_height
         page_rows, page_heights = [], []
-        open_heading = heading_index(index)
+        open_heading = last_heading_index(rows[:index])
         if open_heading is not None and not is_heading(rows[index]):
             page_rows.append([f'{rows[open_heading][0]} {CONTINUATION}', '', '', ''])
             page_heights.append(row_heights[open_heading])
@@ -980,23 +1006,16 @@ def populate_details(prs, data, measured=None):
         slides.append(current)
     targets = iter(slides)
     for sector, pages in layout:
-        styles = heading_axes(sector)
+        styles = row_axes(sector)
         done = 0
         for number, (rows, heights, challenges) in enumerate(pages, 1):
             slide = next(targets)
             _set_cards(slide, sector['cards'])
             title = sector['title'] if len(pages) == 1 else f'{sector["title"]} ({number}/{len(pages)})'
-            # A continuation heading repeats the style of the heading it continues.
-            continued = rows and is_continuation(rows[0])
-            axes, last = {}, None
-            for position in range(len(rows)):
-                source = done + position - (1 if continued else 0)
-                if position == 0 and continued:
-                    last = styles[max(i for i in styles if i < done)]
-                elif source in styles:
-                    last = styles[source]
-                axes[position] = last
-            done += len(rows) - (1 if continued else 0)
+            # A continuation heading takes the perspective of the record it precedes.
+            shift = 1 if rows and is_continuation(rows[0]) else 0
+            axes = {position: styles[done + max(position - shift, 0)] for position in range(len(rows))}
+            done += len(rows) - shift
             shape = _fill_detail_table(slide, pattern, title, rows, heights, axes)
             for note in challenges:
                 shape = _fill_challenge_table(slide, pattern, shape.top + shape.height + GAP, note)
@@ -1026,7 +1045,7 @@ def populate(prs, data, measured=None, sizes=None):
         track, fill = (helpers.shape_by_id(slide, sid) for sid in (track_id, fill_id))
         fill.left = track.left
         fill.width = round(track.width * value / 100)
-    sector_chart = helpers.shape_by_id(slide, 93)
+    sector_chart = helpers.shape_by_id(slide, SECTOR_CHART_ID)
     _chart(sector_chart, [s['name'] for s in data['sectors']],
            [(label, [_chart_number(s['metrics'][axis]/100) if s['metrics'][axis] is not None else None
                      for s in data['sectors']])
@@ -1039,7 +1058,7 @@ def populate(prs, data, measured=None, sizes=None):
             left = sector_chart.left
             top = sector_chart.top + round(155000 + (5-len(data['sectors']))*70000 + index * row_spacing)
             box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, 4900000, 155000)
-            box.name = f'Digital sector note {index+1}'
+            box.name = NOTE_BOX.format(index + 1)
             box.fill.solid()
             box.fill.fore_color.rgb = RGBColor(229, 227, 224)
             box.line.fill.background()
@@ -1050,7 +1069,7 @@ def populate(prs, data, measured=None, sizes=None):
                 paragraph.font.color.rgb = RGBColor(55, 55, 55)
                 for run in paragraph.runs:
                     set_font(run._r.get_or_add_rPr())
-    shape = next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+    shape = summary_table_shape(slide)
     table = shape.table
     set_cell_exact(table.cell(0, 0), SUMMARY_TABLE[0])
     set_cell_exact(table.cell(1, 2), SUMMARY_TABLE[1])
@@ -1208,21 +1227,21 @@ def check(prs, report_path, data, errors, master=None):
         validation.chart_metrics(report_path, str(chart.chart.part.partname).lstrip('/'),
                                  [['المنجز', _chart_number(value)], ['المتبقي', _chart_number(100-value)]],
                                  ['نسبة الإنجاز'], errors)
-    sector_chart = helpers.shape_by_id(slide, 93)
+    sector_chart = helpers.shape_by_id(slide, SECTOR_CHART_ID)
     if any(series.data_labels.number_format != '0%' for series in sector_chart.chart.series):
         errors.append('Digital-maturity sector labels must display percentages')
     rows = [[s['name'], *[_chart_number(s['metrics'][axis]/100) if s['metrics'][axis] is not None else None
                          for axis in AXES]] for s in data['sectors']]
     validation.chart_metrics(report_path, str(sector_chart.chart.part.partname).lstrip('/'), rows, LABELS, errors)
-    table = next(sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+    table = summary_table_shape(slide).table
     actual = [[c.text for c in row.cells] for row in list(table.rows)[2:]]
     expected = [[str(i), u['perspective'], u['text']] for i, u in enumerate(data['updates'], 1)]
     if actual != expected:
         errors.append('Digital-maturity summary updates differ from the reviewed data')
     if (table.cell(0, 0).text, table.cell(1, 2).text) != SUMMARY_TABLE:
         errors.append('Digital-maturity summary table must be titled «أبرز التحديثات»')
-    notes = {s.name: s.text for s in slide.shapes if s.name.startswith('Digital sector note ')}
-    expected_notes = {f'Digital sector note {i}': s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
+    notes = note_boxes(slide)
+    expected_notes = {NOTE_BOX.format(i): s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
     if notes != expected_notes:
         errors.append('Digital-maturity sector notes differ from reviewed PDF data')
     check_details(prs, data, errors, master)

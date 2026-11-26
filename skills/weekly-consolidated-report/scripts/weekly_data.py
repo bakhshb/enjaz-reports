@@ -1,5 +1,6 @@
 """Weekly-only template, transaction schema and approved status mapping."""
 import math
+import re
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -9,6 +10,7 @@ from pptx.dml.color import RGBColor
 from pptx import Presentation
 from report_common import pptx_helpers as helpers
 from report_common import status_styles, validation
+from report_common.table_typography import DEFAULT_INSET
 
 MASTER=Path(__file__).resolve().parents[1]/'assets/weekly-report-master.pptx'
 MASTER_HASH='173d48ace27661a4900cc1d6428826e41515d6d4a764a26385171701ead5d96a'
@@ -18,11 +20,19 @@ TABLE_GAP=200000  # clearance between stacked tables and above the footer
 # half-point steps down to this size; below it the build stops instead of
 # continuing the summary on another slide.
 SUMMARY_SIZES=(11,10.5,10,9.5,9,8.5,8)
-CELL_INSETS=2*45720  # default top+bottom cell margins; they do not scale with the font
+CELL_INSETS=2*DEFAULT_INSET  # top+bottom cell margins; they do not scale with the font
 PT=12700  # EMU per point; layout files store row heights in points
 
 def emu(points):
     return math.ceil(points*PT)
+COVER_DATE_ID=19  # cover text box holding the report date
+TASK_DETAIL_TITLE='تفاصيل المهام ({})'
+
+def task_source(title):
+    """The task source named in a «تفاصيل المهام (…)» table title, or None."""
+    found=re.fullmatch(re.escape(TASK_DETAIL_TITLE).replace(r'\{\}','(.*)'),title)
+    return found.group(1) if found else None
+
 TRANS_FIELDS=('رقم المعاملة','موضوع المعاملة','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط')
 # User confirmed on 2026-09-29 that Monday status colors apply to weekly too.
 # Weekly typography, margins, alignment and borders still come from weekly cells.
