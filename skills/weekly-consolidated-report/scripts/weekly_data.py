@@ -1,4 +1,5 @@
 """Weekly-only template, transaction schema and approved status mapping."""
+import math
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -12,6 +13,12 @@ from report_common import status_styles, validation
 MASTER=Path(__file__).resolve().parents[1]/'assets/weekly-report-master.pptx'
 MASTER_HASH='173d48ace27661a4900cc1d6428826e41515d6d4a764a26385171701ead5d96a'
 TABLE_GAP=200000  # clearance between stacked tables and above the footer
+# Each summary (tasks, Suhail, transactions, digital experience) stays on its one
+# slide. When its measured 11 pt tables do not fit, the table text is reduced in
+# half-point steps down to this size; below it the build stops instead of
+# continuing the summary on another slide.
+SUMMARY_SIZES=(11,10.5,10,9.5,9,8.5,8)
+CELL_INSETS=2*45720  # default top+bottom cell margins; they do not scale with the font
 TRANS_FIELDS=('رقم المعاملة','موضوع المعاملة','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط')
 # User confirmed on 2026-09-29 that Monday status colors apply to weekly too.
 # Weekly typography, margins, alignment and borders still come from weekly cells.
@@ -95,3 +102,27 @@ def transaction_data(path):
             raise ValueError('Delayed transactions differ from sector counts')
         return kpis,chart,records
     finally:wb.close()
+
+def scaled_height(height,size):
+    """Upper bound for a measured 11 pt row set at `size` pt.
+
+    Smaller text wraps into the same number of lines or fewer, and each line is
+    `size/11` as tall, so the text part of the row shrinks at least in that
+    ratio. The cell insets stay the same.
+    """
+    text=max(0,height-CELL_INSETS)
+    return CELL_INSETS+math.ceil(text*size/11)
+
+def summary_size(fixed,bodies,available):
+    """Largest approved summary size at which the rows fit `available` (EMU).
+
+    `fixed` are title/header heights at 11 pt (one line each, scaled).
+    `bodies(size)` returns the measured body heights at that size, or None
+    when that size was not measured; the scaled 11 pt bound is used then.
+    Returns ``(size, heights)`` or ``(None, None)``.
+    """
+    for size in SUMMARY_SIZES:
+        body=bodies(size)
+        heights=[scaled_height(h,size) for h in fixed]+body
+        if sum(heights)<=available:return size,heights
+    return None,None

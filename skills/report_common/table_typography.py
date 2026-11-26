@@ -41,7 +41,7 @@ def rtl_table(table):
 def set_cell_size(cell, font_pt=TABLE_PT):
     for node in cell._tc.iter():
         if node.tag in {qn('a:rPr'), qn('a:defRPr'), qn('a:endParaRPr')}:
-            node.set('sz', str(font_pt * 100))
+            node.set('sz', str(round(font_pt * 100)))
     for paragraph in cell.text_frame.paragraphs:
         paragraph.font.size = Pt(font_pt)
         for run in paragraph.runs:
@@ -84,11 +84,25 @@ def set_table_sizes(prs, agenda_pt=TABLE_PT):
 def set_table_directions(prs):
     for table in all_tables(prs): rtl_table(table)
 
-def check_table_typography(prs, errors, agenda_pt=TABLE_PT):
+def check_table_typography(prs, errors, agenda_pt=TABLE_PT, reduced=None):
+    """Check direction, alignment and size of every table.
+
+    ``reduced`` maps a table element (``table._tbl``) to the sizes it may use
+    instead of the approved size: a summary that had to shrink to stay on one
+    slide. Such a table must still use one size throughout.
+    """
+    reduced = reduced or {}
     for table in all_tables(prs):
         if table._tbl.tblPr.get('rtl') not in ('1', 'true'):
             errors.append('Table direction must be RTL')
         font_pt=table_font_size(table,agenda_pt)
+        allowed = reduced.get(table._tbl)
+        if allowed:
+            used = {run.font.size.pt for row in table.rows for cell in row.cells
+                    for p in cell.text_frame.paragraphs for run in p.runs
+                    if run.text and run.font.size is not None}
+            if len(used) == 1 and used <= set(allowed):
+                font_pt = used.pop()
         headers = [c.text for c in table.rows[1].cells] if len(table.rows)>1 else []
         for i,row in enumerate(table.rows):
             for j,cell in enumerate(row.cells):

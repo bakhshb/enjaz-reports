@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["openpyxl>=3.1", "python-pptx>=1.0.2", "lxml>=5.3"]
+# dependencies = ["openpyxl>=3.1", "python-pptx>=1.0.2", "lxml>=5.3", "pdfplumber>=0.11"]
 # ///
 """Read-only weekly source reconciliation; visual acceptance is a separate step."""
 import argparse, collections, re, sys
@@ -10,7 +10,7 @@ from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers, validation, status_styles
-from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom
+from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom, SUMMARY_SIZES
 
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
@@ -43,7 +43,14 @@ def reference_row(pattern,ri,row,structural):
     body=list(pattern.rows)[2:]
     return next((r for r in body if r.cells[0].span_width==row.cells[0].span_width),body[0])
 
-def check_table_style(table,pattern,errors,structural=False):
+def table_size(table,reduced):
+    """The size a table must use: 11 pt, or one smaller summary size it shrank to."""
+    if table._tbl not in reduced:return TABLE_PT
+    used={run.font.size.pt for row in table.rows for cell in row.cells for p in cell.text_frame.paragraphs
+          for run in p.runs if run.text.strip() and run.font.size is not None}
+    return used.pop() if len(used)==1 and used<=set(reduced[table._tbl]) else TABLE_PT
+
+def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT):
     if [c.width for c in table.columns]!=[c.width for c in pattern.columns]:errors.append('Table column widths changed')
     for ri,row in enumerate(table.rows):
         reference=reference_row(pattern,ri,row,structural)
@@ -51,14 +58,16 @@ def check_table_style(table,pattern,errors,structural=False):
             base=reference.cells[ci]
             is_status=len(table.columns)==6 and ri>=2 and ci==4
             if not is_status and (cell.margin_left,cell.margin_right,cell.margin_top,cell.margin_bottom)!=(base.margin_left,base.margin_right,base.margin_top,base.margin_bottom):errors.append('Table cell margins changed')
-            fonts={font_signature(run) for p in base.text_frame.paragraphs for run in p.runs if run.text.strip()}
+            # Family and script font come from the template; the size is checked on its own.
+            face=lambda run:(font_signature(run)[0],font_signature(run)[2])
+            fonts={face(run) for p in base.text_frame.paragraphs for run in p.runs if run.text.strip()}
             # Empty reference cells retain formatting in their first run.
-            if not fonts:fonts={font_signature(run) for p in base.text_frame.paragraphs for run in p.runs}
-            if not fonts:fonts={(None,TABLE_PT,None)}
+            if not fonts:fonts={face(run) for p in base.text_frame.paragraphs for run in p.runs}
+            if not fonts:fonts={(None,None)}
             for p in cell.text_frame.paragraphs:
                 for run in p.runs:
-                    if run.text.strip() and (run.font.size is None or run.font.size.pt!=TABLE_PT):errors.append('Table font size must be 11 pt')
-                    if run.text.strip() and font_signature(run) not in fonts:errors.append('Table font differs from weekly template: '+run.text[:25])
+                    if run.text.strip() and (run.font.size is None or run.font.size.pt!=size):errors.append(f'Table font size must be {size:g} pt')
+                    if run.text.strip() and face(run) not in fonts:errors.append('Table font differs from weekly template: '+run.text[:25])
 
 def check_navigation(prs,errors):
     slides=list(prs.slides)
@@ -114,7 +123,10 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     errors=[];validation.package(report,errors)
     final=Presentation(report);master=Presentation(template);set_table_sizes(master)
     set_table_directions(master)
-    check_table_typography(final,errors)
+    # A summary keeps its one slide by shrinking its table text (never by a continuation slide).
+    reduced={sh.table._tbl:SUMMARY_SIZES for sl in final.slides if any(x.has_chart for x in sl.shapes)
+             for sh in sl.shapes if sh.has_table}
+    check_table_typography(final,errors,reduced=reduced)
     if (final.slide_width,final.slide_height)!=(master.slide_width,master.slide_height):errors.append('Slide dimensions changed')
     tk,tc,ts,td=helpers.task_data(tasks);pk,pc,ps,pd=helpers.suhail_data(suhail);xk,xc,xd=transaction_data(transactions)
     styles={kind:approved_styles(master,kind) for kind in ('task','project')}
@@ -213,7 +225,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 summaries[title].extend([[row[columns.index(i)] for i in range(4)] for row in rows[2:]])
                 if title in SUMMARY_UPDATE_TITLES:update_cells[title].extend(row.cells[update_column(table)] for row in list(table.rows)[2:])
             else:errors.append('Unexpected table: '+title);continue
-            check_table_style(table,pattern,errors)
+            check_table_style(table,pattern,errors,size=table_size(table,reduced))
     for kind,sections in expected_sections.items():
         expected=[]
         for section,records in sections:
