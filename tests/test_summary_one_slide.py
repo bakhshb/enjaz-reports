@@ -18,7 +18,8 @@ sys.path.insert(0, str(ROOT / 'skills'))
 sys.path.insert(0, str(ROOT / 'skills/weekly-consolidated-report/scripts'))
 import build_report as weekly
 from weekly_data import scaled_height, SUMMARY_SIZES
-from report_common.table_typography import apply_table, check_table_typography, set_table_sizes, set_table_directions
+from report_common.table_typography import apply_table, check_table_typography, set_table_sizes, set_table_directions, TABLE_FONT
+from pptx.oxml.ns import qn
 
 PT = 12700
 
@@ -92,6 +93,29 @@ class SummaryOneSlideTests(unittest.TestCase):
         errors = []
         check_table_typography(self.prs, errors, reduced={table._tbl: SUMMARY_SIZES})
         self.assertFalse(any('font size' in e for e in errors), errors)
+
+
+class TableFontTests(unittest.TestCase):
+    def test_every_table_run_uses_abar(self):
+        """26-11-2026: note cells whose master example names no font fell back to the theme font."""
+        prs = Presentation(weekly.MASTER)
+        cell = weekly.builder.tables(prs.slides[1])[0].table.cell(2, 3)
+        for r in list(cell._tc.iter(qn('a:r'))):
+            r.getparent().remove(r)
+        weekly.set_cell_exact(cell, 'ملاحظة بلا خط محدد')
+        set_table_sizes(prs);set_table_directions(prs)
+        for table in (sh.table for sl in prs.slides for sh in sl.shapes if sh.has_table):
+            for r in table._tbl.iter(qn('a:r')):
+                props = r.find(qn('a:rPr'))
+                self.assertEqual([props.find(qn('a:' + k)).get('typeface') for k in ('latin', 'ea', 'cs')], [TABLE_FONT] * 3)
+        errors = []
+        check_table_typography(prs, errors)
+        self.assertFalse(any('must use' in e for e in errors), errors)
+        props = cell.text_frame.paragraphs[0].runs[0]._r.find(qn('a:rPr'))
+        props.find(qn('a:cs')).set('typeface', 'Arial')
+        errors = []
+        check_table_typography(prs, errors)
+        self.assertTrue(any(f'must use {TABLE_FONT}' in e for e in errors))
 
 
 if __name__ == '__main__':

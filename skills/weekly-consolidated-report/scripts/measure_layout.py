@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_common.measure import measure_rows
 from weekly_artwork import is_digital_detail
-from weekly_data import MASTER, SUMMARY_SIZES
+from weekly_data import MASTER, SUMMARY_SIZES, PT
 from report_common.pptx_helpers import TASK_SUMMARY_TITLES, SUHAIL_SUMMARY_TITLES
 from report_common.table_typography import apply_table
 
@@ -35,7 +35,6 @@ SUMMARY_TITLES = set(TASK_SUMMARY_TITLES) | set(SUHAIL_SUMMARY_TITLES) | {'ال�
 
 DIGITAL_MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
 TYPOGRAPHY = '11pt-suhail-paragraph-updates-v3'
-PT = 12700
 
 
 def sha256(path):

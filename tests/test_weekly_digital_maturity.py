@@ -69,13 +69,19 @@ def master_sectors():
     return sectors
 
 
+def drop_title(text):
+    """An update is the statement itself: remove a leading «عنوان قصير:» label from each line."""
+    return '\n'.join(digital.UPDATE_LABEL.sub(lambda m: m.group(0)[-1], line) if (found := digital.UPDATE_LABEL.match(line))
+                     and len(found.group(1).split()) <= 6 else line for line in text.splitlines())
+
+
 def classify_as_source(data):
-    """A minimal review: file each source note under its source table, without task codes."""
+    """A minimal review: file each source note under its source table, without task codes or update titles."""
     strip = lambda text: ' '.join(digital.CODE_IN_TEXT.sub('', text).split())
     for update in data['updates']:
-        update['text'] = strip(update['text'])
+        update['text'] = drop_title(strip(update['text']))
     for sector in data['detail_sectors']:
-        sector['updates'] = [strip(n['text']) for n in sector['source_notes'] if n['title'] == 'أبرز التحديثات']
+        sector['updates'] = [drop_title(strip(n['text'])) for n in sector['source_notes'] if n['title'] == 'أبرز التحديثات']
         sector['challenges'] = [strip(n['text']) for n in sector['source_notes'] if n['title'] == 'التحديات']
 
 
@@ -186,7 +192,7 @@ class LandscapeFixtureTests(unittest.TestCase):
                 text = text.replace(old, new)
             return text
         for update in data['updates']:
-            update['text'] = fix(update['text'])
+            update['text'] = drop_title(fix(update['text']))
         for sector in data['detail_sectors']:
             for note in sector['source_notes']:
                 note['text'] = fix(note['text'])
@@ -358,6 +364,23 @@ class DigitalMaturityTests(unittest.TestCase):
         errors = []
         digital.check(prs, report, data, errors)
         self.assertEqual(errors, [])
+
+    def test_updates_have_no_title_and_notes_are_formal(self):
+        """26-11-2026: an update is the statement itself; notes use formal government Arabic."""
+        self.data['updates'][0]['text'] = 'تقدم ملحوظ: اكتمل متطلب توافرية المنصات.'
+        with self.assertRaisesRegex(ValueError, 'carries a title'):
+            self.load()
+        self.data['updates'][0]['text'] = 'اكتمل متطلب توافرية المنصات.'
+        self.data['detail_sectors'][0]['updates'] = ['نقل المحتوى: اكتمل نقل المحتوى.']
+        with self.assertRaisesRegex(ValueError, 'carries a title'):
+            self.load()
+        self.data['detail_sectors'][0]['updates'] = ['اكتمل نقل المحتوى.']
+        self.data['detail_sectors'][0]['challenges'] = ['تأخر التقدم: الحين شغالين على الملف.']
+        with self.assertRaisesRegex(ValueError, 'Colloquial wording'):
+            self.load()
+        # A challenge keeps its short title.
+        self.data['detail_sectors'][0]['challenges'] = ['تأخر التقدم: لم يسجل أي تقدم في الملف حتى الآن.']
+        self.load()
 
     def test_measured_digital_summary_stays_on_one_slide(self):
         """Measured update rows that overflow shrink the table on the summary slide instead of stopping."""

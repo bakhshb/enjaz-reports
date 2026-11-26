@@ -16,7 +16,7 @@ from report_common import status_styles
 from report_common import header_heights as shared_heights
 from report_common.table_typography import set_table_sizes, set_table_directions, apply_table
 from report_common.package_tools import reachable_parts
-from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP, SUMMARY_SIZES, scaled_height
+from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP, emu, fit_summary, measured_rows
 
 from update_format import format_update
 from report_common.update_format import format_table_updates
@@ -30,6 +30,7 @@ def remove(shape):shape._element.getparent().remove(shape._element)
 TASK_HEADER_HEIGHT=shared_heights.TASK_HEADER
 TRANSACTION_HEADER_HEIGHT=shared_heights.TWO_LINE_HEADER
 TRANSACTION_TITLE='المعاملات المتأخرة'
+SUMMARY_CONTINUATION_TOP=900000
 
 def header_heights(pattern):
     """Approved title/header heights; auto-height rows are summary task tables."""
@@ -57,6 +58,8 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,siz
                 and not getattr(sh,'has_text_frame',False)
                 and (not summary or outside_summary))
     current=seed;y=top;targets=[seed]
+    # Summary continuations (provisional pass only) start under the header buttons.
+    start=SUMMARY_CONTINUATION_TOP if summary else top
     for sh in list(builder.tables(seed)):remove(sh)
     def place(title,pattern,chunk,weights,row_heights):
         nonlocal y
@@ -78,24 +81,17 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,siz
         if measured and len(measured['body'])!=len(records):raise ValueError('Measured record count differs: '+title)
         if measured and (len(measured['header'])!=2 or any(not isinstance(h,(int,float)) or not math.isfinite(h) or h<=0 for h in measured['header']+measured['body'])):
             raise ValueError('Invalid native row heights: '+title)
-        header=[math.ceil(h*12700) for h in measured['header']] if measured else header_heights(pattern)
+        header=[emu(h) for h in measured['header']] if measured else header_heights(pattern)
         weights=[builder.row_units(row,pattern.table,11) for row in records]
         base=builder._body_base_height(pattern.table,2)
-        body=[math.ceil(h*12700) for h in measured['body']] if measured else [base*w for w in weights]
-        smaller={str(k):[math.ceil(h*12700) for h in v] for k,v in (measured or {}).get('sizes',{}).items()}
+        body=[emu(h) for h in measured['body']] if measured else [base*w for w in weights]
+        smaller=(measured or {}).get('sizes',{})
         prepared.append((title,records,pattern,header,body,weights,bool(measured),smaller))
     if summary and measurements is not None:
         # One slide per summary: every table below the indicators and chart, at
         # the largest size (11 pt first) whose measured rows fit.
-        def at(size,body,smaller):
-            if size==11:return body
-            found=smaller.get(str(size))
-            return found if found and len(found)==len(body) else [scaled_height(h,size) for h in body]
-        for size in SUMMARY_SIZES:
-            heights=[[scaled_height(h,size) for h in p[3]]+at(size,p[4],p[7]) for p in prepared]
-            if sum(map(sum,heights))<=bottom-top-TABLE_GAP*max(0,len(prepared)-1):break
-        else:
-            raise ValueError('Summary tables do not fit on one slide even at '+str(SUMMARY_SIZES[-1])+' pt; shorten the text of: '+'، '.join(p[0] for p in prepared))
+        try:size,heights=fit_summary([(p[3],measured_rows(p[4],p[7])) for p in prepared],bottom-top)
+        except ValueError as exc:raise ValueError(f'{exc}: '+'، '.join(p[0] for p in prepared)) from None
         for (title,records,pattern,*_),row_heights in zip(prepared,heights):
             sh=place(title,pattern,records,[1]*len(records),row_heights)
             if size!=11 and sizes is not None:sizes.append((sh,size))
@@ -104,14 +100,14 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,siz
         fixed=sum(header)
         chunk=[];chunk_weights=[];chunk_heights=[]
         for row,weight,height in zip(records,weights,body):
-            if measured and fixed+height>bottom-(900000 if summary else top):raise ValueError('Rendered record exceeds page capacity with the approved style: '+title)
+            if measured and fixed+height>bottom-start:raise ValueError('Rendered record exceeds page capacity with the approved style: '+title)
             # The first pass is provisional and only feeds the measurement; a rough
             # estimate taller than a whole page must not block that candidate.
-            if not measured:height=min(height,bottom-(900000 if summary else top)-fixed)
+            if not measured:height=min(height,bottom-start-fixed)
             if y+fixed+sum(chunk_heights)+height>bottom:
                 if chunk:place(title,pattern,chunk,chunk_weights,header+chunk_heights)
                 current=builder.clone_slide(prs,seed,after=current,shape_predicate=keep)
-                targets.append(current);y=900000 if summary else top
+                targets.append(current);y=start
                 chunk=[];chunk_weights=[];chunk_heights=[]
             chunk.append(row);chunk_weights.append(weight);chunk_heights.append(height)
         if chunk:place(title,pattern,chunk,chunk_weights,header+chunk_heights)

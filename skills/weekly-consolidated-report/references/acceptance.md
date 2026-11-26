@@ -41,7 +41,7 @@ Every visible table run must be 11 pt, including title/header rows, blank-cell d
 
 ## Table column alignment
 
-Apply to both summaries and details, to column headers and every body paragraph. Center القطاع, تاريخ الإنجاز المخطط (including الانجاز spelling), تاريخ البداية, تاريخ النهاية, الحالة and حالة المشروع. Right-align المهمة, المشروع/اسم المشروع, ملاحظات, التحديث, طلب الدعم, التحدي and ما تم حتى تاريخه. Preserve merged table titles, numbering, other columns, vertical alignment, RTL, colors and emphasis. Font size is 11 pt throughout.
+Check every summary and detail table, headers and body, against the per-column alignment in [business rules](business-rules.md#table-column-alignment).
 
 ## Suhail summaries and details regression
 
@@ -75,7 +75,7 @@ The landscape source PDF never dictates the slide layout. Reject any digital out
 - **Output-only suffixes.** «(k/n)» in a detail title must reflect the output slides of that sector (n = its slide count, k sequential); a single-slide sector has no suffix. No source suffix survives in a title, and the reviewed JSON titles carry none.
 - **Continuation headings.** «(تتمة)» appears only as the first row of a continuation slide, repeating the section heading that is still open; it never appears mid-slide and is never copied from the source. A continuation slide whose first record belongs to an open section without that heading fails.
 - **Rows reconcile per sector.** Concatenating a sector's slides (continuation headings removed) equals the reviewed `rows` exactly: same count, same order, no duplicate at slide boundaries, every section heading styled with its perspective fill (a new heading that names no perspective takes the previous heading's fill, or the sector's first perspective with a percentage).
-- **Updates, then challenges, once per sector.** «أبرز التحديثات / التحديث» and then «التحديات / التحدي» sit on the sector's last slide, below the last records with the same small gap as other detail tables, numbered from 1 each. An empty list has no table. Together they cover every source note of the sector (a mixed note may be split in two); none is dropped or invented. Each item reads as formal government Arabic, ideally «عنوان قصير: النص», keeps every number and date of the source, and carries no task code.
+- **Updates, then challenges, once per sector.** «أبرز التحديثات / التحديث» and then «التحديات / التحدي» sit on the sector's last slide, below the last records with the same small gap as other detail tables, numbered from 1 each. An empty list has no table. Together they cover every source note of the sector (a mixed note may be split in two); none is dropped or invented. Each item reads as formal government Arabic in short declarative sentences with no colloquial word; an update is the statement itself with no title, a challenge reads «عنوان قصير: النص»; every number and date of the source is kept and no task code remains.
 - **Cards.** All four cards on every slide of a sector show the sector's reviewed values (percentages, «معلق» or «لا ينطبق»).
 - **Codes readable.** Latin task codes (`INF-01`, `U-01..09`, `CS-06/13/21/77`, `SIP Trunk`, `FCR`) read left-to-right in the rendered PDF; a reversed code such as «U-09..01» or «knurT PIS» fails visual acceptance.
 - **Extractor failures block.** If `digital_maturity.py` rejects the PDF, the report stops with that error; building the digital slides by hand from the PDF pages is not an accepted workaround.

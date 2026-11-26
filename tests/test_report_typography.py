@@ -6,7 +6,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Pt
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'skills'))
-from report_common.table_typography import set_table_sizes, set_table_directions, all_tables, check_table_typography
+from report_common.table_typography import set_table_sizes, set_table_directions, all_tables, check_table_typography, TABLE_FONT
 
 class TableTypographyTests(unittest.TestCase):
     def test_monday_topics_only_use_14_pt_including_headers_and_defaults(self):
@@ -34,7 +34,8 @@ class TableTypographyTests(unittest.TestCase):
     def test_size_alignment_and_other_formatting_preserved(self):
         expected={'القطاع':PP_ALIGN.CENTER,'تاريخ الإنجاز المخطط':PP_ALIGN.CENTER,'تاريخ الانجاز المخطط':PP_ALIGN.CENTER,'تاريخ البداية':PP_ALIGN.CENTER,'تاريخ النهاية':PP_ALIGN.CENTER,'الحالة':PP_ALIGN.CENTER,'المهمة':PP_ALIGN.RIGHT,'اسم المشروع':PP_ALIGN.RIGHT,'المشروع':PP_ALIGN.RIGHT,'ملاحظات':PP_ALIGN.RIGHT,'التحديث':PP_ALIGN.RIGHT,'طلب الدعم':PP_ALIGN.RIGHT,'التحدي':PP_ALIGN.RIGHT,'ما تم حتى تاريخه':PP_ALIGN.RIGHT}
         for prs in self.templates():
-            before=[(c.text,c._tc.get_or_add_tcPr().xml,[(r.text,r.font.name,r.font.bold) for p in c.text_frame.paragraphs for r in p.runs]) for t in all_tables(prs) for row in t.rows for c in row.cells]
+            # Size and the Abar Mid table font are applied; every other property stays.
+            before=[(c.text,c._tc.get_or_add_tcPr().xml,[(r.text,TABLE_FONT,r.font.bold) for p in c.text_frame.paragraphs for r in p.runs]) for t in all_tables(prs) for row in t.rows for c in row.cells]
             set_table_sizes(prs)
             after=[(c.text,c._tc.get_or_add_tcPr().xml,[(r.text,r.font.name,r.font.bold) for p in c.text_frame.paragraphs for r in p.runs]) for t in all_tables(prs) for row in t.rows for c in row.cells]
             self.assertEqual(before,after)

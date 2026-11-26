@@ -19,6 +19,10 @@ TABLE_GAP=200000  # clearance between stacked tables and above the footer
 # continuing the summary on another slide.
 SUMMARY_SIZES=(11,10.5,10,9.5,9,8.5,8)
 CELL_INSETS=2*45720  # default top+bottom cell margins; they do not scale with the font
+PT=12700  # EMU per point; layout files store row heights in points
+
+def emu(points):
+    return math.ceil(points*PT)
 TRANS_FIELDS=('رقم المعاملة','موضوع المعاملة','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط')
 # User confirmed on 2026-09-29 that Monday status colors apply to weekly too.
 # Weekly typography, margins, alignment and borders still come from weekly cells.
@@ -113,16 +117,23 @@ def scaled_height(height,size):
     text=max(0,height-CELL_INSETS)
     return CELL_INSETS+math.ceil(text*size/11)
 
-def summary_size(fixed,bodies,available):
-    """Largest approved summary size at which the rows fit `available` (EMU).
+def measured_rows(body,smaller):
+    """Body heights (EMU) at a summary size: measured at that size when the layout file has them, else the 11 pt bound."""
+    def at(size):
+        if size==11:return body
+        found=smaller.get(str(size))
+        return [emu(h) for h in found] if found and len(found)==len(body) else [scaled_height(h,size) for h in body]
+    return at
 
-    `fixed` are title/header heights at 11 pt (one line each, scaled).
-    `bodies(size)` returns the measured body heights at that size, or None
-    when that size was not measured; the scaled 11 pt bound is used then.
-    Returns ``(size, heights)`` or ``(None, None)``.
+def fit_summary(tables,available,gap=TABLE_GAP):
+    """Largest summary size at which every table fits `available` (EMU) with `gap` between them.
+
+    `tables` is a list of ``(fixed, at)``: title/header heights at 11 pt and a
+    function giving the body heights at a size (see `measured_rows`). Returns
+    ``(size, heights)`` with one list of row heights per table, or raises.
     """
+    room=available-gap*max(0,len(tables)-1)
     for size in SUMMARY_SIZES:
-        body=bodies(size)
-        heights=[scaled_height(h,size) for h in fixed]+body
-        if sum(heights)<=available:return size,heights
-    return None,None
+        heights=[[scaled_height(h,size) for h in fixed]+at(size) for fixed,at in tables]
+        if sum(map(sum,heights))<=room:return size,heights
+    raise ValueError(f'Summary tables do not fit on one slide even at {SUMMARY_SIZES[-1]} pt; shorten their text')

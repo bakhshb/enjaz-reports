@@ -14,7 +14,7 @@ from weekly_data import MASTER, approved_styles, transaction_data, field_key, TR
 
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
-from report_common.table_typography import set_table_sizes, set_table_directions, TABLE_PT, check_table_typography
+from report_common.table_typography import set_table_sizes, set_table_directions, TABLE_PT, TABLE_FONT, check_table_typography, expected_size
 from weekly_artwork import check_detail_artwork, check_navigation_links, all_shapes, DIGITAL_DETAIL_LABEL, is_digital_detail, is_digital_detail_table
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
@@ -43,13 +43,6 @@ def reference_row(pattern,ri,row,structural):
     body=list(pattern.rows)[2:]
     return next((r for r in body if r.cells[0].span_width==row.cells[0].span_width),body[0])
 
-def table_size(table,reduced):
-    """The size a table must use: 11 pt, or one smaller summary size it shrank to."""
-    if table._tbl not in reduced:return TABLE_PT
-    used={run.font.size.pt for row in table.rows for cell in row.cells for p in cell.text_frame.paragraphs
-          for run in p.runs if run.text.strip() and run.font.size is not None}
-    return used.pop() if len(used)==1 and used<=set(reduced[table._tbl]) else TABLE_PT
-
 def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT):
     if [c.width for c in table.columns]!=[c.width for c in pattern.columns]:errors.append('Table column widths changed')
     for ri,row in enumerate(table.rows):
@@ -63,7 +56,7 @@ def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT):
             fonts={face(run) for p in base.text_frame.paragraphs for run in p.runs if run.text.strip()}
             # Empty reference cells retain formatting in their first run.
             if not fonts:fonts={face(run) for p in base.text_frame.paragraphs for run in p.runs}
-            if not fonts:fonts={(None,None)}
+            if not fonts:fonts={(TABLE_FONT,TABLE_FONT)}
             for p in cell.text_frame.paragraphs:
                 for run in p.runs:
                     if run.text.strip() and (run.font.size is None or run.font.size.pt!=size):errors.append(f'Table font size must be {size:g} pt')
@@ -225,7 +218,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 summaries[title].extend([[row[columns.index(i)] for i in range(4)] for row in rows[2:]])
                 if title in SUMMARY_UPDATE_TITLES:update_cells[title].extend(row.cells[update_column(table)] for row in list(table.rows)[2:])
             else:errors.append('Unexpected table: '+title);continue
-            check_table_style(table,pattern,errors,size=table_size(table,reduced))
+            check_table_style(table,pattern,errors,size=expected_size(table,reduced))
     for kind,sections in expected_sections.items():
         expected=[]
         for section,records in sections:

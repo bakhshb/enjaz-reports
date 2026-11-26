@@ -41,9 +41,9 @@ Build every line only from the delivered report (its summary slides and, for the
 **مؤشر نضج التجربة الرقمية** (`digital` only).
 - Start with «مؤشر نضج التجربة الرقمية على المخطط».
 - If a sector's challenges (التحديات) or the summary «أبرز التحديثات» report a delay (a title or text with «تأخر»), add «، فيه تأخير من <القطاع>» naming each such sector as the report names it.
-- How serious the delay is, whether it needs escalation, and who is working on it are the user's own judgement and are not in the report. Never write them from the report. Put them on one line right after the digital line for the user to complete, starting with «ولكن» and leaving the unknown part as «…», for example:
-  «ولكن لا يستدعي التصعيد الآن، شغالين مع … على تجاوز التأخير.»
-  Tell the user, outside the code block, that this line is theirs to complete.
+- How serious the delay is, whether it needs escalation, and who is working on it are the user's own judgement and are not in the report. Never write them from the report. Append them to the end of the same digital line for the user to complete, starting with «، ولكن» and leaving the unknown part as «…». The digital part is always one line, never split over two:
+  «- مؤشر نضج التجربة الرقمية على المخطط، فيه تأخير من وكالة شؤون الحج، ولكن لا يستدعي التصعيد الآن، شغالين مع … على تجاوز التأخير.»
+  Tell the user, outside the code block, that the end of that line is theirs to complete.
 
 ## Approved example (26 November 2026, digital model)
 

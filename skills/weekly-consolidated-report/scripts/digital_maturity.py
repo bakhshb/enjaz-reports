@@ -31,10 +31,9 @@ from pptx.util import Pt
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers
-import math
-from weekly_data import content_bottom, set_cell_exact, TABLE_GAP, SUMMARY_SIZES, summary_size, scaled_height
+from weekly_data import content_bottom, set_cell_exact, TABLE_GAP, emu, fit_summary, measured_rows
 from weekly_artwork import place_table_copy, is_digital_detail, is_digital_detail_table
-from report_common.table_typography import set_table_directions
+from report_common.table_typography import set_table_directions, set_font
 
 
 MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
@@ -525,6 +524,8 @@ def load_reviewed(path, pdf):
         raise ValueError('Incomplete digital-maturity summary update')
     for update in updates:
         _no_codes(update['text'], 'summary')
+        _formal(update['text'], 'summary')
+        _no_title(update['text'], 'summary')
     details = data.get('detail_sectors')
     if not isinstance(details, list) or not details:
         raise ValueError('Reviewed digital-maturity data must contain merged detail_sectors, one per sector')
@@ -562,9 +563,34 @@ def load_reviewed(path, pdf):
                 raise ValueError(f'Digital-maturity detail {key} are incomplete: ' + title)
             for item in items:
                 _no_codes(item, title)
+                _formal(item, title)
+            if key == 'updates':
+                for item in items:
+                    _no_title(item, title)
         if detail.get('source_notes') and not (detail['updates'] or detail['challenges']):
             raise ValueError('Source notes are not classified into updates or challenges: ' + title)
     return data
+
+
+# Updates are the statement itself: no «عنوان قصير:» label in front of it.
+UPDATE_LABEL = re.compile(r'^\s*([^:\n]{1,60}?)\s*:\s*\S')
+# Saudi and Gulf colloquial words that have no place in the formal register.
+COLLOQUIAL = {'الحين', 'شغالين', 'شغالة', 'شغال', 'وش', 'ليش', 'زين', 'يبي', 'نبي', 'تبي', 'يبون',
+              'مافي', 'مافيه', 'اللي', 'هذي', 'عشان', 'علشان', 'بعدين', 'ابشر', 'أبشر'}
+ARABIC_WORD = re.compile(r'[\u0621-\u064A]+')
+
+
+def _no_title(text, where):
+    for line in text.splitlines():
+        found = UPDATE_LABEL.match(line)
+        if found and len(found.group(1).split()) <= 6:
+            raise ValueError(f'An update carries a title «{found.group(1)}:» ({where}); write the update as the statement itself')
+
+
+def _formal(text, where):
+    found = sorted({word for word in ARABIC_WORD.findall(text) if word in COLLOQUIAL})
+    if found:
+        raise ValueError(f'Colloquial wording {"، ".join(found)} in a digital note ({where}); use formal government Arabic')
 
 
 def _text_ok(value):
@@ -817,7 +843,6 @@ def sector_heights(pattern, sector, measured=None):
     if (found is None or len(found.get('rows', [])) != len(sector['rows'])
             or any(len(found.get(key, [])) != len(sector[key]) for key in keys)):
         raise ValueError('Digital-maturity measurements do not match the reviewed sector; measure again: ' + sector['title'])
-    emu = lambda value: math.ceil(value * 12700)
     rows = [max(pattern.heading_height if is_heading(row) else pattern.body_height, emu(height))
             for row, height in zip(sector['rows'], found['rows'])]
     notes = {key: [max(pattern.challenge_height, emu(height)) for height in found[key]] for key in keys}
@@ -1022,8 +1047,9 @@ def populate(prs, data, measured=None, sizes=None):
             for paragraph in box.text_frame.paragraphs:
                 paragraph.alignment = PP_ALIGN.CENTER
                 paragraph.font.size = Pt(11)
-                paragraph.font.name = 'Abar Mid'
                 paragraph.font.color.rgb = RGBColor(55, 55, 55)
+                for run in paragraph.runs:
+                    set_font(run._r.get_or_add_rPr())
     shape = next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
     table = shape.table
     set_cell_exact(table.cell(0, 0), SUMMARY_TABLE[0])
@@ -1059,18 +1085,8 @@ def _fit_summary(prs, slide, shape, measured, sizes):
         found = measured.get('summary', [])
         if len(found) != len(rows) - 2:
             raise ValueError('Digital-maturity summary measurements do not match the reviewed updates; measure again')
-        body = [math.ceil(height * 12700) for height in found]
-        smaller = measured.get('summary_sizes', {})
-        def bodies(size):
-            if size == 11:
-                return body
-            heights = smaller.get(str(size))
-            if not heights or len(heights) != len(body):
-                return [scaled_height(height, size) for height in body]
-            return [math.ceil(height * 12700) for height in heights]
-        size, heights = summary_size(fixed, bodies, available)
-        if size is None:
-            raise ValueError(f'Digital-maturity summary updates do not fit on one slide even at {SUMMARY_SIZES[-1]} pt; shorten them')
+        body = [emu(height) for height in found]
+        size, (heights,) = fit_summary([(fixed, measured_rows(body, measured.get('summary_sizes', {})))], available)
         fixed, body = heights[:2], heights[2:]
         if size != 11 and sizes is not None:
             sizes.append((shape, size))
