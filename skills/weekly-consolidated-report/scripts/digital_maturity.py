@@ -31,9 +31,9 @@ from pptx.util import Pt
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers
-from weekly_data import content_bottom, set_cell_exact, TABLE_GAP
+from weekly_data import content_bottom, set_cell_exact, TABLE_GAP, emu, fit_summary, measured_rows
 from weekly_artwork import place_table_copy, is_digital_detail, is_digital_detail_table
-from report_common.table_typography import set_table_directions
+from report_common.table_typography import set_table_directions, set_font
 
 
 MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
@@ -73,6 +73,9 @@ CHALLENGE_HEADERS = ('التحدي', 'التحديث')
 UPDATES_TABLE = ('أبرز التحديثات', 'التحديث')
 CHALLENGES_TABLE = ('التحديات', 'التحدي')
 NOTE_TABLES = (('updates',) + UPDATES_TABLE, ('challenges',) + CHALLENGES_TABLE)
+NOTE_KEYS = {title: key for key, title, _ in NOTE_TABLES}  # «أبرز التحديثات» → updates, «التحديات» → challenges
+SECTOR_CHART_ID = 93  # the sector bar chart on the digital summary slide
+NOTE_BOX = 'Digital sector note {}'  # gray bar for a sector shown with a note, numbered from 1
 SUMMARY_TABLE = UPDATES_TABLE
 TASK_HEADERS = ('المهمة', 'المؤشر')
 CARD_STATUSES = ('معلق', 'لا ينطبق')
@@ -302,8 +305,13 @@ def is_continuation(row):
     return is_heading(row) and row[0].endswith(CONTINUATION)
 
 
+def last_heading_index(rows):
+    return next((i for i in range(len(rows) - 1, -1, -1) if is_heading(rows[i])), None)
+
+
 def last_heading(rows):
-    return next((row[0] for row in reversed(rows) if is_heading(row)), None)
+    index = last_heading_index(rows)
+    return None if index is None else rows[index][0]
 
 
 def _card_box(axis, band):
@@ -334,8 +342,8 @@ def _extract_summary(page):
             if axis:
                 key = next((k for k in bars if abs(k - rect['top']) <= 3), round(rect['top']))
                 bars[key].append((axis, rect))
-    if not 1 <= len(bars) <= 5:
-        raise ValueError('Digital-maturity sector bars are missing or exceed template capacity')
+    if not bars:
+        raise ValueError('Digital-maturity sector bars are missing')
     ordered = sorted(bars.items())
     keys = [key for key, _ in ordered]
     pitch = min([b - a for a, b in zip(keys, keys[1:])] or [22])
@@ -380,8 +388,8 @@ def _extract_summary(page):
         if not perspective or not text:
             raise ValueError('Digital-maturity challenge is incomplete')
         challenges.append({'perspective': perspective, 'text': text})
-    if not 1 <= len(challenges) <= 4:
-        raise ValueError('Digital-maturity challenges exceed the approved slide capacity')
+    if not challenges:
+        raise ValueError('Digital-maturity page one has no notes')
     date = re.search(r'14\d\d/\d{1,2}/\d{1,2}', page.extract_text() or '')
     if not date:
         raise ValueError('Digital-maturity PDF update date is missing')
@@ -507,8 +515,8 @@ def load_reviewed(path, pdf):
         if not isinstance(value, (int, float)) or isinstance(value, bool) or not 0 <= value <= 100:
             raise ValueError('Invalid digital-maturity metric')
     sectors = data.get('sectors', [])
-    if not 1 <= len(sectors) <= 5 or len({s['name'] for s in sectors}) != len(sectors):
-        raise ValueError('Digital-maturity sectors must be unique and fit the approved chart')
+    if not sectors or len({s['name'] for s in sectors}) != len(sectors):
+        raise ValueError('Digital-maturity sectors must be present and unique')
     for sector in sectors:
         if not sector.get('name') or set(sector.get('metrics', {})) != set(AXES):
             raise ValueError('Incomplete digital-maturity sector')
@@ -518,12 +526,14 @@ def load_reviewed(path, pdf):
         if sector.get('note') and any(v is not None for v in numbers):
             raise ValueError('A digital-maturity sector note cannot have percentages')
     updates = data.get('updates')
-    if not isinstance(updates, list) or not 1 <= len(updates) <= 4:
-        raise ValueError('Digital-maturity updates must hold 1-4 rows for the summary table')
+    if not isinstance(updates, list) or not updates:
+        raise ValueError('Digital-maturity updates must hold at least one row for the summary table')
     if any(not isinstance(u, dict) or not u.get('perspective') or not _text_ok(u.get('text')) for u in updates):
         raise ValueError('Incomplete digital-maturity summary update')
     for update in updates:
         _no_codes(update['text'], 'summary')
+        _formal(update['text'], 'summary')
+        _no_title(update['text'], 'summary')
     details = data.get('detail_sectors')
     if not isinstance(details, list) or not details:
         raise ValueError('Reviewed digital-maturity data must contain merged detail_sectors, one per sector')
@@ -561,9 +571,34 @@ def load_reviewed(path, pdf):
                 raise ValueError(f'Digital-maturity detail {key} are incomplete: ' + title)
             for item in items:
                 _no_codes(item, title)
+                _formal(item, title)
+            if key == 'updates':
+                for item in items:
+                    _no_title(item, title)
         if detail.get('source_notes') and not (detail['updates'] or detail['challenges']):
             raise ValueError('Source notes are not classified into updates or challenges: ' + title)
     return data
+
+
+# Updates are the statement itself: no «عنوان قصير:» label in front of it.
+UPDATE_LABEL = re.compile(r'^\s*([^:\n]{1,60}?)\s*:\s*\S')
+# Saudi and Gulf colloquial words that have no place in the formal register.
+COLLOQUIAL = {'الحين', 'شغالين', 'شغالة', 'شغال', 'وش', 'ليش', 'زين', 'يبي', 'نبي', 'تبي', 'يبون',
+              'مافي', 'مافيه', 'اللي', 'هذي', 'عشان', 'علشان', 'بعدين', 'ابشر', 'أبشر'}
+ARABIC_WORD = re.compile(r'[\u0621-\u064A]+')
+
+
+def _no_title(text, where):
+    for line in text.splitlines():
+        found = UPDATE_LABEL.match(line)
+        if found and len(found.group(1).split()) <= 6:
+            raise ValueError(f'An update carries a title «{found.group(1)}:» ({where}); write the update as the statement itself')
+
+
+def _formal(text, where):
+    found = sorted({word for word in ARABIC_WORD.findall(text) if word in COLLOQUIAL})
+    if found:
+        raise ValueError(f'Colloquial wording {"، ".join(found)} in a digital note ({where}); use formal government Arabic')
 
 
 def _text_ok(value):
@@ -597,6 +632,16 @@ def digital_slide(prs):
     if len(matches) != 1:
         raise ValueError('Expected one approved digital-maturity slide')
     return matches[0]
+
+
+def summary_table_shape(slide):
+    """The «أبرز التحديثات» table of the digital summary slide (its only 3-column table)."""
+    return next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+
+
+def note_boxes(slide):
+    """The sector note bars on the digital summary slide, by shape name."""
+    return {sh.name: sh.text_frame.text.strip() for sh in slide.shapes if sh.name.startswith(NOTE_BOX.format(''))}
 
 
 def calculation_note(slide):
@@ -726,6 +771,24 @@ def _axis_of(heading):
     return next((axis for axis, label in zip(AXES, LABELS) if base.startswith(label)), None)
 
 
+def heading_axes(sector):
+    """The perspective style of each section heading in a sector, by row index.
+
+    A heading that names a perspective uses that perspective's fill. A new
+    heading that names none (a sub-unit such as «خدمات المستفيدين» or
+    «الجهات المساندة») takes the perspective of the heading before it, or for
+    the first heading the sector's first perspective that carries a
+    percentage card, so a new kind of section never stops the build.
+    """
+    default = next((axis for axis in AXES if '%' in sector['cards'].get(axis, '')), AXES[0])
+    axes, current = {}, None
+    for index, row in enumerate(sector['rows']):
+        if is_heading(row):
+            current = _axis_of(row[0]) or current or default
+            axes[index] = current
+    return axes
+
+
 class DetailPattern:
     """Row templates and height estimates taken from the approved master table."""
 
@@ -781,49 +844,89 @@ class DetailPattern:
         return sum(GAP + self.challenges_height(items) for _, _, items in notes)
 
 
-def paginate_sector(pattern, sector):
-    """Flow one sector into slide pages using the approved pattern's row heights.
+def row_axes(sector):
+    """The perspective of every row of a sector by index: a heading's own, a record's that of its heading."""
+    headings, current, axes = heading_axes(sector), None, {}
+    for index in range(len(sector['rows'])):
+        current = headings.get(index, current)
+        axes[index] = current
+    return axes
 
-    Returns a list of pages; each page is ``(rows, challenges)`` where rows may
-    begin with a synthetic continuation heading.  Headings never end a page,
-    records are never split, and the challenge table follows the last records.
+
+def sector_heights(pattern, sector, measured=None):
+    """Row heights (EMU) for a sector's records and its update/challenge items.
+
+    With LibreOffice measurements (``measured`` is the ``digital`` part of the
+    layout file) every row gets its measured height, never less than the
+    master's row; without them the character estimate is a provisional first
+    pass that only feeds the measurement.
     """
-    rows, challenges = sector['rows'], sector_notes(sector)
+    keys = [key for key, _, _ in NOTE_TABLES]
+    if measured is None:
+        rows = [pattern.row_height(row) for row in sector['rows']]
+        notes = {key: [pattern.challenge_row_height(text) for text in sector[key]] for key in keys}
+        return rows, notes
+    found = measured.get('sectors', {}).get(sector['title'])
+    if (found is None or len(found.get('rows', [])) != len(sector['rows'])
+            or any(len(found.get(key, [])) != len(sector[key]) for key in keys)):
+        raise ValueError('Digital-maturity measurements do not match the reviewed sector; measure again: ' + sector['title'])
+    rows = [max(pattern.heading_height if is_heading(row) else pattern.body_height, emu(height))
+            for row, height in zip(sector['rows'], found['rows'])]
+    notes = {key: [max(pattern.challenge_height, emu(height)) for height in found[key]] for key in keys}
+    return rows, notes
+
+
+def paginate_sector(pattern, sector, measured=None):
+    """Flow one sector into slide pages.
+
+    Returns a list of pages; each page is ``(rows, heights, notes)`` where rows
+    may begin with a synthetic continuation heading, ``heights`` holds each
+    row's height and ``notes`` the update/challenge tables as
+    ``(title, header, items, item_heights)``. Headings never end a page,
+    records are never split, and the note tables follow the last records.
+    """
+    rows = sector['rows']
+    row_heights, note_heights = sector_heights(pattern, sector, measured)
+    challenges = [(title, header, items, note_heights[key])
+                  for key, title, header in NOTE_TABLES if sector.get(key)
+                  for items in [list(sector[key])]]
+    notes_height = sum(GAP + pattern.challenge_fixed + sum(item_heights) for *_, item_heights in challenges)
     pages, index = [], 0
     while index < len(rows):
         used = pattern.title_height + pattern.header_height
-        page_rows = []
-        heading = last_heading(rows[:index])
-        if heading is not None and not is_heading(rows[index]):
-            page_rows.append([f'{heading} {CONTINUATION}', '', '', ''])
-            used += pattern.heading_height
+        page_rows, page_heights = [], []
+        open_heading = last_heading_index(rows[:index])
+        if open_heading is not None and not is_heading(rows[index]):
+            page_rows.append([f'{rows[open_heading][0]} {CONTINUATION}', '', '', ''])
+            page_heights.append(row_heights[open_heading])
+            used += row_heights[open_heading]
         while index < len(rows):
-            row = rows[index]
-            need = pattern.row_height(row)
-            if is_heading(row):
+            need = row_heights[index]
+            if is_heading(rows[index]):
                 if index + 1 >= len(rows):
                     raise ValueError('Digital-maturity section heading has no records: ' + sector['title'])
-                need += pattern.row_height(rows[index + 1])
+                need += row_heights[index + 1]
             if pattern.top + used + need > pattern.bottom:
                 break
-            page_rows.append(row)
-            used += pattern.row_height(row)
+            page_rows.append(rows[index])
+            page_heights.append(row_heights[index])
+            used += row_heights[index]
             index += 1
         page_challenges = []
         if index == len(rows) and challenges:
-            if pattern.top + used + pattern.notes_height(challenges) <= pattern.bottom:
+            if pattern.top + used + notes_height <= pattern.bottom:
                 page_challenges = list(challenges)
             else:
                 # Only the trailing record (with its heading) moves to the next page with the challenges.
-                page_rows.pop()
+                page_rows.pop(); page_heights.pop()
                 index -= 1
                 if page_rows and is_heading(page_rows[-1]) and not is_continuation(page_rows[-1]):
-                    page_rows.pop()
+                    page_rows.pop(); page_heights.pop()
                     index -= 1
         if not any(not is_heading(row) for row in page_rows):
             raise ValueError('A digital-maturity record cannot fit on an empty detail slide: ' + sector['title'])
-        pages.append((page_rows, page_challenges))
-    if challenges and not pages[-1][1]:
+        pages.append((page_rows, page_heights, page_challenges))
+    if challenges and not pages[-1][2]:
         raise ValueError('Digital-maturity challenges cannot fit with their last record: ' + sector['title'])
     return pages
 
@@ -841,17 +944,15 @@ def _place_table(slide, element, top):
     return shape
 
 
-def _fill_detail_table(slide, pattern, title, rows):
+def _fill_detail_table(slide, pattern, title, rows, heights, axes):
+    """Fill one detail table; ``axes`` gives the perspective style of each heading row."""
     shape = _place_table(slide, pattern.table_element, pattern.top)
     table = shape.table
     set_cell_exact(table.cell(0, 0), title)
     table.rows[0].height, table.rows[1].height = pattern.title_height, pattern.header_height
-    for values in rows:
+    for position, (values, height) in enumerate(zip(rows, heights)):
         if is_heading(values):
-            axis = _axis_of(values[0])
-            if axis is None:
-                raise ValueError('Digital-maturity section heading has no approved perspective style: ' + values[0])
-            row = _append_row(table, pattern.heading_rows[axis])
+            row = _append_row(table, pattern.heading_rows[axes[position]])
             set_cell_exact(row.cells[0], values[0])
         else:
             row = _append_row(table, pattern.body_row)
@@ -862,22 +963,22 @@ def _fill_detail_table(slide, pattern, title, rows):
             if CODE.fullmatch(values[3]):
                 _set_code_text(code_cell, values[3], CODE)
                 code_cell.text_frame.paragraphs[0]._p.get_or_add_pPr().set('rtl', '0')
-        row.height = pattern.row_height(values)
+        row.height = height
     shape.height = sum(row.height for row in table.rows)
     return shape
 
 
 def _fill_challenge_table(slide, pattern, top, note):
-    title, header, items = note
+    title, header, items, heights = note
     shape = _place_table(slide, pattern.challenge_element, top)
     table = shape.table
     set_cell_exact(table.cell(0, 0), title)
     set_cell_exact(table.cell(1, 1), header)
-    for index, challenge in enumerate(items, 1):
+    for index, (challenge, height) in enumerate(zip(items, heights), 1):
         row = _append_row(table, pattern.challenge_body)
         set_cell_exact(row.cells[0], str(index))
         _set_challenge_text(row.cells[1], challenge)
-        row.height = pattern.challenge_row_height(challenge)
+        row.height = height
     shape.height = sum(row.height for row in table.rows)
     return shape
 
@@ -891,13 +992,13 @@ def _set_cards(slide, cards):
         paragraphs[1].runs[0].text = cards[axis]
 
 
-def populate_details(prs, data):
+def populate_details(prs, data, measured=None):
     slides = detail_slides(prs)
     seed, extras = slides[0], slides[1:]
     pattern = DetailPattern(prs, seed)
     for shape in [sh for sh in seed.shapes if sh.has_table]:
         shape._element.getparent().remove(shape._element)
-    layout = [(sector, paginate_sector(pattern, sector)) for sector in data['detail_sectors']]
+    layout = [(sector, paginate_sector(pattern, sector, measured)) for sector in data['detail_sectors']]
     # Clone the table-free seed once per page before filling, so no populated table is copied.
     slides, current = [seed], seed
     for _ in range(sum(len(pages) for _, pages in layout) - 1):
@@ -905,18 +1006,31 @@ def populate_details(prs, data):
         slides.append(current)
     targets = iter(slides)
     for sector, pages in layout:
-        for number, (rows, challenges) in enumerate(pages, 1):
+        styles = row_axes(sector)
+        done = 0
+        for number, (rows, heights, challenges) in enumerate(pages, 1):
             slide = next(targets)
             _set_cards(slide, sector['cards'])
             title = sector['title'] if len(pages) == 1 else f'{sector["title"]} ({number}/{len(pages)})'
-            shape = _fill_detail_table(slide, pattern, title, rows)
+            # A continuation heading takes the perspective of the record it precedes.
+            shift = 1 if rows and is_continuation(rows[0]) else 0
+            axes = {position: styles[done + max(position - shift, 0)] for position in range(len(rows))}
+            done += len(rows) - shift
+            shape = _fill_detail_table(slide, pattern, title, rows, heights, axes)
             for note in challenges:
                 shape = _fill_challenge_table(slide, pattern, shape.top + shape.height + GAP, note)
     for slide in extras:
         helpers.remove_slide(prs, slide)
 
 
-def populate(prs, data):
+def populate(prs, data, measured=None, sizes=None):
+    """Fill the digital summary and detail slides.
+
+    ``measured`` is the ``digital`` part of a LibreOffice layout file; with it
+    the summary «أبرز التحديثات» table gets its measured row heights and, when
+    needed, smaller text so the summary stays on its one slide (recorded in
+    ``sizes`` as ``(shape, size)``).
+    """
     slide = digital_slide(prs)
     calculation_note(slide)
     for axis, (chart_id, label_id, track_id, fill_id) in CARDS.items():
@@ -931,7 +1045,7 @@ def populate(prs, data):
         track, fill = (helpers.shape_by_id(slide, sid) for sid in (track_id, fill_id))
         fill.left = track.left
         fill.width = round(track.width * value / 100)
-    sector_chart = helpers.shape_by_id(slide, 93)
+    sector_chart = helpers.shape_by_id(slide, SECTOR_CHART_ID)
     _chart(sector_chart, [s['name'] for s in data['sectors']],
            [(label, [_chart_number(s['metrics'][axis]/100) if s['metrics'][axis] is not None else None
                      for s in data['sectors']])
@@ -944,7 +1058,7 @@ def populate(prs, data):
             left = sector_chart.left
             top = sector_chart.top + round(155000 + (5-len(data['sectors']))*70000 + index * row_spacing)
             box = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, 4900000, 155000)
-            box.name = f'Digital sector note {index+1}'
+            box.name = NOTE_BOX.format(index + 1)
             box.fill.solid()
             box.fill.fore_color.rgb = RGBColor(229, 227, 224)
             box.line.fill.background()
@@ -952,11 +1066,16 @@ def populate(prs, data):
             for paragraph in box.text_frame.paragraphs:
                 paragraph.alignment = PP_ALIGN.CENTER
                 paragraph.font.size = Pt(11)
-                paragraph.font.name = 'Abar Mid'
                 paragraph.font.color.rgb = RGBColor(55, 55, 55)
-    table = next(sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+                for run in paragraph.runs:
+                    set_font(run._r.get_or_add_rPr())
+    shape = summary_table_shape(slide)
+    table = shape.table
     set_cell_exact(table.cell(0, 0), SUMMARY_TABLE[0])
     set_cell_exact(table.cell(1, 2), SUMMARY_TABLE[1])
+    # The master holds four sample rows; a longer source list gets more rows of the same style.
+    while len(table.rows) < 2 + len(data['updates']):
+        _append_row(table, table.rows[2]._tr)
     for index, update in enumerate(data['updates'], 2):
         for cell, value in zip(table.rows[index].cells,
                                (str(index-1), update['perspective'], update['text'])):
@@ -964,9 +1083,35 @@ def populate(prs, data):
         _bullet_lines(table.rows[index].cells[2])
     for row in list(table.rows)[2+len(data['updates']):]:
         row._tr.getparent().remove(row._tr)
-    populate_details(prs, data)
+    _fit_summary(prs, slide, shape, measured, sizes)
+    populate_details(prs, data, measured)
     set_table_directions(prs)
     return slide
+
+
+def _fit_summary(prs, slide, shape, measured, sizes):
+    """Keep the «أبرز التحديثات» table above the footer of the summary slide."""
+    table = shape.table
+    rows = list(table.rows)
+    available = content_bottom(prs, slide) - shape.top
+    fixed = [row.height for row in rows[:2]]
+    if measured is None:
+        # Provisional: share the free space; the measurement sets the real heights.
+        body = [row.height for row in rows[2:]]
+        if sum(fixed + body) > available:
+            body = [(available - sum(fixed)) // len(body)] * len(body)
+    else:
+        found = measured.get('summary', [])
+        if len(found) != len(rows) - 2:
+            raise ValueError('Digital-maturity summary measurements do not match the reviewed updates; measure again')
+        body = [emu(height) for height in found]
+        size, (heights,) = fit_summary([(fixed, measured_rows(body, measured.get('summary_sizes', {})))], available)
+        fixed, body = heights[:2], heights[2:]
+        if size != 11 and sizes is not None:
+            sizes.append((shape, size))
+    for row, height in zip(rows, fixed + body):
+        row.height = height
+    shape.height = sum(row.height for row in table.rows)
 
 
 def _slide_rows(table):
@@ -982,7 +1127,9 @@ class _DetailSlide:
         self.table = _detail_table(slide)
         self.base, self.index, self.total = split_title(self.table.cell(0, 0).text)
         self.rows = _slide_rows(self.table)
+        self.heights = [row.height for row in list(self.table.rows)[2:]]
         self.notes = _note_tables(slide)
+        self.notes_height = sum(GAP + sh.height for sh in _note_shapes(slide))
         self.bottom = max(sh.top + sh.height for sh in slide.shapes if sh.has_table)
 
     def card(self, axis):
@@ -1045,17 +1192,19 @@ def check_details(prs, data, errors, master=None):
         if actual != notes:
             errors.append(f'Digital-maturity detail updates/challenges differ from the reviewed data: {base}')
         for position, (detail, following) in enumerate(zip(members, members[1:]), 2):
-            following_rows = following.rows
+            # Heights are the generated rows' own (measured) heights.
+            following_rows, following_heights = following.rows, following.heights
             if following_rows and is_continuation(following_rows[0]):
-                following_rows = following_rows[1:]  # a consequence of the break, not a cost of moving the record back
-            next_record = next((row for row in following_rows if not is_heading(row)), None)
+                # a consequence of the break, not a cost of moving the record back
+                following_rows, following_heights = following_rows[1:], following_heights[1:]
+            next_record = next((i for i, row in enumerate(following_rows) if not is_heading(row)), None)
             if next_record is None:
                 continue
             if position == count and following.notes:
                 # The last records may move only together with the update/challenge tables.
-                need = sum(pattern.row_height(row) for row in following_rows) + pattern.notes_height(notes)
+                need = sum(following_heights) + following.notes_height
             else:
-                need = sum(pattern.row_height(row) for row in following_rows[:following_rows.index(next_record) + 1])
+                need = sum(following_heights[:next_record + 1])
             if detail.bottom + need <= pattern.bottom:
                 errors.append(f'Digital-maturity detail slide breaks the page early; the next record still fits: {base}')
 
@@ -1078,21 +1227,21 @@ def check(prs, report_path, data, errors, master=None):
         validation.chart_metrics(report_path, str(chart.chart.part.partname).lstrip('/'),
                                  [['المنجز', _chart_number(value)], ['المتبقي', _chart_number(100-value)]],
                                  ['نسبة الإنجاز'], errors)
-    sector_chart = helpers.shape_by_id(slide, 93)
+    sector_chart = helpers.shape_by_id(slide, SECTOR_CHART_ID)
     if any(series.data_labels.number_format != '0%' for series in sector_chart.chart.series):
         errors.append('Digital-maturity sector labels must display percentages')
     rows = [[s['name'], *[_chart_number(s['metrics'][axis]/100) if s['metrics'][axis] is not None else None
                          for axis in AXES]] for s in data['sectors']]
     validation.chart_metrics(report_path, str(sector_chart.chart.part.partname).lstrip('/'), rows, LABELS, errors)
-    table = next(sh.table for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+    table = summary_table_shape(slide).table
     actual = [[c.text for c in row.cells] for row in list(table.rows)[2:]]
     expected = [[str(i), u['perspective'], u['text']] for i, u in enumerate(data['updates'], 1)]
     if actual != expected:
         errors.append('Digital-maturity summary updates differ from the reviewed data')
     if (table.cell(0, 0).text, table.cell(1, 2).text) != SUMMARY_TABLE:
         errors.append('Digital-maturity summary table must be titled «أبرز التحديثات»')
-    notes = {s.name: s.text for s in slide.shapes if s.name.startswith('Digital sector note ')}
-    expected_notes = {f'Digital sector note {i}': s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
+    notes = note_boxes(slide)
+    expected_notes = {NOTE_BOX.format(i): s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
     if notes != expected_notes:
         errors.append('Digital-maturity sector notes differ from reviewed PDF data')
     check_details(prs, data, errors, master)

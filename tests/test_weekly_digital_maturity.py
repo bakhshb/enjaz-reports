@@ -69,13 +69,19 @@ def master_sectors():
     return sectors
 
 
+def drop_title(text):
+    """An update is the statement itself: remove a leading «عنوان قصير:» label from each line."""
+    return '\n'.join(digital.UPDATE_LABEL.sub(lambda m: m.group(0)[-1], line) if (found := digital.UPDATE_LABEL.match(line))
+                     and len(found.group(1).split()) <= 6 else line for line in text.splitlines())
+
+
 def classify_as_source(data):
-    """A minimal review: file each source note under its source table, without task codes."""
+    """A minimal review: file each source note under its source table, without task codes or update titles."""
     strip = lambda text: ' '.join(digital.CODE_IN_TEXT.sub('', text).split())
     for update in data['updates']:
-        update['text'] = strip(update['text'])
+        update['text'] = drop_title(strip(update['text']))
     for sector in data['detail_sectors']:
-        sector['updates'] = [strip(n['text']) for n in sector['source_notes'] if n['title'] == 'أبرز التحديثات']
+        sector['updates'] = [drop_title(strip(n['text'])) for n in sector['source_notes'] if n['title'] == 'أبرز التحديثات']
         sector['challenges'] = [strip(n['text']) for n in sector['source_notes'] if n['title'] == 'التحديات']
 
 
@@ -186,7 +192,7 @@ class LandscapeFixtureTests(unittest.TestCase):
                 text = text.replace(old, new)
             return text
         for update in data['updates']:
-            update['text'] = fix(update['text'])
+            update['text'] = drop_title(fix(update['text']))
         for sector in data['detail_sectors']:
             for note in sector['source_notes']:
                 note['text'] = fix(note['text'])
@@ -324,14 +330,79 @@ class DigitalMaturityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'calculation note'):
             digital.calculation_note(slide)
 
-    def test_capacity_and_conflicting_note_rejected(self):
-        self.data['updates'] *= 3
-        with self.assertRaisesRegex(ValueError, '1-4 rows'):
-            self.load()
-        self.data['updates'] = self.data['updates'][:2]
+    def test_conflicting_note_rejected(self):
         self.data['sectors'][1]['metrics']['experience'] = 5
         with self.assertRaisesRegex(ValueError, 'cannot have percentages'):
             self.load()
+
+    def test_new_rows_sectors_and_headings_do_not_stop_the_build(self):
+        """26-11-2026: a fifth update row and a new kind of section heading stopped the digital part."""
+        self.data['updates'] = [{'perspective': 'تجربة المستخدم', 'text': f'تحديث رقم {i}'} for i in range(1, 7)]
+        self.data['sectors'].append({'name': 'القطاع السادس', 'note': None,
+                                     'metrics': {'experience': 40, 'satisfaction': 30, 'complaints': None, 'tools': 20}})
+        first = self.data['detail_sectors'][0]
+        body = [row for row in first['rows'] if not digital.is_heading(row)]
+        first['rows'] = ([['خدمات المستفيدين: 87% (12 متطلبا)', '', '', '']] + body[:2]
+                         + [['الجهات المساندة: الاتصال المؤسسي 73%', '', '', '']] + body[2:4]
+                         + [['رضا المستفيد: 15%', '', '', '']] + body[4:5])
+        data, prs, report = self.build()
+        summary = next(sh.table for sh in digital.digital_slide(prs).shapes if sh.has_table and len(sh.table.columns) == 3)
+        self.assertEqual([row.cells[2].text for row in list(summary.rows)[2:]], [u['text'] for u in data['updates']])
+        chart = digital.helpers.shape_by_id(digital.digital_slide(prs), 93).chart
+        self.assertEqual(len(list(chart.plots[0].categories)), 6)
+        # A heading that names no perspective takes the sector's first perspective with a percentage.
+        pattern = digital.DetailPattern(Presentation(digital.MASTER), digital.detail_slides(Presentation(digital.MASTER))[0])
+        default = next(axis for axis in digital.AXES if '%' in first['cards'][axis])
+        def fill(tr):
+            colour = tr.find('.//' + qn('a:tcPr')).find(qn('a:solidFill'))[0]
+            return colour.tag, dict(colour.attrib)
+        expected = fill(pattern.heading_rows[default])
+        table = digital._detail_table(slides_for(prs, first['title'])[0])
+        headings = [row for row in list(table.rows)[2:] if row.cells[0].span_width == 4]
+        self.assertEqual(fill(headings[0]._tr), expected)
+        self.assertEqual(fill(headings[1]._tr), expected)
+        errors = []
+        digital.check(prs, report, data, errors)
+        self.assertEqual(errors, [])
+
+    def test_updates_have_no_title_and_notes_are_formal(self):
+        """26-11-2026: an update is the statement itself; notes use formal government Arabic."""
+        self.data['updates'][0]['text'] = 'تقدم ملحوظ: اكتمل متطلب توافرية المنصات.'
+        with self.assertRaisesRegex(ValueError, 'carries a title'):
+            self.load()
+        self.data['updates'][0]['text'] = 'اكتمل متطلب توافرية المنصات.'
+        self.data['detail_sectors'][0]['updates'] = ['نقل المحتوى: اكتمل نقل المحتوى.']
+        with self.assertRaisesRegex(ValueError, 'carries a title'):
+            self.load()
+        self.data['detail_sectors'][0]['updates'] = ['اكتمل نقل المحتوى.']
+        self.data['detail_sectors'][0]['challenges'] = ['تأخر التقدم: الحين شغالين على الملف.']
+        with self.assertRaisesRegex(ValueError, 'Colloquial wording'):
+            self.load()
+        # A challenge keeps its short title.
+        self.data['detail_sectors'][0]['challenges'] = ['تأخر التقدم: لم يسجل أي تقدم في الملف حتى الآن.']
+        self.load()
+
+    def test_measured_digital_summary_stays_on_one_slide(self):
+        """Measured update rows that overflow shrink the table on the summary slide instead of stopping."""
+        self.data['updates'] = [{'perspective': 'عام', 'text': f'تحديث رقم {i}'} for i in range(1, 7)]
+        data = self.load()
+        prs = Presentation(digital.MASTER)
+        shape = next(sh for sh in digital.digital_slide(prs).shapes if sh.has_table and len(sh.table.columns) == 3)
+        room = digital.content_bottom(prs, digital.digital_slide(prs)) - shape.top
+        tall = room / 6 / 12700  # pt: six rows alone fill the space at 11 pt
+        measured = {'summary': [tall] * 6, 'summary_sizes': {'9': [tall * .6] * 6},
+                    'sectors': {s['title']: {'rows': [20] * len(s['rows']), 'updates': [20] * len(s['updates']),
+                                             'challenges': [20] * len(s['challenges'])} for s in data['detail_sectors']}}
+        sizes = []
+        digital.populate(prs, data, measured, sizes)
+        shape = next(sh for sh in digital.digital_slide(prs).shapes if sh.has_table and len(sh.table.columns) == 3)
+        self.assertEqual([(s.shape_id, size) for s, size in sizes], [(shape.shape_id, 9)])
+        self.assertLessEqual(shape.top + shape.height, digital.content_bottom(prs, digital.digital_slide(prs)))
+        measured['summary'] = measured['summary_sizes']['9'] = [tall * 3] * 6
+        for key in [k for k in measured['summary_sizes']]:
+            measured['summary_sizes'][key] = [tall * 3] * 6
+        with self.assertRaisesRegex(ValueError, 'do not fit on one slide'):
+            digital.populate(Presentation(digital.MASTER), data, measured, [])
 
     def test_source_pagination_artifacts_rejected(self):
         self.data['detail_sectors'][0]['title'] += ' (1/3)'

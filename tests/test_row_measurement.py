@@ -60,6 +60,39 @@ class ProbeMeasurementTests(unittest.TestCase):
             self.assertEqual(before,deck.read_bytes())
 
 
+    def test_measured_height_holds_the_rendered_text(self):
+        """26-11-2026: rows sized by the old collapsed probe were 0.05-0.07 in short, so tables overlapped."""
+        sys.path.insert(0,str(ROOT/'skills'))
+        from report_common.render import export_pdf
+        import pdfplumber
+        with tempfile.TemporaryDirectory() as directory:
+            deck=Path(directory)/'deck.pptx'
+            sys.path.insert(0,str(WEEKLY))
+            from weekly_data import set_cell_exact
+            from report_common.table_typography import set_table_sizes
+            prs=Presentation(DIGITAL);set_table_sizes(prs);si,sh=first_table(prs,4)
+            table=sh.table
+            for tr in list(table._tbl.tr_lst)[3:]:table._tbl.remove(tr)
+            # Filled the way the builder fills cells: the template run keeps Abar 11 pt.
+            set_cell_exact(table.rows[2].cells[3],'\n'.join(' '.join(['سطر طويل لقياس ارتفاع الصف']*2) for _ in range(3)))
+            prs.save(deck)
+            needed=measure_rows(deck,[(si,sh.shape_id,[2])])[(si,sh.shape_id,2)]
+            prs=Presentation(deck);frame=next(x for x in prs.slides[si].shapes if x.shape_id==sh.shape_id)
+            # Roomy title/header rows, so only the measured row decides where the text ends.
+            frame.table.rows[0].height=frame.table.rows[1].height=EMU
+            frame.table.rows[2].height=needed;frame.height=sum(r.height for r in frame.table.rows)
+            prs.save(deck)
+            pdf=export_pdf(deck,Path(directory)/'deck.pdf')
+            with pdfplumber.open(pdf) as document:
+                page=document.pages[si]
+                left,right=frame.left/EMU*72,(frame.left+frame.width)/EMU*72
+                bottom=(frame.top+frame.height)/EMU*72
+                # Text overflowing the row would land within an inch below it; the footer is far lower.
+                chars=[c for c in page.chars if c['text'].strip() and left<=c['x0']<=right and frame.top/EMU*72<c['top']<bottom+72]
+                self.assertTrue(chars)
+                self.assertLessEqual(max(c['bottom'] for c in chars),bottom)
+
+
 class DateTextTests(unittest.TestCase):
     def test_iso_timestamp_text_is_shown_as_report_date(self):
         self.assertEqual(val('2026-12-11 00:00:00'),'11-12-2026')
@@ -128,6 +161,46 @@ class ConsolidatedMeasurementTests(unittest.TestCase):
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertLessEqual(len(Presentation(root/'measured.pptx').slides),len(Presentation(root/'weekly.pptx').slides))
 
+@unittest.skipUnless(LIBREOFFICE,'LibreOffice is required')
+class DigitalMeasurementTests(unittest.TestCase):
+    def test_digital_rows_are_measured_and_rebuilt(self):
+        import hashlib
+        import run_weekly_workflow as workflow
+        from test_weekly_digital_maturity import master_sectors
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            with contextlib.redirect_stdout(io.StringIO()):workflow.scenario(root,'normal')
+            pdf=root/'source.pdf';pdf.write_bytes(b'synthetic source identity')
+            review=root/'review.json'
+            review.write_text(json.dumps({
+                'source_pdf_sha256':hashlib.sha256(pdf.read_bytes()).hexdigest(),'reviewed':True,
+                'metrics':{'experience':15,'satisfaction':10,'complaints':20,'tools':65},
+                'sectors':[{'name':'القطاع الأول','note':None,'metrics':{'experience':15,'satisfaction':10,'complaints':20,'tools':65}}],
+                'updates':[{'perspective':'عام','text':f'تحديث رقم {i} عن سير العمل في المنصات'} for i in range(1,7)],
+                'detail_sectors':master_sectors()},ensure_ascii=False),encoding='utf-8')
+            inputs=['--tasks',root/'tasks.xlsx','--suhail',root/'projects.xlsx','--transactions',root/'transactions.xlsx']
+            digital=['--digital-pdf',pdf,'--digital-data',review]
+            result=run(WEEKLY/'build_report.py',*inputs,'--model','digital',*digital,'--output',root/'d0.pptx')
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            result=run(WEEKLY/'measure_layout.py','--report',root/'d0.pptx',*inputs,*digital)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            data=json.loads((root/'d0.layout.json').read_text(encoding='utf-8'))
+            self.assertEqual(len(data['digital']['summary']),6)
+            self.assertEqual(set(data['digital']['summary_sizes']),{'10.5','10','9.5','9','8.5','8'})
+            sectors=master_sectors()
+            self.assertEqual(sorted(data['digital']['sectors']),sorted(s['title'] for s in sectors))
+            for sector in sectors:
+                self.assertEqual(len(data['digital']['sectors'][sector['title']]['rows']),len(sector['rows']))
+            result=run(WEEKLY/'build_report.py',*inputs,'--model','digital',*digital,
+                       '--measurements',root/'d0.layout.json','--output',root/'d1.pptx')
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            # Older layout files without digital rows are stale for the digital model.
+            del data['digital'];stale=root/'stale.layout.json'
+            stale.write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
+            result=run(WEEKLY/'build_report.py',*inputs,'--model','digital',*digital,
+                       '--measurements',stale,'--output',root/'d2.pptx')
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('lack the digital-maturity tables',result.stdout+result.stderr)
 
 if __name__=='__main__':
     unittest.main()

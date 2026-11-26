@@ -4,6 +4,12 @@ from pptx.enum.text import PP_ALIGN
 from pptx.oxml.ns import qn
 
 TABLE_PT = 11
+DEFAULT_INSET = 45720  # DrawingML default top/bottom cell margin (0.05 in)
+# Every approved master writes its table text in Abar Mid. A run without its
+# own typeface falls back to the theme font (Aptos/Arial), so every run gets it.
+TABLE_FONT = 'Abar Mid'
+FONT_SLOTS = ('latin', 'ea', 'cs')
+_AFTER_FONTS = ('sym', 'hlinkClick', 'hlinkMouseOver', 'rtl', 'extLst')
 AGENDA_HEADERS = ['م','جدول الأعمال','المسؤول','المدة الزمنية (بالدقيقة)']
 
 def reverse_table_columns(table):
@@ -38,10 +44,28 @@ def rtl_table(table):
         reverse_table_columns(table)
     table._tbl.tblPr.set('rtl', '1')
 
+def set_font(props, name=TABLE_FONT):
+    """Give a run-properties element `name` for Latin, East Asian and Arabic text, in schema order."""
+    for slot in FONT_SLOTS:
+        for old in props.findall(qn('a:' + slot)):
+            props.remove(old)
+    anchor = next((child for child in props if child.tag in {qn('a:' + t) for t in _AFTER_FONTS}), None)
+    for slot in FONT_SLOTS:
+        node = props.makeelement(qn('a:' + slot), {'typeface': name})
+        if anchor is None:
+            props.append(node)
+        else:
+            anchor.addprevious(node)
+
+
 def set_cell_size(cell, font_pt=TABLE_PT):
+    for run in cell._tc.iter(qn('a:r')):
+        if run.find(qn('a:rPr')) is None:
+            run.insert(0, run.makeelement(qn('a:rPr'), {}))
     for node in cell._tc.iter():
         if node.tag in {qn('a:rPr'), qn('a:defRPr'), qn('a:endParaRPr')}:
-            node.set('sz', str(font_pt * 100))
+            node.set('sz', str(round(font_pt * 100)))
+            set_font(node)
     for paragraph in cell.text_frame.paragraphs:
         paragraph.font.size = Pt(font_pt)
         for run in paragraph.runs:
@@ -84,11 +108,29 @@ def set_table_sizes(prs, agenda_pt=TABLE_PT):
 def set_table_directions(prs):
     for table in all_tables(prs): rtl_table(table)
 
-def check_table_typography(prs, errors, agenda_pt=TABLE_PT):
+def expected_size(table, reduced, default=TABLE_PT):
+    """The size `table` must use: `default`, or the one reduced size it uses throughout when `reduced` grants it."""
+    allowed = reduced.get(table._tbl)
+    if not allowed:
+        return default
+    used = {run.font.size.pt for row in table.rows for cell in row.cells
+            for p in cell.text_frame.paragraphs for run in p.runs
+            if run.text.strip() and run.font.size is not None}
+    return used.pop() if len(used) == 1 and used <= set(allowed) else default
+
+
+def check_table_typography(prs, errors, agenda_pt=TABLE_PT, reduced=None):
+    """Check direction, alignment and size of every table.
+
+    ``reduced`` maps a table element (``table._tbl``) to the sizes it may use
+    instead of the approved size: a summary that had to shrink to stay on one
+    slide. Such a table must still use one size throughout.
+    """
+    reduced = reduced or {}
     for table in all_tables(prs):
         if table._tbl.tblPr.get('rtl') not in ('1', 'true'):
             errors.append('Table direction must be RTL')
-        font_pt=table_font_size(table,agenda_pt)
+        font_pt=expected_size(table,reduced,table_font_size(table,agenda_pt))
         headers = [c.text for c in table.rows[1].cells] if len(table.rows)>1 else []
         for i,row in enumerate(table.rows):
             for j,cell in enumerate(row.cells):
@@ -99,3 +141,8 @@ def check_table_typography(prs, errors, agenda_pt=TABLE_PT):
                     for run in p.runs:
                         if run.text and (run.font.size is None or run.font.size.pt!=font_pt):
                             errors.append(f'Table font size must be {font_pt} pt')
+                        props = run._r.find(qn('a:rPr'))
+                        if run.text.strip() and (props is None or any(
+                                (props.find(qn('a:' + slot)) is None or props.find(qn('a:' + slot)).get('typeface') != TABLE_FONT)
+                                for slot in ('latin', 'cs'))):
+                            errors.append(f'Table text must use {TABLE_FONT}')

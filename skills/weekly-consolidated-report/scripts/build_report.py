@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["openpyxl>=3.1", "python-pptx>=1.0.2", "lxml>=5.3"]
+# dependencies = ["openpyxl>=3.1", "python-pptx>=1.0.2", "lxml>=5.3", "pdfplumber>=0.11"]
 # ///
 """Generate a validated weekly candidate; rendered layout review remains required."""
 import argparse, copy, datetime as dt, hashlib, json, math, sys, tempfile, zipfile
@@ -14,9 +14,9 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as builder
 from report_common import status_styles
 from report_common import header_heights as shared_heights
-from report_common.table_typography import set_table_sizes, set_table_directions
+from report_common.table_typography import set_table_sizes, set_table_directions, apply_table
 from report_common.package_tools import reachable_parts
-from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP
+from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, content_bottom, TABLE_GAP, emu, fit_summary, measured_rows, COVER_DATE_ID, TASK_DETAIL_TITLE
 
 from update_format import format_update
 from report_common.update_format import format_table_updates
@@ -30,6 +30,7 @@ def remove(shape):shape._element.getparent().remove(shape._element)
 TASK_HEADER_HEIGHT=shared_heights.TASK_HEADER
 TRANSACTION_HEADER_HEIGHT=shared_heights.TWO_LINE_HEADER
 TRANSACTION_TITLE='المعاملات المتأخرة'
+SUMMARY_CONTINUATION_TOP=900000
 
 def header_heights(pattern):
     """Approved title/header heights; auto-height rows are summary task tables."""
@@ -37,8 +38,15 @@ def header_heights(pattern):
     if builder.table_title(pattern)==TRANSACTION_TITLE:heights[1]=TRANSACTION_HEADER_HEIGHT
     return heights
 
-def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
-    """Initial placement only; final visual acceptance must confirm pagination."""
+def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,sizes=None):
+    """Lay out titled tables from the top of `seed` down to the footer.
+
+    Detail tables continue on copies of `seed`. A summary built with
+    measurements stays on its one slide: when its 11 pt tables do not fit, the
+    table text shrinks to the largest size whose measured rows fit and `sizes` records each shrunk
+    table so the size survives the final typography pass. Without
+    measurements the placement is provisional and only feeds the measurement.
+    """
     seed._element.set('showMasterSp','1')
     patterns={builder.table_title(sh):sh for sh in builder.tables(seed)}
     top=min(sh.top for sh in patterns.values())
@@ -50,46 +58,72 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None):
                 and not getattr(sh,'has_text_frame',False)
                 and (not summary or outside_summary))
     current=seed;y=top;targets=[seed]
+    # Summary continuations (provisional pass only) start under the header buttons.
+    start=SUMMARY_CONTINUATION_TOP if summary else top
     for sh in list(builder.tables(seed)):remove(sh)
+    def place(title,pattern,chunk,weights,row_heights):
+        nonlocal y
+        sh=place_table_copy(current,pattern._element);sh.top=y
+        builder.fill_titled_table(sh,chunk,title=title,weights=weights)
+        for row,values in zip(list(sh.table.rows)[2:],chunk):
+            for cell,value in zip(row.cells,values):set_cell_exact(cell,value)
+        if summary:
+            format_table_updates(sh.table,bullet_style,paragraph_items=True)
+        for row,height in zip(sh.table.rows,row_heights):row.height=height
+        sh.height=sum(row.height for row in sh.table.rows)
+        y+=sh.height+TABLE_GAP
+        return sh
+    prepared=[]
     for title,records,pattern in sections:
         if not records:continue
-        approved_header=header_heights(pattern)
-        fixed=sum(approved_header)
-        base=builder._body_base_height(pattern.table,2)
         if measurements is not None and title not in measurements:raise ValueError('Missing layout measurements: '+title)
         measured=(measurements or {}).get(title)
         if measured and len(measured['body'])!=len(records):raise ValueError('Measured record count differs: '+title)
         if measured and (len(measured['header'])!=2 or any(not isinstance(h,(int,float)) or not math.isfinite(h) or h<=0 for h in measured['header']+measured['body'])):
             raise ValueError('Invalid native row heights: '+title)
-        fixed_heights=[math.ceil(h*12700) for h in measured['header']] if measured else None
-        if fixed_heights:fixed=sum(fixed_heights)
-        chunk=[];weights=[];heights=[]
-        def place():
-            nonlocal y,chunk,weights,heights
-            sh=place_table_copy(current,pattern._element);sh.top=y
-            builder.fill_titled_table(sh,chunk,title=title,weights=weights)
-            for row,values in zip(list(sh.table.rows)[2:],chunk):
-                for cell,value in zip(row.cells,values):set_cell_exact(cell,value)
-            if summary:
-                format_table_updates(sh.table,bullet_style,paragraph_items=True)
-            for row,height in zip(sh.table.rows,approved_header):row.height=height
-            sh.height=sum(row.height for row in sh.table.rows)
-            if fixed_heights:
-                for row,height in zip(sh.table.rows,fixed_heights+heights):row.height=height
-                sh.height=sum(row.height for row in sh.table.rows)
-            y+=sh.height+TABLE_GAP;chunk=[];weights=[];heights=[]
-        for index,row in enumerate(records):
-            weight=builder.row_units(row,pattern.table,11)
-            height=math.ceil(measured['body'][index]*12700) if measured else base*weight
-            if measured and fixed+height>bottom-(900000 if summary else top):raise ValueError('Rendered record exceeds page capacity with the approved style: '+title)
-            used=fixed+sum(heights)+height
-            if y+used>bottom:
-                if chunk:place()
+        header=[emu(h) for h in measured['header']] if measured else header_heights(pattern)
+        weights=[builder.row_units(row,pattern.table,11) for row in records]
+        base=builder._body_base_height(pattern.table,2)
+        body=[emu(h) for h in measured['body']] if measured else [base*w for w in weights]
+        smaller=(measured or {}).get('sizes',{})
+        prepared.append((title,records,pattern,header,body,weights,bool(measured),smaller))
+    if summary and measurements is not None:
+        # One slide per summary: every table below the indicators and chart, at
+        # the largest size (11 pt first) whose measured rows fit.
+        try:size,heights=fit_summary([(p[3],measured_rows(p[4],p[7])) for p in prepared],bottom-top)
+        except ValueError as exc:raise ValueError(f'{exc}: '+'، '.join(p[0] for p in prepared)) from None
+        for (title,records,pattern,*_),row_heights in zip(prepared,heights):
+            sh=place(title,pattern,records,[1]*len(records),row_heights)
+            if size!=11 and sizes is not None:sizes.append((sh,size))
+        return targets
+    for title,records,pattern,header,body,weights,measured,_ in prepared:
+        fixed=sum(header)
+        chunk=[];chunk_weights=[];chunk_heights=[]
+        for row,weight,height in zip(records,weights,body):
+            if measured and fixed+height>bottom-start:raise ValueError('Rendered record exceeds page capacity with the approved style: '+title)
+            # The first pass is provisional and only feeds the measurement; a rough
+            # estimate taller than a whole page must not block that candidate.
+            if not measured:height=min(height,bottom-start-fixed)
+            if y+fixed+sum(chunk_heights)+height>bottom:
+                if chunk:place(title,pattern,chunk,chunk_weights,header+chunk_heights)
                 current=builder.clone_slide(prs,seed,after=current,shape_predicate=keep)
-                targets.append(current);y=900000 if summary else top
-            chunk.append(row);weights.append(weight);heights.append(height)
-        if chunk:place()
+                targets.append(current);y=start
+                chunk=[];chunk_weights=[];chunk_heights=[]
+            chunk.append(row);chunk_weights.append(weight);chunk_heights.append(height)
+        if chunk:place(title,pattern,chunk,chunk_weights,header+chunk_heights)
     return targets
+
+DIGIT_WIDTH=320040  # one 36 pt bold Abar digit plus its share of the box insets (0.35 in)
+
+def fit_number(box):
+    """Widen a KPI box around its centre so a long number stays on one line.
+
+    The masters size these boxes for three digits; «1032» wrapped to «103 / 2»
+    over the label below it.
+    """
+    need=len(box.text_frame.text.strip())*DIGIT_WIDTH
+    if need>box.width:
+        box.left-= (need-box.width)//2;box.width=need
 
 def update_chart(shape,records,statuses):
     data=CategoryChartData()
@@ -146,7 +180,7 @@ def build_candidate(args):
     if not args.template and hashlib.sha256(template.read_bytes()).hexdigest()!=expected_hash:
         raise ValueError('Bundled weekly template checksum mismatch')
     tasks=Path(args.tasks);projects=Path(args.suhail);transactions=Path(args.transactions)
-    measurements=None
+    measurements=None;digital_measurements=None;sizes=[]
     if args.measurements:
         measured=json.loads(Path(args.measurements).read_text(encoding='utf-8-sig'))
         for key,path in [('tasks',tasks),('suhail',projects),('transactions',transactions),('template',template)]:
@@ -158,11 +192,14 @@ def build_candidate(args):
             raise ValueError('Digital layout measurements cannot be used for the standard model')
         if measured.get('typography')!='11pt-suhail-paragraph-updates-v3':raise ValueError('Layout measurements are stale: regenerate for Suhail summary update formatting')
         measurements=measured['tables']
+        if args.model=='digital':
+            digital_measurements=measured.get('digital')
+            if not digital_measurements:raise ValueError('Layout measurements lack the digital-maturity tables: measure the digital candidate again')
     tk,tc,ts,td=builder.task_data(tasks);pk,pc,ps,pd=builder.suhail_data(projects);xk,xc,xd=transaction_data(transactions)
     prs=Presentation(template);set_table_sizes(prs);slides=list(prs.slides)
     if digital_data is not None:
         from digital_maturity import populate
-        populate(prs,digital_data)
+        populate(prs,digital_data,digital_measurements,sizes)
     # Discover roles first; IDs are checked within the identified summary role.
     summary=[builder.find_slide_with_text(prs,label) for label in ('إجمالي المهام','إجمالي مشاريع سهيل','إجمالي المعاملات')]
     task_patterns=builder.detail_pattern_slides(prs,'task')
@@ -175,13 +212,14 @@ def build_candidate(args):
                        if p._p.find('./'+qn('a:pPr')+'/'+qn('a:buChar')) is not None),None)
 
     date=dt.datetime.now().astimezone().date()
-    builder.set_text(builder.shape_by_id(slides[0],19),f'{date.day} {builder.MONTHS[date.month-1]} {date.year}')
+    builder.set_text(builder.shape_by_id(slides[0],COVER_DATE_ID),f'{date.day} {builder.MONTHS[date.month-1]} {date.year}')
     chart_specs=[]
     for sl,kpis,ids,records,statuses,chart_name in [
         (summary[0],tk,[11,14,16,7,6],tc,['مكتملة','على المخطط','متأخر','معلق'],'chart1.xml'),
         (summary[1],pk,[10,12,14,8,7],pc,['مكتملة','على المخطط','متأخر','لم تبدأ'],'chart2.xml'),
         (summary[2],xk,[24,29,31,26],xc,['مكتملة','على المخطط','متأخر'],'chart3.xml')]:
-        for sid,value in zip(ids,kpis):builder.set_text(builder.shape_by_id(sl,sid),value)
+        for sid,value in zip(ids,kpis):
+            box=builder.shape_by_id(sl,sid);builder.set_text(box,value);fit_number(box)
         ordered=update_chart(next(sh for sh in sl.shapes if sh.has_chart),records,statuses)
         chart_specs.append((chart_name,ordered,statuses))
     for sl,sections in [(summary[0],ts),(summary[1],ps)]:
@@ -192,16 +230,16 @@ def build_candidate(args):
             headers=[c.text.strip() for c in pattern.table.rows[1].cells]
             columns=summary_columns(title,headers,sl==summary[0])
             seq.append((title,[[row[i] for i in columns] for row in records],pattern))
-        flow(prs,sl,seq,True,measurements,bullet_style)
+        flow(prs,sl,seq,True,measurements,bullet_style,sizes)
     tframe=next(sh for sh in builder.tables(summary[2]))
     headings=[field_key(c.text) for c in tframe.table.rows[1].cells]
     xheaders=[field_key(s) for s in ['رقم المعاملة','موضوع المعاملة','القطاع','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط']]
-    flow(prs,summary[2],[(TRANSACTION_TITLE,[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],True,measurements)
+    flow(prs,summary[2],[(TRANSACTION_TITLE,[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],True,measurements,sizes=sizes)
     generated={};unused=[]
     for kind,patterns,sections in [('task',task_patterns,td),('project',project_patterns,pd)]:
         seed=patterns[0];pattern=builder.detail_tables(seed,kind)[0]
         # Remove any additional sample tables before filling a single flowing stream.
-        seq=[((f'تفاصيل المهام ({title})' if kind=='task' else title),[row[:6] for row in rows],pattern) for title,rows in sections]
+        seq=[((TASK_DETAIL_TITLE.format(title) if kind=='task' else title),[row[:6] for row in rows],pattern) for title,rows in sections]
         generated[kind]=flow(prs,seed,seq,measurements=measurements)
         if not any(rows for _,rows in sections):generated[kind]=[]
         for sl in generated[kind]:
@@ -235,6 +273,8 @@ def build_candidate(args):
                 for t in sh._element.findall('.//'+qn('a:t')):t.text=str(i)
     prepare_navigation(prs)
     set_table_sizes(prs)
+    # Summary tables that had to shrink to stay on their one slide keep that size.
+    for shape,size in sizes:apply_table(shape.table,size)
     set_table_directions(prs)
     deck=Path(args.output);prs.save(deck)
     with tempfile.TemporaryDirectory() as td:

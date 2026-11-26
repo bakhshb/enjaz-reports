@@ -3,9 +3,15 @@
 LibreOffice draws a PowerPoint table row at exactly its declared height and lets
 longer text overflow; it never grows the row. Reading row borders back from a
 render therefore only echoes the declared heights. Instead, every measured row
-is copied into its own one-row table on a probe slide, collapsed to almost no
-height, and the vertical extent of its rendered glyphs (plus the cell insets)
-gives the height the row needs. The source presentation is never modified.
+is copied into its own one-row table on a probe slide, made taller than any
+text it could hold and anchored to the top, and the distance from the row's top
+edge to the bottom of its lowest glyph (plus the bottom cell inset) gives the
+height the row needs. The source presentation is never modified.
+
+Measuring from the row's top edge counts the top inset and the first line's
+ascent. An earlier probe collapsed the row to 1 pt and measured only the glyph
+extent, which left out that space and came out 0.05-0.07 in short on every row;
+on a table of six rows that let the next table overlap the last one.
 """
 from copy import deepcopy
 from pathlib import Path
@@ -17,12 +23,11 @@ from pptx import Presentation
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from report_common.render import export_pdf
 from report_common.pptx_helpers import add_slide
+from report_common.table_typography import DEFAULT_INSET
 
 EMU = 914400
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-COLLAPSED = 12700          # 1 pt: every line of text then overflows the row
-PROBE_TOP = 4 * EMU        # leaves room for text centred on the collapsed row
-DEFAULT_INSET = 45720      # DrawingML default top/bottom cell margin (0.05")
+PROBE_TOP = int(0.25 * EMU)  # the probe row starts here, anchored to the top
 MIN_ROW = int(0.22 * EMU)  # one 11 pt line with insets
 
 
@@ -35,15 +40,22 @@ def _row_text(tr):
                      for tc in tr.findall(_q('tc')) for p in tc.iter(_q('p'))).strip()
 
 
-def _insets(tr):
-    """Largest top+bottom margin among the row's cells."""
+def _bottom_inset(tr):
+    """Largest bottom margin among the row's cells."""
     best = 0
     for tc in tr.findall(_q('tc')):
         pr = tc.find(_q('tcPr'))
-        top = int(pr.get('marT', DEFAULT_INSET)) if pr is not None else DEFAULT_INSET
-        bottom = int(pr.get('marB', DEFAULT_INSET)) if pr is not None else DEFAULT_INSET
-        best = max(best, top + bottom)
+        best = max(best, int(pr.get('marB', DEFAULT_INSET)) if pr is not None else DEFAULT_INSET)
     return best
+
+
+def _anchor_top(tr):
+    for tc in tr.findall(_q('tc')):
+        pr = tc.find(_q('tcPr'))
+        if pr is None:
+            pr = tc.makeelement(_q('tcPr'), {})
+            tc.append(pr)
+        pr.set('anchor', 't')
 
 
 def measure_rows(report, targets, padding=0.06):
@@ -52,7 +64,8 @@ def measure_rows(report, targets, padding=0.06):
     ``targets`` is an iterable of (slide_index, shape_id, row_indices). Rows
     without text are skipped (the caller keeps their declared height).
     ``padding`` (inches) is added to every measured row as a safety margin for
-    renderer differences."""
+    renderer differences (glyph descent below the font box, PowerPoint vs
+    LibreOffice line breaks)."""
     source = Presentation(report)
     probe = Presentation(report)
     layout = probe.slides[0].slide_layout
@@ -73,7 +86,9 @@ def measure_rows(report, targets, padding=0.06):
                 if k != row_index:
                     tbl.remove(other)
             kept = tbl.find(_q('tr'))
-            kept.set('h', str(COLLAPSED))
+            tall = probe.slide_height - 2 * PROBE_TOP
+            kept.set('h', str(tall))
+            _anchor_top(kept)
             # A merged-from-above cell would hide its text once alone.
             for tc in kept.findall(_q('tc')):
                 for attr in ('vMerge', 'rowSpan'):
@@ -81,9 +96,9 @@ def measure_rows(report, targets, padding=0.06):
             slide.shapes._spTree.append(element)
             shape = slide.shapes[-1]
             shape.top = PROBE_TOP
-            shape.height = COLLAPSED
+            shape.height = tall
             jobs.append(((slide_index, shape_id, row_index), len(probe.slides) - 1,
-                         shape.left, shape.left + shape.width, _insets(kept)))
+                         shape.left, shape.left + shape.width, _bottom_inset(kept)))
     if not jobs:
         return {}
     # Original slides stay in the probe deck: layout nav links still reference
@@ -102,7 +117,7 @@ def measure_rows(report, targets, padding=0.06):
                          and c['text'].strip()]
                 if not chars:
                     continue
-                text_h = max(c['bottom'] for c in chars) - min(c['top'] for c in chars)
-                needed = int(text_h / 72 * EMU) + insets + int(padding * EMU)
+                text_bottom = max(c['bottom'] for c in chars) - PROBE_TOP / EMU * 72
+                needed = int(text_bottom / 72 * EMU) + insets + int(padding * EMU)
                 result[key] = max(MIN_ROW, needed)
     return result
