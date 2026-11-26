@@ -11,7 +11,7 @@ A Claude Code plugin (also used by Codex and ChatGPT) with skills that build the
 1. `task-details`: raw tasks export → tasks summary Excel.
 2. `suhail-project-report`: raw Suhail export → Suhail summary Excel (newest `Wxx` week wins).
 3. `delayed-transactions-summary`: per-sector transaction files → one transactions Excel.
-4. `weekly-consolidated-report`: the three Excel files → weekly PowerPoint, plus an Arabic summary message to the Minister.
+4. `weekly-consolidated-report`: the three Excel files → weekly PowerPoint, plus a short and a long Arabic message to the Minister.
 5. `weekly-report-by-sector`: weekly deck → one deck per sector.
 
 `monday-meeting-report` is separate: weekly topics + tasks + Suhail Excel → Monday meeting deck.

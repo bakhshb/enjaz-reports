@@ -1,6 +1,6 @@
 ---
 name: weekly-consolidated-report
-description: Populate either approved Ministry of Hajj and Umrah weekly consolidated PowerPoint model from the final tasks, Suhail projects, and transactions Excel summaries. The digital-experience model also uses its current PDF. After delivery, replies with a copyable Arabic summary message to the Minister built from the delivered report. Ask which model to use when the user has not chosen one. Does not build upstream Excel summaries or split by sector.
+description: Populate either approved Ministry of Hajj and Umrah weekly consolidated PowerPoint model from the final tasks, Suhail projects, and transactions Excel summaries. The digital-experience model also uses its current PDF. After delivery, replies with a short and a long copyable Arabic message to the Minister built from the delivered report. Ask which model to use when the user has not chosen one. Does not build upstream Excel summaries or split by sector.
 ---
 
 # Weekly Consolidated Report
@@ -107,4 +107,4 @@ Prefer `uv run` using the declared dependencies. Reuse an existing installation.
 
 Deliver the editable PPTX bytes that were rebuilt with measurements and passed data checks and final visual review, using an accessible file link. Deliver PDF only when requested.
 
-After delivering the report, always reply with the Arabic summary message to the Minister in one copyable code block, built only from the delivered report's summary slides. It is short: «معاليك», one line each for المهام، المعاملات، مبادرات سهيل and (for `digital`) مؤشر نضج التجربة الرقمية, then «تحياتي». Follow [the minister summary reference](references/minister-summary.md) exactly; judgements that are not in the report (how serious a delay is, escalation, who is following it) go at the end of the digital line for the user to complete; every part stays on one line. Keep QA evidence outside the slides: exact output/input/template hashes, performed checks, renderer, and any limitation. Any edit invalidates affected checks. Do not split sectors, schedule runs, or send reports to others unless requested.
+After delivering the report, always reply with the two Arabic messages to the Minister, short and long, each in its own copyable code block, and save both next to the report. Generate them with `scripts/minister_messages.py` from the delivered report and follow [the minister messages reference](references/minister-summary.md) for both templates and rules. Keep QA evidence outside the slides: exact output/input/template hashes, performed checks, renderer, and any limitation. Any edit invalidates affected checks. Do not split sectors, schedule runs, or send reports to others unless requested.
