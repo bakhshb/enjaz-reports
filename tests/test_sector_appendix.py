@@ -1,7 +1,7 @@
 """A weekly deck with appendix slides splits cleanly, and a bad transactions workbook only drops that section."""
 from pathlib import Path
 import contextlib, io, shutil, tempfile, unittest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from pptx import Presentation
 import run_weekly_workflow as workflow
 from test_upstream_integrity import run
@@ -18,6 +18,8 @@ def deck_tables(path):
 
 
 class AppendixMasterTests(unittest.TestCase):
+    TRANSACTIONS = 40   # delayed transactions in the appendix deck
+
     @classmethod
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
@@ -26,20 +28,31 @@ class AppendixMasterTests(unittest.TestCase):
             workflow.scenario(cls.root, 'overflow')      # also splits the shrunk (reduced font floor) deck and runs qa on it
             cls.shrunk = cls.root / 'weekly.pptx'
             cls.appendix = cls.root / 'appendix.pptx'
+            # At a line height of 1.2 times the font size the scenario's 24 delayed transactions fit the
+            # summary slide, so the appendix deck gets its own workbook with enough of them to need an appendix.
+            source = cls.root / 'raw-transactions' / 'source.xlsx'
+            wb = load_workbook(source); ws = wb.active
+            for r in range(29, 29 + cls.TRANSACTIONS - 24):
+                for c in [20, 24, 27, 28, 29]: ws.cell(r, c).value = ws.cell(5, c).value
+                ws.cell(r, 31).value = f'{r:06d}'
+            wb.save(source)
+            cls.transactions = cls.root / 'transactions-appendix.xlsx'
+            workflow.require(run(workflow.TRANSACTIONS, '--input-dir', source.parent, '--output', cls.transactions))
             weekly.main(['--tasks', str(cls.root / 'tasks.xlsx'), '--suhail', str(cls.root / 'projects.xlsx'),
-                         '--transactions', str(cls.root / 'transactions.xlsx'), '--output', str(cls.appendix),
+                         '--transactions', str(cls.transactions), '--output', str(cls.appendix),
                          '--measure', '--summary-overflow', 'appendix'])
 
     @classmethod
     def tearDownClass(cls):
         cls.temp.cleanup()
 
-    def split_and_qa(self, master, name):
+    def split_and_qa(self, master, name, transactions=None):
         out = self.root / name
-        split = run(SECTOR / 'split_report.py', master, '--transactions', self.root / 'transactions.xlsx',
+        transactions = transactions or self.root / 'transactions.xlsx'
+        split = run(SECTOR / 'split_report.py', master, '--transactions', transactions,
                     '--outdir', out, '--no-refine')
         self.assertEqual(split.returncode, 0, split.stderr)
-        qa = run(SECTOR / 'qa_report.py', out, '--master', master, '--transactions', self.root / 'transactions.xlsx')
+        qa = run(SECTOR / 'qa_report.py', out, '--master', master, '--transactions', transactions)
         return out, qa
 
     def test_the_master_really_has_appendix_tables_above_the_kpi_zone(self):
@@ -53,17 +66,18 @@ class AppendixMasterTests(unittest.TestCase):
         slides = list(prs.slides)
         self.assertIn(role['trans'], range(len(slides)))
         self.assertIn('إجمالي', splitter.kpi_shapes(slides[role['trans']]))
+        self.assertTrue(role['trans_slides'])   # the transactions table sits on an appendix, not on the KPI slide
         self.assertTrue(all(i > role['trans'] for i in role['trans_slides']))
 
     def test_split_of_an_appendix_master_passes_qa(self):
-        out, qa = self.split_and_qa(self.appendix, 'sectors-appendix')
+        out, qa = self.split_and_qa(self.appendix, 'sectors-appendix', self.transactions)
         self.assertEqual(qa.returncode, 0, qa.stdout + qa.stderr)
         self.assertNotIn('ISSUES FOUND', qa.stdout)
         for deck in out.glob('*.pptx'):
             prs = Presentation(deck)
             rows = [len(sh.table.rows) - 2 for sl in prs.slides for sh in sl.shapes
                     if sh.has_table and splitter.table_title(splitter.table_rows(sh)) == 'المعاملات المتأخرة']
-            self.assertEqual(sum(rows), 24, rows)   # each transaction once, not the master's table again
+            self.assertEqual(sum(rows), self.TRANSACTIONS, rows)   # each transaction once, not the master's table again
 
     def test_split_of_a_reduced_font_master_passes_qa(self):
         out, qa = self.split_and_qa(self.shrunk, 'sectors-shrunk')

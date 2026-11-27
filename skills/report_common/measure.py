@@ -108,7 +108,8 @@ def measure_rows(report, targets, padding=0.06):
     with tempfile.TemporaryDirectory(prefix='measure-') as temporary:
         root = Path(temporary)
         probe.save(root / 'probe.pptx')
-        pdf_path = export_pdf(root / 'probe.pptx', root / 'probe.pdf')
+        # LibreOffice's own text placement: the preview shift would move the last line's bottom.
+        pdf_path = export_pdf(root / 'probe.pptx', root / 'probe.pdf', preview=False)
         with pdfplumber.open(pdf_path) as pdf:
             for key, page_index, left, right, insets in jobs:
                 page = pdf.pages[page_index]

@@ -5,6 +5,12 @@ PowerPoint: every paragraph ends with complete end-of-paragraph properties
 (size and Abar), so text typed into an emptied cell or an inserted row keeps
 the table's typography instead of the theme default, and every row carries
 its own row ID (rows copied from one pattern row shared one).
+
+Every table paragraph also gets a fixed line spacing of LINE_SPACING times its
+font size. Abar Mid declares a line 1.8 times the font size; LibreOffice (the
+measure step) follows that, while the user's PDF shows lines at 1.2, so
+without a written spacing each program chose its own line height and the
+measured rows came out one and a half times too tall.
 """
 from copy import deepcopy
 from pptx.util import Pt
@@ -16,6 +22,9 @@ DEFAULT_INSET = 45720  # DrawingML default top/bottom cell margin (0.05 in)
 # Every approved master writes its table text in Abar Mid. A run without its
 # own typeface falls back to the theme font (Aptos/Arial), so every run gets it.
 TABLE_FONT = 'Abar Mid'
+# Line pitch of all table text as a multiple of its font size, written as an
+# exact spacing in points: 13.2 at 11 pt, 12.6 at 10.5, 12 at 10, 9.6 at 8.
+LINE_SPACING = 1.2
 FONT_SLOTS = ('latin', 'ea', 'cs')
 _AFTER_FONTS = ('sym', 'hlinkClick', 'hlinkMouseOver', 'rtl', 'extLst')
 AGENDA_HEADERS = ['م','جدول الأعمال','المسؤول','المدة الزمنية (بالدقيقة)']
@@ -85,12 +94,36 @@ def end_paragraph_properties(paragraph):
     return end
 
 
+def line_spacing(font_pt):
+    """The fixed line spacing of table text at `font_pt`, in hundredths of a point as DrawingML stores it."""
+    return round(font_pt * LINE_SPACING * 100)
+
+
+def set_line_spacing(paragraph, font_pt):
+    """Give `paragraph` (an ``a:p``) the fixed line spacing of `font_pt` text.
+
+    ``a:lnSpc`` is the first child of the paragraph properties: the schema puts
+    it before the spacing and bullet elements, and PowerPoint asks to repair a
+    file that has them the other way round.
+    """
+    props = paragraph.find(qn('a:pPr'))
+    if props is None:
+        props = paragraph.makeelement(qn('a:pPr'), {})
+        paragraph.insert(0, props)
+    for old in props.findall(qn('a:lnSpc')):
+        props.remove(old)
+    spacing = props.makeelement(qn('a:lnSpc'), {})
+    spacing.append(spacing.makeelement(qn('a:spcPts'), {'val': str(line_spacing(font_pt))}))
+    props.insert(0, spacing)
+
+
 def set_cell_size(cell, font_pt=TABLE_PT):
     for run in cell._tc.iter(qn('a:r')):
         if run.find(qn('a:rPr')) is None:
             run.insert(0, run.makeelement(qn('a:rPr'), {}))
     for paragraph in cell._tc.iter(qn('a:p')):
         end_paragraph_properties(paragraph)
+        set_line_spacing(paragraph, font_pt)
     # A list first: set_font rebuilds each node's children, and changing the tree
     # while walking it made lxml skip the nodes that follow (the end-of-paragraph
     # properties kept the master's 10 pt, which is what typed text then used).

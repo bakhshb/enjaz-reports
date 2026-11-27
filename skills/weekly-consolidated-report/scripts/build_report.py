@@ -299,7 +299,7 @@ def read_measurements(args,inputs):
             if sha(path)!=hashes.get(key,'').lower():raise ValueError('ملف القياس قديم: تغيّر '+('ملف PDF للنضج الرقمي' if key=='digital_pdf' else 'ملف بيانات النضج الرقمي'))
     elif 'digital_pdf' in hashes or 'digital_data' in hashes:
         raise ValueError('قياسات النضج الرقمي لا تصلح للنموذج القياسي')
-    if measured.get('typography')!='11pt-suhail-paragraph-updates-v3':raise ValueError('ملف القياس قديم: تغير تنسيق تحديثات سهيل')
+    if measured.get('typography')!='11pt-line-1.2-updates-v4':raise ValueError('ملف القياس قديم: تغير تنسيق الجداول')
     tables=measured['tables']
     digital=None
     if args.model=='digital':

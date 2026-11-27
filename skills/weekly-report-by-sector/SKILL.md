@@ -364,7 +364,7 @@ Acceptance: no output table contains a sector column; delayed and on-plan task t
 
 Every generated PowerPoint table must have native RTL table direction, including support, project status, transactions and continuation tables. Right-aligned Arabic text alone is insufficient. Keep numbering at the right and preserve field content, column widths and merged titles when converting an LTR source pattern. QA must reject any table without RTL enabled.
 
-Apply to every summary/detail/status table, including patterns cloned from the bundled master or a supplied 10 pt report. All table text must be **11 pt**: titles, column headers, body, status, notes and empty-cell defaults. This is the explicit exception to preserving the source's font size/alignment.
+Apply to every summary/detail/status table, including patterns cloned from the bundled master or a supplied 10 pt report. All table text must be **11 pt**: titles, column headers, body, status, notes and empty-cell defaults. This is the explicit exception to preserving the source's font size/alignment. The same pass writes a fixed line spacing of 1.2 times the font size (13.2 pt at 11 pt) into every table paragraph, and row heights are measured at that spacing.
 
 Apply horizontal alignment to the column headers and body paragraphs:
 

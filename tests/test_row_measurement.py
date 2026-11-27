@@ -36,6 +36,23 @@ LIBREOFFICE=shutil.which('soffice') is not None
 EMU=914400
 
 
+def spacing_faults(deck):
+    """Table paragraphs of a saved deck whose first paragraph property is not a fixed line spacing of 1.2 times every size in them."""
+    from pptx.oxml.ns import qn
+    faults=[];count=0
+    for si,slide in enumerate(Presentation(deck).slides):
+        for tbl in slide._element.iter(qn('a:tbl')):
+            for p in tbl.iter(qn('a:p')):
+                count+=1
+                props=p.find(qn('a:pPr'))
+                exact=props[0].find(qn('a:spcPts')) if props is not None and len(props) and props[0].tag==qn('a:lnSpc') else None
+                sizes={int(node.get('sz')) for node in p.iter(qn('a:rPr'),qn('a:endParaRPr')) if node.get('sz')}
+                if exact is None or len(sizes)!=1 or int(exact.get('val'))!=round(sizes.pop()*1.2):
+                    faults.append((Path(deck).name,si+1,''.join(t.text or '' for t in p.iter(qn('a:t')))[:30]))
+    assert count,deck
+    return faults
+
+
 def first_table(prs,min_rows=3):
     for i,slide in enumerate(prs.slides):
         for sh in slide.shapes:
@@ -59,6 +76,38 @@ class ProbeMeasurementTests(unittest.TestCase):
             self.assertLess(measured[(si,sh.shape_id,3)],int(0.8*EMU))
             self.assertEqual(before,deck.read_bytes())
 
+
+    def test_known_line_count_measures_lines_times_1_2_font_size_plus_margins(self):
+        """27-11-2026: LibreOffice drew Abar lines at 1.8 times the size (19.8 pt at 11) and the user's PDF at 1.2 (13.2 pt),
+
+        so a 19-line row measured 5.39 in against his 3.58 in and a summary that fits went to an appendix.
+        The tables now carry a fixed spacing of 1.2 times the size, and the measure step reads that height.
+        """
+        sys.path.insert(0,str(WEEKLY))
+        from weekly_data import set_cell_exact, set_body_margins
+        from report_common.table_typography import set_table_sizes, apply_table
+        lines=7;padding=0.06
+        with tempfile.TemporaryDirectory() as directory:
+            for size,margin in [(11,None),(10.5,None),(10,9144),(8,9144)]:
+                deck=Path(directory)/f'deck-{size:g}.pptx'
+                prs=Presentation(DIGITAL);set_table_sizes(prs);si,sh=first_table(prs,4)
+                table=sh.table
+                for tr in list(table._tbl.tr_lst)[3:]:table._tbl.remove(tr)
+                # Short paragraphs, one per line: the line count does not depend on wrapping.
+                for cell in table.rows[2].cells:set_cell_exact(cell,'')
+                set_cell_exact(table.rows[2].cells[3],'\n'.join(f'سطر {n}' for n in range(1,lines+1)))
+                apply_table(table,size)
+                if margin is not None:set_body_margins(table,margin)
+                cell=table.rows[2].cells[3]
+                margins=(cell.margin_top+cell.margin_bottom)/EMU*72
+                prs.save(deck)
+                key=(si,sh.shape_id,2)
+                bare=measure_rows(deck,[(si,sh.shape_id,[2])],padding=0)[key]/EMU*72
+                expected=lines*1.2*size+margins
+                # Within one point of the exact height; at the font's own 1.8 the row would be 0.6 x size x lines taller.
+                self.assertAlmostEqual(bare,expected,delta=1.0,msg=f'{size} pt')
+                padded=measure_rows(deck,[(si,sh.shape_id,[2])])[key]/EMU*72
+                self.assertAlmostEqual(padded,expected+padding*72,delta=1.0,msg=f'{size} pt')
 
     def test_measured_height_holds_the_rendered_text(self):
         """26-11-2026: rows sized by the old collapsed probe were 0.05-0.07 in short, so tables overlapped."""
@@ -150,12 +199,16 @@ class ConsolidatedMeasurementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             with contextlib.redirect_stdout(io.StringIO()):workflow.scenario(root,'normal')
+            # The files the builders save (weekly, Monday, every sector deck) carry the fixed spacing in every table paragraph.
+            decks=[root/'weekly.pptx',root/'monday.pptx',*sorted((root/'sectors').glob('*.pptx'))]
+            self.assertGreater(len(decks),2)
+            for deck in decks:self.assertEqual(spacing_faults(deck),[])
             inputs=['--tasks',root/'tasks.xlsx','--suhail',root/'projects.xlsx','--transactions',root/'transactions.xlsx']
             result=run(WEEKLY/'measure_layout.py','--report',root/'weekly.pptx',*inputs)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             layout=root/'weekly.layout.json'
             data=json.loads(layout.read_text(encoding='utf-8'))
-            self.assertEqual(data['typography'],'11pt-suhail-paragraph-updates-v3')
+            self.assertEqual(data['typography'],'11pt-line-1.2-updates-v4')
             self.assertTrue(data['tables'])
             # Summary tables carry rows measured with the compact margins at every summary size, 11 included.
             summaries=[entry for entry in data['tables'].values() if 'compact' in entry]
@@ -166,6 +219,7 @@ class ConsolidatedMeasurementTests(unittest.TestCase):
             result=run(WEEKLY/'build_report.py',*inputs,'--measurements',layout,'--output',root/'measured.pptx')
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertLessEqual(len(Presentation(root/'measured.pptx').slides),len(Presentation(root/'weekly.pptx').slides))
+            self.assertEqual(spacing_faults(root/'measured.pptx'),[])
 
 @unittest.skipUnless(LIBREOFFICE,'LibreOffice is required')
 class DigitalMeasurementTests(unittest.TestCase):

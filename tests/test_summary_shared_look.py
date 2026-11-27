@@ -130,7 +130,7 @@ class Inputs:
                     tables[title] = entry
         hashes = {'tasks': sha(self.root / 'tasks.xlsx'), 'suhail': sha(self.root / 'projects.xlsx'),
                   'transactions': sha(self.root / 'transactions.xlsx'), 'template': sha(self.template)}
-        data = {'typography': '11pt-suhail-paragraph-updates-v3', 'hashes': hashes, 'tables': tables}
+        data = {'typography': '11pt-line-1.2-updates-v4', 'hashes': hashes, 'tables': tables}
         if self.digital:
             hashes.update(digital_pdf=sha(self.pdf), digital_data=sha(self.review))
             data['digital'] = digital_part

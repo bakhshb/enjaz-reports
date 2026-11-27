@@ -36,7 +36,7 @@ For `digital`, verify SHA-256 `4f44e50242617b4448ff4f9dcde2b29e609a3a37e89132a05
 
 Every PowerPoint table must use native right-to-left (RTL) table direction in both models, including support, transactions, digital summary/detail/challenge tables and all continuations. Right-aligned text alone is insufficient. Keep numbering at the right; convert LTR-stored patterns together with their column widths and merged cells so every value stays with its field. Reject output tables without RTL enabled. Latin identifiers may retain LTR text within an RTL table.
 
-All table text is **11 pt**, including table titles, headers, data, status cells and notes (and the Monday agenda). Apply this explicit size even when the master stores 10 or 14 pt. Preserve Abar, bold emphasis, RTL, fills and column widths. Adjust row heights and pagination when needed; never reduce the font to make a detail table fit.
+All table text is **11 pt**, including table titles, headers, data, status cells and notes (and the Monday agenda). Apply this explicit size even when the master stores 10 or 14 pt. Preserve Abar, bold emphasis, RTL, fills and column widths. Every table paragraph gets a fixed line spacing of 1.2 times its font size (13.2 pt at 11 pt); the shared typography pass writes it, and the measurement reads rows at that height. Adjust row heights and pagination when needed; never reduce the font to make a detail table fit.
 
 Every table run is set in the master's Abar Mid for Latin, East Asian and Arabic text, including note cells whose master example names no font (they otherwise fall back to the theme font); the validator rejects any other table font.
 

@@ -6,7 +6,8 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Pt
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'skills'))
-from report_common.table_typography import set_table_sizes, set_table_directions, all_tables, check_table_typography, TABLE_FONT
+from pptx.oxml.ns import qn
+from report_common.table_typography import set_table_sizes, set_table_directions, all_tables, apply_table, check_table_typography, TABLE_FONT
 
 class TableTypographyTests(unittest.TestCase):
     def test_monday_topics_only_use_14_pt_including_headers_and_defaults(self):
@@ -26,6 +27,81 @@ class TableTypographyTests(unittest.TestCase):
         set_table_directions(prs)
         errors=[];check_table_typography(prs,errors,agenda_pt=14)
         self.assertEqual(errors,[])
+
+    def spacings(self,table):
+        """The line spacing written in every paragraph of `table`, as (first child tag, spcPts value)."""
+        result=[]
+        for row in table.rows:
+            for cell in row.cells:
+                for p in cell._tc.iter(qn('a:p')):
+                    props=p.find(qn('a:pPr'))
+                    self.assertIsNotNone(props)
+                    found=props.findall(qn('a:lnSpc'))
+                    self.assertEqual(len(found),1)
+                    # First in the paragraph properties: before the spacing and bullet elements.
+                    self.assertIs(props[0],found[0])
+                    self.assertEqual([child.tag for child in found[0]],[qn('a:spcPts')])
+                    result.append(found[0][0].get('val'))
+        return result
+
+    def test_every_table_paragraph_has_a_fixed_line_spacing_of_1_2_times_its_size(self):
+        """27-11-2026: without a written spacing LibreOffice drew Abar lines at 1.8 times the size and the user's PDF at 1.2."""
+        for skill,name in [('monday-meeting-report','monday-meeting-master.pptx'),('weekly-consolidated-report','weekly-report-master.pptx'),
+                           ('weekly-consolidated-report','weekly-report-digital-master.pptx')]:
+            prs=Presentation(ROOT/'skills'/skill/'assets'/name)
+            set_table_sizes(prs,agenda_pt=14)
+            tables=list(all_tables(prs))
+            self.assertTrue(tables)
+            for table in tables:
+                agenda=table.cell(0,0).text.strip()=='م' and len(table.columns)==4
+                self.assertEqual(set(self.spacings(table)),{'1680' if agenda else '1320'},name)
+
+    def test_line_spacing_follows_the_size_the_fitting_picks(self):
+        prs=Presentation(ROOT/'skills/weekly-consolidated-report/assets/weekly-report-digital-master.pptx')
+        set_table_sizes(prs)
+        table=next(t for t in all_tables(prs) if len(t.columns)==3)   # the digital «أبرز التحديثات» table
+        for size,expected in [(10.5,'1260'),(10,'1200'),(9.5,'1140'),(9,'1080'),(8.5,'1020'),(8,'960'),(11,'1320')]:
+            apply_table(table,size)
+            self.assertEqual(set(self.spacings(table)),{expected})
+
+    def test_line_spacing_precedes_bullets_and_passes_the_package_check(self):
+        import tempfile
+        from report_common import validation
+        from report_common.update_format import format_update
+        from report_common.pptx_helpers import set_cell_text
+        prs=Presentation(ROOT/'skills/weekly-consolidated-report/assets/weekly-report-master.pptx')
+        set_table_sizes(prs)
+        table=next(t for t in all_tables(prs) if len(t.columns)==6 and 'ما تم حتى تاريخه' in [c.text for c in t.rows[1].cells])
+        cell=table.rows[2].cells[5]
+        bullet=cell.text_frame.paragraphs[0]._p.makeelement(qn('a:pPr'),{'marR':'171450','indent':'-171450'})
+        set_cell_text(cell,'تاريخ التحديث: 01-11-2026\n- بند أول\n- بند ثان')
+        format_update(cell,bullet)
+        apply_table(table,10)
+        for p in cell._tc.iter(qn('a:p')):
+            tags=[child.tag for child in p.find(qn('a:pPr'))]
+            marker=next(i for i,tag in enumerate(tags) if tag in (qn('a:buNone'),qn('a:buChar')))
+            self.assertLess(tags.index(qn('a:lnSpc')),marker)
+        self.assertEqual(set(self.spacings(table)),{'1200'})
+        with tempfile.TemporaryDirectory() as directory:
+            deck=Path(directory)/'deck.pptx';prs.save(deck)
+            errors=[];validation.package(deck,errors)
+            self.assertEqual(errors,[])
+
+    def test_preview_lowers_fixed_spacing_text_without_changing_the_text_block(self):
+        """LibreOffice draws a fixed-spacing line against the top of its cell; the PDF preview moves it to PowerPoint's place."""
+        from report_common.render import lower_fixed_spacing_text
+        prs=Presentation(ROOT/'skills/weekly-consolidated-report/assets/weekly-report-master.pptx')
+        set_table_sizes(prs)
+        table=next(t for t in all_tables(prs) if len(t.columns)==6)
+        cell=table.rows[2].cells[1]
+        before=(cell.margin_top,cell.margin_bottom,cell._tc.tcPr.get('anchor'))
+        lower_fixed_spacing_text(table)
+        shift=round((0.8*13.2-(13.2-0.7*11))*12700)   # 5.06 pt at 11 pt
+        taken=min(before[1],shift)
+        self.assertEqual(before[2],'ctr')
+        self.assertEqual(cell.margin_bottom,before[1]-taken)
+        self.assertEqual(cell.margin_top,before[0]+2*shift-taken)
+        self.assertGreaterEqual(cell.margin_bottom,0)
 
     def templates(self):
         for skill,name in [('monday-meeting-report','monday-meeting-master.pptx'),('weekly-consolidated-report','weekly-report-master.pptx')]:

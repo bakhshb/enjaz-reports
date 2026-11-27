@@ -35,7 +35,7 @@ from report_common.table_typography import apply_table
 SUMMARY_TITLES = set(TASK_SUMMARY_TITLES) | set(SUHAIL_SUMMARY_TITLES) | {'المعاملات المتأخرة'}
 
 DIGITAL_MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
-TYPOGRAPHY = '11pt-suhail-paragraph-updates-v3'
+TYPOGRAPHY = '11pt-line-1.2-updates-v4'
 
 
 def points(found, si, shape_id, row, fallback):
