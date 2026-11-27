@@ -21,26 +21,23 @@ treated as a defect, not a bonus.
 
 ## The two questions to settle before building
 
-Ask these up front (in one short message) unless the user already answered them:
+The skill stops only when it cannot produce the report at all. These two points
+do not stop it and it does not wait for an answer: use what the user already
+said, otherwise build with the default, name the default in the final reply and
+offer the alternative as a question.
 
 1. **Duplicates.** The same transaction number often appears in two sectors, or
-    
-    twice inside one file, because it was routed to more than one party. Should
-    
-    the summary count every record (`اجمالي = عدد السجلات`) or count each
-    
-    transaction number once? Both are legitimate readings; the counts differ by
-    
-    the number of duplicate records, so never pick silently. Report the duplicate
-    
-    count either way so the user can sanity-check the total.
-    
-2. **Sector order** in the sector breakdown and delayed tables, if they care.
-    
-    Default is Arabic alphabetical, which is deterministic and easy to defend; both
-    
-    tables use the same order.
-    
+    twice inside one file, because it was routed to more than one party. Either
+    every record is counted (`اجمالي = عدد السجلات`) or each transaction number
+    is counted once; the counts differ by the number of duplicate records.
+    **Default: count every record**, which is what the script does with no flag.
+    Run with `--dedupe` only when the user asks for one count per number.
+    Report the duplicate count either way so the user can check the total, and
+    name the default you used.
+
+2. **Sector order** in the sector breakdown and delayed tables. **Default:
+    Arabic alphabetical** (the script has no flag for it); both tables use the
+    same order.
 
 Everything else in this skill is fixed and needs no asking.
 
@@ -102,9 +99,11 @@ categories and invent no fourth one:
 | على المخطط، علي المخطط | على المخطط |
 | متأخر، متاخر، المتأخر | متأخرة |
 
-If a status appears that this table doesn't cover, stop and show it to the user
+If a status appears that this table doesn't cover, the script does not stop. It places the transaction by the wording of the status (a status that contains «متأخر» is delayed, «مكتمل/منجز» completed), falls back to `على المخطط` when no wording matches, and reports the value, the file, the row and the category it chose. Tell the user in the final reply.
 
-rather than forcing it into a bucket. A category with no rows still gets its
+The script stops only when it cannot build the workbook at all (a missing file, sheet or required column). Everything else is a best assumption that it reports: each one is printed as «تنبيه: …» and saved in `<output>.notices.json` next to the workbook. Read that file after every run and repeat every notice to the user in the final reply; do not stop and wait for an answer.
+
+ A category with no rows still gets its
 
 line in the summary with the value `0`; omitting a supported category would
 
@@ -211,9 +210,9 @@ Both date columns are written as `dd-mm-yyyy` text through the shared
 
 real Excel dates, Excel serial numbers, Arabic month names and Arabic-Indic
 
-digits. The date values themselves never change. A date it cannot read stops the
+digits. The date values themselves never change. A date it cannot read does not stop the
 
-script with the file name, row number and value. A required field that is missing
+script: the cell keeps the text as written, the row sorts last, and a notice gives the file name, row number and value. A required field that is missing
 
 stays an empty cell; never guess it.
 
@@ -287,13 +286,13 @@ verification line — read that output before replying, and do not open a
 
 LibreOffice recalculation on the result.
 
-Every selected source file must contain the transaction header and required cells; a malformed file stops the run rather than being skipped. With `--dedupe`, duplicate transaction numbers that disagree on status or sector stop for a decision instead of keeping an arbitrary first record. The script publishes the output path only after its saved-workbook verification passes; a failed verification exits nonzero and leaves any earlier output untouched.
+Every selected source file must contain the transaction header and required cells; a malformed file stops the run rather than being skipped, because a sector missing from the totals would falsify the report. With `--dedupe`, duplicate transaction numbers that disagree on status or sector do not stop the run: the first record is kept, as for every duplicate, and a notice lists those numbers for the user to settle. The script publishes the output path only after its saved-workbook verification passes; a failed verification exits nonzero and leaves any earlier output untouched.
 
 ## Final verification before delivering
 
 - `اجمالي = مكتملة + على المخطط + متأخرة`. If it doesn't balance,
     
-    there is an unmapped status; surface it instead of forcing the numbers.
+    check the notices file: a status the maps do not list is placed by its wording (or the default) with a notice, so the notice says which row and where it went. Repeat every notice in the final reply.
     
 - Re-open the saved file and confirm the transaction-number cells are still
     
@@ -306,6 +305,8 @@ Every selected source file must contain the transaction header and required cell
     
 - Confirm the delayed table row count equals the `المعاملات المتأخرة` line.
 - Confirm every populated cell is `Abar Mid` at size 10.
+
+Read `<output>.notices.json` and repeat every notice in the final reply.
 
 Then tell the user the four numbers, the sector breakdown of the delayed rows,
 

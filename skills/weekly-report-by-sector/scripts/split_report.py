@@ -11,7 +11,7 @@ re-designs anything: every table, row, KPI card and title bar is cloned from a
 shape that already exists in the master, and only the text, the fills that encode
 status, and the geometry are changed.
 """
-import argparse, json, math, os, re, shutil, sys, zipfile, pathlib
+import argparse, json, math, os, re, shutil, subprocess, sys, zipfile, pathlib
 from collections import defaultdict
 from copy import deepcopy
 
@@ -22,8 +22,10 @@ from lxml import etree
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[2]))
 from report_common.table_typography import set_table_sizes, set_table_directions
 from report_common.package_tools import reachable_parts
-from report_common.dates import report_date
-from report_common import header_heights
+from report_common.dates import DateError, report_date
+from report_common import header_heights, notices, status_styles
+from report_common.pptx_helpers import next_shape_id
+from report_common.validation import field_key
 
 A = 'http://schemas.openxmlformats.org/drawingml/2006/main'
 P = 'http://schemas.openxmlformats.org/presentationml/2006/main'
@@ -34,7 +36,7 @@ EMU = 914400
 # ---- layout constants taken from the master deck -------------------------
 CX, CW   = 474245, 6623050      # content column: x and width of the KPI card
 TOP_Y    = 1780255              # first table starts where the comparison chart was
-GAP      = 200000               # vertical gap between stacked tables
+GAP      = header_heights.TABLE_GAP   # vertical gap between stacked tables
 KPI_ZONE = 1700000              # everything below this y on a section slide is body
 FOOTER_Y = 12687759
 NAV_KEEP_LABELS = ('ملخص المهام', 'ملخص مشاريع سهيل', 'المعاملات')   # nav tabs that stay
@@ -42,17 +44,40 @@ NAV_ZONE = 700000               # the nav strip sits above this y on every layou
 NAV_TOL  = 1000                 # EMU tolerance when matching tab x / width
 
 # ---- palette (read off the master's KPI cards) ---------------------------
-STATUS_FILL = {'مكتملة':'DCE6F2', 'على المخطط':'EBF1DE', 'متأخرة':'F2DCDB',
-               'لم تبدأ':'F2F2F2', 'معلقة':'F2F2F2'}
+# The approved fills, under the status labels this deck shows (متأخرة، معلقة).
+STATUS_FILL = {label: status_styles.FILLS[status_styles.canonical(label)]
+               for label in ('مكتملة', 'على المخطط', 'متأخرة', 'لم تبدأ', 'معلقة')}
 ACCENT = {'متأخرة':'87452B', 'مكتملة':'174766', 'على المخطط':'0A8062',
           'معلقة':'A6A6A6', 'لم تبدأ':'A6A6A6', 'تحديثات':'D9A86A'}
 
 TASK_ORDER = ['متأخرة', 'معلقة', 'مكتملة', 'على المخطط']
 TASK_TITLE = {'متأخرة':'المهام المتأخرة', 'مكتملة':'المهام المكتملة',
               'على المخطط':'المهام على المخطط', 'معلقة':'المهام المعلقة'}
+# A status the master has no table for keeps its own text and takes this gray (as the consolidated build does).
+NEUTRAL_FILL = status_styles.NEUTRAL_FILL
+NEUTRAL_ACCENT = ACCENT['معلقة']
+NO_STATUS = 'بدون حالة'
 PROJ_ORDER = ['متأخرة', 'على المخطط', 'لم تبدأ', 'مكتملة']
 PROJ_TITLE = {'متأخرة':'المشاريع المتأخرة', 'على المخطط':'المشاريع على المخطط',
               'لم تبدأ':'المشاريع لم تبدأ', 'مكتملة':'المشاريع المكتملة'}
+
+def extra_statuses(records, order):
+    """Statuses in `records` that `order` does not list, in the order they first appear."""
+    found = []
+    for r in records:
+        if r['status'] not in order and r['status'] not in found:
+            found.append(r['status'])
+    return found
+
+def extra_title(kind, status):
+    """Table title of an unlisted status, using the status text as written."""
+    return '%s (%s)' % ('المهام' if kind == 'task' else 'المشاريع', status or NO_STATUS)
+
+def extra_kind(title):
+    """'task' or 'project' for a title made by extra_title, else None."""
+    for kind, head in (('task', 'المهام ('), ('project', 'المشاريع (')):
+        if title.startswith(head) and title.endswith(')'): return kind
+    return None
 
 # =========================== small helpers ================================
 def norm(s):
@@ -202,14 +227,10 @@ def gf_set_pos(gf, x, y, cx, cy):
     xf.find(q('off')).set('x', str(int(x))); xf.find(q('off')).set('y', str(int(y)))
     xf.find(q('ext')).set('cx', str(int(cx))); xf.find(q('ext')).set('cy', str(int(cy)))
 
-def next_id(spTree):
-    ids = [int(e.get('id')) for e in spTree.iter(qp('cNvPr'))]
-    return max(ids) + 1 if ids else 2
-
 def add_frame(spTree, gf, name):
     gf = deepcopy(gf)
     nv = gf.find(qp('nvGraphicFramePr') + '/' + qp('cNvPr'))
-    nv.set('id', str(next_id(spTree))); nv.set('name', name)
+    nv.set('id', str(next_shape_id(spTree))); nv.set('name', name)
     spTree.append(gf)
     return gf
 
@@ -244,7 +265,7 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
             set_cell(tcs[0], row['num'], algn='ctr', fallback_rpr=first_rpr(tcs[0]))
             if status_col is not None:
                 set_fill(tcs[status_col],
-                         STATUS_FILL.get(norm_status(cell_text_el(tcs[status_col])), 'F2F2F2'))
+                         STATUS_FILL.get(norm_status(cell_text_el(tcs[status_col])), NEUTRAL_FILL))
             tbl.append(tr)
             continue
         tr = deepcopy(body); tcs = tr.findall(q('tc'))
@@ -254,7 +275,7 @@ def make_table(tmpl_gf, title, rows, algns, status_col=None, title_tr=None, acce
             set_cell(tcs[ci], val, algn=algns[ci], fallback_rpr=fb,
                      bold_date_line=(ci == bold_update_col))
         if status_col is not None:
-            set_fill(tcs[status_col], STATUS_FILL.get(norm_status(row[status_col]), 'F2F2F2'))
+            set_fill(tcs[status_col], STATUS_FILL.get(norm_status(row[status_col]), NEUTRAL_FILL))
         tr.set('h', '152400')
         tbl.append(tr)
     return gf
@@ -409,8 +430,11 @@ def locate(prs):
         labels = ' '.join(sh.text_frame.text for sh in s.shapes if sh.has_text_frame)
         tables = [(sh, table_rows(sh)) for sh in s.shapes if sh.has_table]
         if any('رقم المعاملة' in [norm(x) for x in r[1]] for _, r in tables if len(r) > 1):
-            role['trans_slides'].append(i)
-            if role['trans'] is None: role['trans'] = i
+            role['trans_slides'].append(i)   # a source of rows; appendix slides come here too
+        if role['trans'] is None and any(
+                sh.has_text_frame and sh.top is not None and sh.top < KPI_ZONE
+                and 'إجمالي المعاملات' in norm(sh.text_frame.text) for sh in s.shapes):
+            role['trans'] = i                # the section slide: the one with the KPI, never an appendix
         # Summary tables carry a القطاع column; same-titled tables elsewhere
         # (e.g. the digital-experience التحديات) do not and are not split.
         task_summary = any(table_title(r) in {'طلبات الدعم', 'المهام المعلقة',
@@ -434,6 +458,8 @@ def locate(prs):
     missing = [k for k in ('tasks', 'projects') if role[k] is None]
     if missing:
         raise SystemExit('Could not locate section slide(s): %s — check the master layout' % missing)
+    if role['trans'] is None and role['trans_slides']:
+        role['trans'] = role['trans_slides'][0]   # no KPI card on any of them: the first table slide
     if role['trans'] is None:
         print('  note: no delayed-transactions table (رقم المعاملة) in the master this week')
     return role
@@ -486,26 +512,31 @@ TRANS_DATES = {'تاريخ انشاء المعاملة', 'تاريخ الإنج�
 def transaction_value(value, name=None):
     """Date fields go through report_date (Hijri allowed), so a real Excel date
     and dd-mm-yyyy deck text match. Every other field is plain stripped text."""
-    if name in TRANS_DATES: return report_date(value, hijri=True)
+    if name in TRANS_DATES:
+        try: return report_date(value, hijri=True)
+        except DateError: return str(value).strip()   # kept as written upstream, with its own notice
     if value is None: return ''
     return str(value).strip()
-
-def field_key(name):
-    return norm(name).replace('إنشاء', 'انشاء').replace('الانجاز', 'الإنجاز').replace('المخطط له', 'المخطط')
 
 def transaction_key(values):
     return tuple(norm(transaction_value(x, name)) for x, name in zip(values, TRANS_FIELDS))
 
 def attach_transaction_sectors(trans, workbook_path):
-    """Join the five displayed PPTX fields to the final Excel's sector column."""
+    """Join the five displayed PPTX fields to the final Excel's sector column.
+
+    Returns the transactions whose sector is known. A transaction that cannot be
+    placed does not stop the split: it is left out of the sector decks and
+    reported, so the tasks and projects of every sector are still delivered.
+    """
     if not trans: return trans
     if all('القطاع' in item['head'] for item in trans):
         for item in trans:
             item['sector'] = item['row'][item['head'].index('القطاع')]
         return trans
     if not workbook_path:
-        raise ValueError('The five-column transactions table needs --transactions FINAL.xlsx '
-                         'to identify sectors.')
+        notices.warn('جدول المعاملات المتأخرة في التقرير الموحد لا يحمل عمود القطاع ولم يُرفق ملف المعاملات النهائي (--transactions)، '
+                     f'فلم توزع {len(trans)} معاملة متأخرة على تقارير القطاعات. أرفق الملف وأعد التقسيم لإضافتها.', 'source')
+        return []
     from openpyxl import load_workbook
     wb = load_workbook(workbook_path, read_only=True, data_only=True)
     ws = wb['المعاملات'] if 'المعاملات' in wb.sheetnames else wb.active
@@ -514,30 +545,49 @@ def attach_transaction_sectors(trans, workbook_path):
                      if {'رقم المعاملة', 'موضوع المعاملة', 'القطاع'}.issubset(
                          {field_key(x) for x in r if x is not None})), None)
     if header_i is None:
-        raise ValueError('Could not find the delayed-transactions header in ' + workbook_path)
+        wb.close()
+        notices.warn('ملف المعاملات المرفق (--transactions) ما فيه صف عناوين يُعرف (رقم المعاملة، موضوع المعاملة، القطاع)، '
+                     f'فتركت قسم المعاملات خارج تقارير القطاعات ({len(trans)} معاملة متأخرة) وسلّمت المهام والمشاريع. '
+                     'أرفق ملف المعاملات النهائي الصحيح وأعد التقسيم.', 'source')
+        return []
     head = [field_key(x) for x in excel_rows[header_i]]
-    col = {name: head.index(field_key(name)) for name in TRANS_FIELDS}
+    try:
+        col = {name: head.index(field_key(name)) for name in TRANS_FIELDS}
+    except ValueError:
+        wb.close()
+        notices.warn('ملف المعاملات المرفق (--transactions) ينقصه أحد أعمدة المعاملات الخمسة، '
+                     f'فتركت قسم المعاملات خارج تقارير القطاعات ({len(trans)} معاملة متأخرة) وسلّمت المهام والمشاريع. '
+                     'أرفق ملف المعاملات النهائي الصحيح وأعد التقسيم.', 'source')
+        return []
     sector_col = head.index('القطاع')
     lookup = defaultdict(list)
     for row in excel_rows[header_i + 1:]:
         if not norm(transaction_value(row[col['رقم المعاملة']])): continue
         values = [row[col[name]] for name in TRANS_FIELDS]
         lookup[transaction_key(values)].append(transaction_value(row[sector_col]))
+    placed = []
     for item in trans:
         head = [field_key(x) for x in item['head']]
         try:
             values = [item['row'][head.index(field_key(name))] for name in TRANS_FIELDS]
-        except ValueError as exc:
-            raise ValueError('Unexpected five-column transactions header') from exc
+        except ValueError:
+            wb.close()
+            notices.warn('جدول المعاملات في التقرير الموحد عناوين أعمدته ليست الأعمدة الخمسة المعتمدة، '
+                         f'فتركت قسم المعاملات خارج تقارير القطاعات ({len(trans)} معاملة متأخرة) وسلّمت المهام والمشاريع.', 'source')
+            return []
         key = transaction_key(values)
         sectors = lookup.get(key, [])
         if not sectors:
-            raise ValueError('Transaction %s does not match the final Excel workbook' % values[0])
+            notices.warn('المعاملة %s في التقرير الموحد لا تطابق أي صف في ملف المعاملات النهائي، فلم تدخل في تقارير القطاعات. '
+                         'تأكد أن الملف من الأسبوع نفسه.' % values[0], 'source')
+            continue
         if len(set(sectors)) != 1:
-            raise ValueError('Transaction %s matches multiple sectors in Excel' % values[0])
-        item['sector'] = sectors.pop()
+            notices.warn('المعاملة %s مسجلة في ملف المعاملات تحت أكثر من قطاع (%s)؛ وضعتها تحت الأول.'
+                         % (values[0], '، '.join(dict.fromkeys(sectors))), 'source')
+        item['sector'] = sectors[0]
+        placed.append(item)
     wb.close()
-    return trans
+    return placed
 
 def kpi_shapes(slide):
     """Pair each KPI number box with its label box by horizontal proximity."""
@@ -696,10 +746,11 @@ def strip_and_centre_nav(prs, targets=None):
             sh.left = Emu(sh.left - shift)
 
 def clear_body(slide):
-    """Drop the cross-sector chart, its card and the template table."""
+    """Drop the cross-sector chart, its card and every table, wherever it sits
+    (an appendix table starts above KPI_ZONE)."""
     spTree = slide.shapes._spTree
     for sh in list(slide.shapes):
-        if sh.top is not None and sh.top >= KPI_ZONE:
+        if sh.has_table or (sh.top is not None and sh.top >= KPI_ZONE):
             spTree.remove(sh._element)
 
 def continuation_slide(prs, source_index, keep, base_count):
@@ -722,7 +773,7 @@ def place_table(prs, slide, y, source_index, keep, base_count, tmpl, title, rows
     """Place whole rows on as many same-design summary pages as required."""
     headers = [norm(cell_text_el(tc)) for tc in gf_tbl(tmpl).findall(q('tr'))[1].findall(q('tc'))]
     omitted = {'القطاع'}
-    if title in (TASK_TITLE['متأخرة'], TASK_TITLE['على المخطط']): omitted.add('الحالة')
+    if title in (TASK_TITLE['متأخرة'], TASK_TITLE['على المخطط']) or extra_kind(title) == 'task': omitted.add('الحالة')
     for column in reversed([i for i,h in enumerate(headers) if h in omitted]):
         tmpl = deepcopy(tmpl)
         tbl = gf_tbl(tmpl)
@@ -758,11 +809,13 @@ def place_table(prs, slide, y, source_index, keep, base_count, tmpl, title, rows
             else:
                 break
         if n == 0:
-            if y == page_top:
-                raise ValueError('A single %s row cannot fit on an empty section page' % title)
-            slide, _ = continuation_slide(prs, source_index, keep, base_count)
-            y = page_top
-            continue
+            if y != page_top:
+                slide, _ = continuation_slide(prs, source_index, keep, base_count)
+                y = page_top
+                continue
+            # Never stop for one oversized record: it takes a page of its own and is flagged.
+            notices.warn('سجل في «%s» أطول من مساحة شريحة كاملة؛ وضعته في شريحة بمفرده وقد يتجاوز النص حدها. اختصر نصه أو قسّمه.' % title, 'space')
+            n = 1
         chunk = remaining[:n]
         gf = make_table(tmpl, title, chunk, algns, **kwargs)
         h = estimate(chunk, width, kind)
@@ -806,7 +859,7 @@ def build(master, outdir, aliases, transactions=None, only=None):
     src = open_master(master)
     role = locate(src)
     tasks, projs, trans, ups, support, challenges = read_data(src, role)
-    attach_transaction_sectors(trans, transactions)
+    trans = attach_transaction_sectors(trans, transactions)
 
     canon = {norm(k): v for k, v in aliases.items()}
     def C(name): return canon.get(norm(name), norm(name))
@@ -854,10 +907,17 @@ def build(master, outdir, aliases, transactions=None, only=None):
                   if field_key(c.text) not in ('القطاع','الحالة')}
         total = sum(widths.values())
         task_column_widths = {h:round(CW*w/total) for h,w in widths.items()}
+    extra_task_template = None
+    if any(t['status'] not in TASK_ORDER for t in tasks):
+        # A status without a table of its own: the dated detail layout (task, planned date, notes).
+        extra_task_template = deepcopy(task_detail_shapes[0]._element) if task_detail_shapes else task_fallback
+        if extra_task_template is not None and task_detail_shapes: rescale(gf_tbl(extra_task_template), CW)
     TMPL_SUPPORT = titled_frame(role['task_summaries'], 'طلبات الدعم')
     TMPL_UPD = titled_frame(role['project_summaries'], 'أبرز التحديثات')
     TMPL_CHALLENGE = titled_frame(role['project_summaries'], 'التحديات')
-    TMPL_TRANS = deepcopy(find_tables(sl[role['trans']], ['رقم المعاملة'])[0][0]._element) if role['trans'] is not None else None
+    trans_frame = next((fr for i in role['trans_slides']
+                        for fr, _ in find_tables(sl[i], ['رقم المعاملة'])), None)
+    TMPL_TRANS = deepcopy(trans_frame._element) if trans_frame is not None else None
     detail_shapes = (find_tables(sl[role['proj_details'][-1]], ['اسم المشروع'])
                      if role['proj_details'] else [])
     if not detail_shapes and design_slides:
@@ -876,6 +936,13 @@ def build(master, outdir, aliases, transactions=None, only=None):
         if only and only not in sec: continue
         d = sectors[sec]
         if not any(d.values()): continue
+        extra_tasks = extra_statuses(d['tasks'], TASK_ORDER)
+        extra_projs = extra_statuses(d['projs'], PROJ_ORDER)
+        for kind, found, records in (('المهام', extra_tasks, d['tasks']), ('المشاريع', extra_projs, d['projs'])):
+            for st in found:
+                n = sum(1 for r in records if r['status'] == st)
+                notices.warn('%s: %d من %s بحالة غير معروفة «%s». وضعتها في جدول مستقل بعنوان «%s» وبتعبئة رمادية محايدة، وهي داخل إجمالي القطاع.'
+                             % (sec, n, kind, st or NO_STATUS, extra_title('task' if kind == 'المهام' else 'project', st)), 'status')
         prs = open_master(master)
         fix_cover(prs, sec)
         keep = [role['cover']]
@@ -898,13 +965,15 @@ def build(master, outdir, aliases, transactions=None, only=None):
                 if key in kp: set_text(kp[key]['num'], val)
             clear_body(s)
             y = TOP_Y
-            for st in TASK_ORDER:
+            for st in TASK_ORDER + extra_tasks:
                 sel = [x for x in d['tasks'] if x['status'] == st]
                 if not sel: continue
-                tmpl = task_templates[st] if task_templates[st] is not None else task_fallback
+                known = st in TASK_ORDER
+                if known: tmpl = task_templates[st] if task_templates[st] is not None else task_fallback
+                else: tmpl = extra_task_template
                 if tmpl is None: raise ValueError('No task status table to clone')
                 headers = [cell_text_el(tc) for tc in gf_tbl(tmpl).findall(q('tr'))[1].findall(q('tc'))]
-                if task_templates[st] is None:
+                if known and task_templates[st] is None:
                     headers = ['#', 'المهمة', 'القطاع', 'ملاحظات'] if len(headers) == 4 else ['#', 'المهمة', 'القطاع']
                 headers = ['ملاحظات' if field_key(h) == 'التحديث' else h for h in headers]
                 rows = []
@@ -915,10 +984,10 @@ def build(master, outdir, aliases, transactions=None, only=None):
                     values = {field_key(k): v for k, v in values.items()}
                     rows.append([values.get(field_key(h), '') for h in headers])
                 s, y = place_table(prs, s, y, role['tasks'], keep, len(sl), tmpl,
-                                   TASK_TITLE[st], rows, ['ctr' if h == '#' else 'r' for h in headers],
+                                   TASK_TITLE[st] if known else extra_title('task', st), rows, ['ctr' if h == '#' else 'r' for h in headers],
                                    'tbl_' + st, est_table,
                                    'tasks_dated' if 'تاريخ الإنجاز المخطط' in map(field_key, headers) else 'tasks',
-                                   accent=ACCENT[st], headers=headers,
+                                   accent=ACCENT[st] if known else NEUTRAL_ACCENT, headers=headers,
                                    column_widths=task_column_widths)
             if d['support']:
                 if TMPL_SUPPORT is None: raise ValueError('No support table to clone')
@@ -957,19 +1026,18 @@ def build(master, outdir, aliases, transactions=None, only=None):
                 s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_CHALLENGE,
                                    'التحديات', rows, ['ctr' if h == '#' else 'r' for h in headers],
                                    'tbl_challenges', est_table, 'updates', accent=ACCENT['متأخرة'])
-            for st in PROJ_ORDER:
+            for st in PROJ_ORDER + extra_projs:
                 rows = [{'num': str(i + 1), 'tr': p['tr']}
                         for i, p in enumerate([x for x in d['projs'] if x['status'] == st])]
                 if not rows: continue
                 s, y = place_table(prs, s, y, role['projects'], keep, len(sl), TMPL_PROJ,
-                                   PROJ_TITLE[st], rows, ['ctr', 'r', 'ctr', 'ctr', 'ctr', 'r'],
+                                   PROJ_TITLE.get(st) or extra_title('project', st), rows, ['ctr', 'r', 'ctr', 'ctr', 'ctr', 'r'],
                                    'proj_' + st, est_rows, 'projects', status_col=4,
-                                   title_tr=GOLD_TITLE, accent=ACCENT[st])
+                                   title_tr=GOLD_TITLE, accent=ACCENT.get(st, NEUTRAL_ACCENT))
 
         if d['trans']:
             s = prs.slides[role['trans']]
-            tframe = find_tables(s, ['رقم المعاملة'])[0][0]
-            tx, tw = tframe.left, tframe.width
+            tx, tw = trans_frame.left, trans_frame.width
             clear_body(s)
             single_kpi(s, len(d['trans']), 'إجمالي المعاملات المتأخرة')
             rows = []
@@ -1090,15 +1158,27 @@ def main():
     ap.add_argument('--transactions', help='Final consolidated transactions Excel; required for five-column transaction tables')
     a = ap.parse_args()
     aliases = json.load(open(a.aliases, encoding='utf-8')) if os.path.exists(a.aliases) else {}
+    notices.reset()
+    notices.clear_stale(os.path.join(a.outdir, 'manifest.json'))
     man = build(a.master, a.outdir, aliases, a.transactions, a.only)
+    measured = False
     if not a.no_refine:
         # Rebuild with measured row heights so pagination uses what each row
         # really needs: no clipped rows, no oversized rows, no premature breaks.
-        print('  measured %d rows; rebuilding' % measure_pass(man))
-        man = build(a.master, a.outdir, aliases, a.transactions, a.only)
+        try:
+            print('  measured %d rows; rebuilding' % measure_pass(man))
+            measured = True
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            notices.warn('تعذر قياس الصفوف عبر LibreOffice (%s). تقارير القطاعات مبنية بارتفاعات تقديرية؛ راجعها في باوربوينت قبل التسليم.' % exc, 'layout')
+        if measured:
+            man = build(a.master, a.outdir, aliases, a.transactions, a.only)
+    if not measured:
+        notices.warn('تقارير القطاعات مبنية بارتفاعات تقديرية (بدون قياس). راجعها في باوربوينت قبل التسليم.', 'layout')
     man = slim(man, a.outdir)
-    with open(os.path.join(a.outdir, 'manifest.json'), 'w', encoding='utf-8') as stream:
+    manifest_path = os.path.join(a.outdir, 'manifest.json')
+    with open(manifest_path, 'w', encoding='utf-8') as stream:
         json.dump(man, stream, ensure_ascii=False, indent=1)
+    notices.save(manifest_path)
     for it in man:
         print('%-45s tasks=%d projects=%d transactions=%d updates=%d support=%d challenges=%d slides=%d'
               % (it['sector'], *it['n'], len(it['keep'])))

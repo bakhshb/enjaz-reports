@@ -22,8 +22,11 @@ class MondayLayoutTests(unittest.TestCase):
         pages=layout.pack([('a',list(range(5)),[10,10],[30]*5)],0,100,gap=5)
         self.assertEqual([len(p[0][1]) for p in pages],[2,2,1])
         self.assertEqual([r for p in pages for item in p for r in item[1]],list(range(5)))
-        with self.assertRaisesRegex(ValueError,'too tall'):
-            layout.pack([('a',[1],[10,10],[81])],0,100)
+        # An oversized record takes a whole page and is reported; the build does not stop.
+        layout.notices.reset()
+        pages=layout.pack([('a',[1,2],[10,10],[81,5])],0,100)
+        self.assertEqual([(item[1],item[3]) for page in pages for item in page],[([1],[80]),([2],[5])])
+        self.assertTrue(any(n['kind']=='space' for n in layout.notices.collected()))
 
     def test_rtl_conversion_preserves_columns_merges_and_schema_order(self):
         prs=Presentation(MONDAY.parent/'assets/monday-meeting-master.pptx')

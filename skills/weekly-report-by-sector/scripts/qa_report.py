@@ -15,27 +15,19 @@ from collections import defaultdict
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from pptx import Presentation
-from pptx.oxml.ns import qn
 import split_report as splitter
 from report_common.table_typography import check_table_typography
 from report_common.render import export_pdf
 
-def cell_text(c):
-    s = ''
-    for p in c.text_frame.paragraphs:
-        for ch in p._p:
-            if ch.tag == qn('a:r'): s += ch.find(qn('a:t')).text or ''
-            elif ch.tag == qn('a:br'): s += '\n'
-        s += '\n'
-    return s.strip()
-
-FOOTER_Y = 12687759
+cell_text = splitter.cell_text
+FOOTER_Y = splitter.FOOTER_Y
 
 def record_text(value):
     return str(value or '').replace('\r\n','\n').replace('\v','\n').strip()
 
 
 TASK_FIELDS=('المهمة','ملاحظات')
+DATED_TASK_FIELDS=('المهمة','تاريخ الإنجاز المخطط','ملاحظات')
 PROJECT_FIELDS=('اسم المشروع','تاريخ البداية','تاريخ النهاية','الحالة','ما تم حتى تاريخه')
 FIELDS={**{t:TASK_FIELDS for t in splitter.TASK_TITLE.values()},
         **{t:PROJECT_FIELDS for t in splitter.PROJ_TITLE.values()},
@@ -50,17 +42,20 @@ FIELDS={**{t:TASK_FIELDS for t in splitter.TASK_TITLE.values()},
 def expected_records(master,transactions=None,aliases=None,only=None):
     src=splitter.open_master(master)
     tasks,projects,trans,updates,support,challenges=splitter.read_data(src,splitter.locate(src))
-    splitter.attach_transaction_sectors(trans,transactions)
+    trans=splitter.attach_transaction_sectors(trans,transactions)
     alias_path=aliases or Path(__file__).resolve().parents[1]/'references'/'sector-aliases.json'
     mapping={splitter.norm(k):v for k,v in json.loads(Path(alias_path).read_text(encoding='utf-8')).items()}
     canonical=lambda s:mapping.get(splitter.norm(s),splitter.norm(s))
     result=defaultdict(lambda:defaultdict(list))
     for item in tasks:
-        sector=canonical(item['sector']); title=splitter.TASK_TITLE[item['status']]
-        values = (item['text'], item['planned_date'], item['note']) if item['status'] in ('متأخرة','على المخطط') else (item['text'], item['note'])
+        sector=canonical(item['sector'])
+        # A status without a table of its own has its own neutral table (dated layout), as the splitter builds it.
+        title=splitter.TASK_TITLE.get(item['status']) or splitter.extra_title('task',item['status'])
+        dated=item['status'] in ('متأخرة','على المخطط') or item['status'] not in splitter.TASK_ORDER
+        values = (item['text'], item['planned_date'], item['note']) if dated else (item['text'], item['note'])
         result[sector][title].append(tuple(map(record_text,values)))
     for item in projects:
-        sector=canonical(item['sector']); title=splitter.PROJ_TITLE[item['status']]
+        sector=canonical(item['sector']); title=splitter.PROJ_TITLE.get(item['status']) or splitter.extra_title('project',item['status'])
         result[sector][title].append(tuple(map(record_text,(item['name'],item['start'],item['end'],item['status'],item['note']))))
     for items,title,name in [(updates,'أبرز التحديثات','project'),(support,'طلبات الدعم','name'),(challenges,'التحديات','name')]:
         for item in items:
@@ -80,7 +75,9 @@ def actual_records(prs):
             if not shape.has_table:continue
             rr=[[cell_text(c) for c in row.cells] for row in shape.table.rows]
             title=splitter.table_title(rr)
-            if title not in FIELDS:raise ValueError(f'Unexpected output table: {title}')
+            extra=splitter.extra_kind(title)
+            if title not in FIELDS and extra is None:raise ValueError(f'Unexpected output table: {title}')
+            fields=FIELDS[title] if title in FIELDS else DATED_TASK_FIELDS if extra=='task' else PROJECT_FIELDS
             if len(rr)<3:raise ValueError(f'Empty output table: {title}')
             if title=='المعاملات المتأخرة' and abs(shape.top-splitter.TOP_Y)>2:
                 raise ValueError('Transaction table must start at the common section top')
@@ -88,12 +85,12 @@ def actual_records(prs):
             if 'القطاع' in headers:raise ValueError('Sector column must be omitted from sector report tables')
             if title=='المهام المعلقة' and 'التحديث' in headers:
                 raise ValueError('Suspended tasks must use the notes header')
-            if title in (*splitter.TASK_TITLE.values(),'طلبات الدعم'):
+            if title in (*splitter.TASK_TITLE.values(),'طلبات الدعم') or extra=='task':
                 width=shape.table.columns[headers.index('المهمة')].width
                 if task_width is not None and abs(width-task_width)>2:
                     raise ValueError('Task column widths must match across sector task tables')
                 task_width=width
-            if title in ('المهام المتأخرة','المهام على المخطط') and headers != [splitter.field_key(h) for h in ('#',*FIELDS[title])]:
+            if (title in ('المهام المتأخرة','المهام على المخطط') or extra=='task') and headers != [splitter.field_key(h) for h in ('#',*fields)]:
                 raise ValueError(f'{title}: expected task, planned date and notes without status')
             if title in ('المهام على المخطط','المعاملات المتأخرة') and any(not run.font.bold
                     for cell in shape.table.rows[0].cells for p in cell.text_frame.paragraphs
@@ -101,7 +98,7 @@ def actual_records(prs):
                 raise ValueError(f'{title}: table title must be bold')
             for row in rr[2:]:
                 values=[]
-                for field in FIELDS[title]:
+                for field in fields:
                     key=splitter.field_key(field)
                     if key not in headers and field=='ملاحظات' and 'التحديث' in headers:key='التحديث'
                     if key not in headers:raise ValueError(f'{title}: missing column {field}')
@@ -233,16 +230,18 @@ def identity_errors(prs,sector,records,master):
     source=splitter.open_master(master)
     specs=[('إجمالي المهام',[11,14,16,7,6],['المهام المكتملة','المهام على المخطط','المهام المتأخرة','المهام المعلقة']),
            ('إجمالي مشاريع سهيل',[10,12,14,8,7],['المشاريع المكتملة','المشاريع على المخطط','المشاريع المتأخرة','المشاريع لم تبدأ'])]
-    for label,ids,titles in specs:
+    for (label,ids,titles),kind in zip(specs,('task','project')):
         # The fixed identifiers apply only to the approved template's KPI pattern.
         seeds=[sl for sl in source.slides if any(getattr(sh,'has_text_frame',False) and sh.text.strip()==label for sh in sl.shapes)]
         if not seeds or not set(ids).issubset({sh.shape_id for sh in seeds[0].shapes}):continue
         candidates=[sl for sl in prs.slides if any(getattr(sh,'has_text_frame',False) and sh.text.strip()==label for sh in sl.shapes)]
         counts=[len(records.get(title,[])) for title in titles]
-        if sum(counts) and not candidates:errors.append(label+': missing KPI slide')
+        # The total also counts the tables of statuses the master has no card for.
+        unlisted=sum(len(rows) for title,rows in records.items() if splitter.extra_kind(title)==kind)
+        if (sum(counts) or unlisted) and not candidates:errors.append(label+': missing KPI slide')
         for slide in candidates:
             shapes={sh.shape_id:sh for sh in slide.shapes}
-            for sid,expected in zip(ids,[sum(counts),*counts]):
+            for sid,expected in zip(ids,[sum(counts)+unlisted,*counts]):
                 if sid not in shapes or getattr(shapes[sid],'text','').strip()!=str(expected):
                     errors.append(f'{label}: KPI {sid} differs from source')
     trans=len(records.get('المعاملات المتأخرة',[]))

@@ -30,7 +30,9 @@ Only four, in this canonical spelling: `مكتملة` · `على المخطط` �
 
 The source often writes `مكتمل` and `لم يبدأ` — map them. **A project whose newest-week status cell is blank counts as `على المخطط`** (the source frequently fills the narrative column but leaves the status empty). Report how many rows this affected so the user can correct the source if needed.
 
-If a nonblank newest-week status is not in the mapping, stop and name the value and source row. Do not use the blank-cell default for an unknown value. The project, sector, start-date, and end-date columns must be present; stop with their names if a required column is missing.
+If a nonblank newest-week status is not in the mapping, the script does not stop: it places the project by the wording of the status (a status that contains «متأخر» is delayed, «مكتمل/منجز» completed, «لم يبدأ» not started), falls back to `على المخطط` when no wording matches, and reports the value, the row and the category it chose. Tell the user so they can correct the source. The project, sector, start-date, and end-date columns must be present; a missing required column is the one thing that stops the script, with the column names.
+
+The script stops only when it cannot build the workbook at all (a missing file, sheet or required column). Everything else is a best assumption that it reports: each one is printed as «تنبيه: …» and saved in `<output>.notices.json` next to the workbook. Read that file after every run and repeat every notice to the user in the final reply; do not stop and wait for an answer.
 
 ## Python runtime and automatic bootstrap
 
@@ -63,7 +65,7 @@ When installing or updating this skill locally, first run `uv --version`.
 uv run scripts/build_report.py <source.xlsx> [output.xlsx]
 ```
 
-Without an output path it writes `ملخص_مشاريع_سهيل.xlsx` to `/mnt/user-data/outputs/` on claude.ai, otherwise to the working directory. It prints the week it picked, the project count, and the status breakdown — check that line before delivering. Then present the file.
+Without an output path it writes `ملخص_مشاريع_سهيل.xlsx` to `/mnt/user-data/outputs/` on claude.ai, otherwise to the working directory. It prints the week it picked, the project count, and the status breakdown, so check that line before delivering. Read `<output>.notices.json` and repeat every notice in the final reply, then present the file.
 
 ## Sheet 1 — «ملخص مشاريع سهيل»
 
@@ -104,7 +106,7 @@ A sector in the data that matches nothing in the fixed lists is appended at the 
 - Exactly two sheets. No dashboard, no charts, no extra sheets, no extra columns, no analysis or recommendations sections.
 - Both sheets right-to-left, Arabic, wrap text on.
 - **Font: `Abar Mid`, size 10, in every single cell** — headers, section titles, KPI figures, table body, all of it. No exceptions and no larger display sizes. Bold and colour carry the hierarchy instead. The constants `F` and `SZ` at the top of the script are the only place this is set.
-- Never invent missing data. Start and end dates are written as `dd-mm-yyyy` text whatever form the export uses (real Excel dates, Excel serial numbers, `dd-mm-yyyy`, `dd/mm/yyyy`, `dd.mm.yyyy`, `yyyy-mm-dd` with or without `00:00:00`, Arabic month names, Arabic-Indic digits). The shared `report_common/dates.py` does this. A date it cannot read, a Hijri date for example, stops the script with the row number and the value; ask the user for the right date. An empty date stays empty.
+- Never invent missing data. Start and end dates are written as `dd-mm-yyyy` text whatever form the export uses (real Excel dates, Excel serial numbers, `dd-mm-yyyy`, `dd/mm/yyyy`, `dd.mm.yyyy`, `yyyy-mm-dd` with or without `00:00:00`, Arabic month names, Arabic-Indic digits). The shared `report_common/dates.py` does this. A date it cannot read, a Hijri date for example, does not stop the script: the cell keeps the text as written, and a notice names the row and the value so the user can correct it. An empty date stays empty.
 - Arabic text carries no diacritics.
 
 ## Colours

@@ -199,8 +199,10 @@ class DigitalMeasurementTests(unittest.TestCase):
             stale.write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
             result=run(WEEKLY/'build_report.py',*inputs,'--model','digital',*digital,
                        '--measurements',stale,'--output',root/'d2.pptx')
-            self.assertNotEqual(result.returncode,0)
-            self.assertIn('lack the digital-maturity tables',result.stdout+result.stderr)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertTrue((root/'d2.pptx').exists())
+            notices=json.loads((root/'d2.pptx.notices.json').read_text(encoding='utf-8'))
+            self.assertTrue(any('ملف القياس' in json.dumps(n,ensure_ascii=False) for n in notices),notices)
 
 if __name__=='__main__':
     unittest.main()

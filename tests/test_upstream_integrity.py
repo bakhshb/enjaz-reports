@@ -4,6 +4,7 @@
 # ///
 """Synthetic regression cases for the three source-workbook skills."""
 
+import json
 import os
 import importlib.util
 import contextlib
@@ -117,14 +118,74 @@ class UpstreamIntegrityTests(unittest.TestCase):
             self.assertEqual(wb["ملخص مشاريع سهيل"]["C3"].value, 1)
             self.assertIn("حديث", [c.value for row in wb["تفاصيل مشاريع سهيل"] for c in row])
 
-    def test_suhail_rejects_unknown_latest_status(self):
+    def notices(self, output):
+        return json.loads(Path(str(output) + ".notices.json").read_text(encoding="utf-8"))
+
+    def test_suhail_reports_unknown_latest_status_and_continues(self):
         with tempfile.TemporaryDirectory() as td:
             source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
             suhail_source(source, "قيد المراجعة")
             result = run(SUHAIL, source, output)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("قيد المراجعة", result.stderr)
+            self.assertTrue(any(n["kind"] == "status" and "قيد المراجعة" in n["message"] for n in self.notices(output)))
+            # No wording matches a known status, so it takes the documented default.
+            self.assertEqual(load_workbook(output, data_only=True)["ملخص مشاريع سهيل"]["C3"].value, 1)
+
+    def test_suhail_places_a_near_status_by_its_wording(self):
+        with tempfile.TemporaryDirectory() as td:
+            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
+            suhail_source(source, "متأخر جدا")
+            result = run(SUHAIL, source, output)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertEqual(load_workbook(output, data_only=True)["ملخص مشاريع سهيل"]["D3"].value, 1)
+            self.assertTrue(any("متأخر جدا" in n["message"] for n in self.notices(output)))
+
+    def test_assumptions_that_were_only_printed_are_recorded_as_notices(self):
+        with tempfile.TemporaryDirectory() as td:
+            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
+            suhail_source(source, "", headers=[
+                "القطاع", "اسم المشروع", "تاريخ البداية", "تاريخ النهاية",
+                "الحالة الفعلية W38", "ما تم حتى تاريخه W38"])
+            result = run(SUHAIL, source, output)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            kinds = [n["kind"] for n in self.notices(output)]
+            self.assertIn("column", kinds)   # no notes column
+            self.assertIn("status", kinds)   # one blank status defaulted
+            source, output = Path(td) / "tasks.xlsx", Path(td) / "tasks-out.xlsx"
+            task_source(source)
+            wb = load_workbook(source)
+            wb["المهام"].append([c.value for c in wb["المهام"][2]])
+            wb.save(source)
+            result = run(TASKS, "--input", source, "--output", output)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertTrue(any(n["kind"] == "duplicate" and "مهمة تجريبية" in n["message"] for n in self.notices(output)))
+
+    def test_a_fatal_exit_leaves_no_old_notices_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            source, output = Path(td) / "source.xlsx", Path(td) / "out.xlsx"
+            suhail_source(source, headers=["القطاع", "الحالة الفعلية W38", "ما تم حتى تاريخه W38"])
+            stale = Path(str(output) + ".notices.json")
+            stale.write_text("[]", encoding="utf-8")
+            result = run(SUHAIL, source, output)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("قيد المراجعة", result.stderr + result.stdout)
-            self.assertFalse(output.exists())
+            self.assertFalse(stale.exists())
+            input_dir = Path(td) / "input"
+            input_dir.mkdir()
+            transaction_source(input_dir / "bad.xlsx", header=False)
+            output = Path(td) / "tx.xlsx"
+            stale = Path(str(output) + ".notices.json")
+            stale.write_text("[]", encoding="utf-8")
+            result = run(TRANSACTIONS, "--input-dir", input_dir, "--output", output)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(stale.exists())
+            source, output = Path(td) / "t.xlsx", Path(td) / "t-out.xlsx"
+            wb = Workbook(); wb.active.title = "المهام"; wb.active.append(["شيء"]); wb.save(source)
+            stale = Path(str(output) + ".notices.json")
+            stale.write_text("[]", encoding="utf-8")
+            result = run(TASKS, "--input", source, "--output", output)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse(stale.exists())
 
     def test_suhail_names_missing_required_column(self):
         with tempfile.TemporaryDirectory() as td:
@@ -247,27 +308,28 @@ class UpstreamIntegrityTests(unittest.TestCase):
             self.assertIn("missing-header.xlsx", result.stderr + result.stdout)
             self.assertFalse(output.exists())
 
-    def test_transactions_reject_conflicting_duplicate_before_dedupe(self):
+    def test_transactions_report_conflicting_duplicate_and_keep_the_first(self):
         with tempfile.TemporaryDirectory() as td:
             input_dir, output = Path(td) / "input", Path(td) / "out.xlsx"
             input_dir.mkdir()
             transaction_source(input_dir / "one.xlsx", status="متأخر")
             transaction_source(input_dir / "two.xlsx", status="مكتمل")
             result = run(TRANSACTIONS, "--input-dir", input_dir, "--output", output, "--dedupe")
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("000123", result.stderr + result.stdout)
-            self.assertFalse(output.exists())
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertTrue(any(n["kind"] == "source" and "000123" in n["message"] for n in self.notices(output)))
+            ws = load_workbook(output).active
+            self.assertEqual((ws["B2"].value, ws["B5"].value), (1, 1))  # one.xlsx is read first: delayed
 
-    def test_transactions_reject_conflicting_sector_before_dedupe(self):
+    def test_transactions_report_conflicting_sector_and_keep_the_first(self):
         with tempfile.TemporaryDirectory() as td:
             input_dir, output = Path(td) / "input", Path(td) / "out.xlsx"
             input_dir.mkdir()
             transaction_source(input_dir / "one.xlsx", sector="قطاع أ")
             transaction_source(input_dir / "two.xlsx", sector="قطاع ب")
             result = run(TRANSACTIONS, "--input-dir", input_dir, "--output", output, "--dedupe")
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("000123", result.stderr + result.stdout)
-            self.assertFalse(output.exists())
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertTrue(any("000123" in n["message"] for n in self.notices(output)))
+            self.assertEqual(load_workbook(output).active["B2"].value, 1)
 
     def test_transactions_valid_report_keeps_identifier_as_text(self):
         with tempfile.TemporaryDirectory() as td:

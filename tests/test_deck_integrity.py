@@ -39,6 +39,7 @@ def load_module(name,path):
 
 
 gate=load_module('monday_gate',MONDAY/'report_gate_v2.py')
+monday_layout=load_module('monday_layout_tests',MONDAY/'monday_layout.py')
 
 
 def mutate_zip(path,part,change):
@@ -190,6 +191,12 @@ class ScenarioTests(unittest.TestCase):
                                             for cell in row.cells for p in cell.text_frame.paragraphs for r in p.runs))
 
 
+def agenda_rows_of(deck):
+    table=next(sh.table for sl in Presentation(deck).slides for sh in sl.shapes if sh.has_table
+               and [c.text.strip() for c in sh.table.rows[0].cells]==gate.AGENDA_HEADERS)
+    return list(table.rows)[1:]
+
+
 class MondayGateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -256,7 +263,31 @@ class MondayGateTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertIn('Topics must occupy exactly one page',result.stdout)
 
-    def test_excess_topics_preserve_existing_report_without_splitting_or_shrinking(self):
+    def assert_agenda_fitted(self,output,result,topic_count,expect_second_slide):
+        """Lack of space never stops the report: font shrinks in steps to the floor, then more
+        agenda slides with the header repeated; all topics stay in order; a notice is written."""
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        found=json.loads(Path(str(output)+'.notices.json').read_text(encoding='utf-8'))
+        self.assertTrue(any(n['kind']=='space' and 'جدول الأعمال' in n['message'] for n in found),found)
+        prs=Presentation(output)
+        agendas=[sh for sl in prs.slides for sh in sl.shapes if sh.has_table
+                 and [c.text.strip() for c in sh.table.rows[0].cells]==gate.AGENDA_HEADERS]
+        if expect_second_slide is not None:self.assertEqual(len(agendas)>1,expect_second_slide)
+        footer=prs.slide_height-int(55*12700)
+        for sh in agendas:
+            self.assertLessEqual(sh.top+sh.height,footer)
+        sizes={run.font.size.pt for sh in agendas for row in sh.table.rows for c in row.cells
+               for p in c.text_frame.paragraphs for run in p.runs if run.text.strip()}
+        self.assertEqual(len(sizes),1,sizes)
+        size=sizes.pop()
+        self.assertGreaterEqual(size,monday_layout.AGENDA_FLOOR_PT)
+        self.assertLess(size,monday_layout.AGENDA_PT)
+        if expect_second_slide:self.assertEqual(size,monday_layout.AGENDA_FLOOR_PT)
+        numbers=[int(row.cells[0].text.strip()) for sh in agendas for row in list(sh.table.rows)[1:]]
+        if topic_count is None:topic_count=len(numbers)
+        self.assertEqual(numbers,list(range(1,topic_count+1)))
+
+    def test_excess_topics_shrink_font_then_continue_on_more_agenda_slides_with_notice(self):
         with tempfile.TemporaryDirectory() as td:
             topics=Path(td)/'topics.xlsx';wb=load_workbook(self.topics);ws=wb['Sheet1']
             ws.delete_rows(3,ws.max_row)
@@ -265,9 +296,9 @@ class MondayGateTests(unittest.TestCase):
             output=Path(td)/'report.pptx';output.write_bytes(b'accepted report')
             result=run(MONDAY/'build_report.py','--topics',topics,'--tasks',self.tasks,
                        '--suhail',self.projects,'--output',output,'--layout-engine','estimate')
-            self.assertNotEqual(result.returncode,0)
-            self.assertIn('Topics cannot fit on one page at 14 pt',result.stderr)
-            self.assertEqual(output.read_bytes(),b'accepted report')
+            self.assert_agenda_fitted(output,result,61,True)
+            gated=run(MONDAY/'report_gate_v2.py','--report',output,'--topics',topics,'--tasks',self.tasks,'--suhail',self.projects)
+            self.assertEqual(gated.returncode,0,gated.stdout+gated.stderr)
 
     def test_status_typography_corruption_is_not_hidden(self):
         for attribute,value in [('name','Calibri'),('size',Inches(.4)),('bold',True)]:
@@ -316,15 +347,14 @@ class MondayGateTests(unittest.TestCase):
                                   '--suhail',str(self.projects),'--output',str(output)])
                 self.assertEqual(output.read_bytes(),before)
 
-    def test_oversized_agenda_preserves_existing_report(self):
+    def test_oversized_agenda_text_is_fitted_and_reported_without_stopping(self):
         with tempfile.TemporaryDirectory() as td:
             topics=Path(td)/'topics.xlsx';wb=load_workbook(self.topics)
             wb['Sheet1']['B3']='موضوع طويل ' * 2500;wb.save(topics)
             output=Path(td)/'report.pptx';output.write_bytes(b'accepted report')
             result=run(MONDAY/'build_report.py','--topics',topics,'--tasks',self.tasks,
                        '--suhail',self.projects,'--output',output)
-            self.assertNotEqual(result.returncode,0)
-            self.assertEqual(output.read_bytes(),b'accepted report')
+            self.assert_agenda_fitted(output,result,None,None)
             self.assertFalse(list(Path(td).glob('.monday-build-*')))
 
     def test_conflicting_master_status_examples_fail(self):

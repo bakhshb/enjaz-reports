@@ -12,11 +12,15 @@ import warnings
 from pptx import Presentation
 from pptx.oxml.ns import qn
 from pptx.util import Pt
+from report_common import notices
 from report_common.pptx_helpers import fill_titled_table, remove_slide, resize_table, set_cell_text
 from report_common.update_format import format_table_updates
 from report_common.table_typography import apply_table, rtl_table
 
 AGENDA_PT=14
+# Tight agenda: shrink by this step down to the floor (the weekly skill's floor), then continue on a second slide.
+AGENDA_STEP_PT=0.5
+AGENDA_FLOOR_PT=8
 
 
 def bullet_example(prs):
@@ -34,10 +38,10 @@ def bullet_example(prs):
     raise ValueError('Suhail master has no approved bullet paragraph')
 
 
-def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
+def populate(shape, rows, title=None, kind=None, styles=None, bullets=None, agenda_pt=AGENDA_PT):
     rtl_table(shape.table)
     fixed=1 if kind=='agenda' else 2
-    font_pt=AGENDA_PT if kind=='agenda' else 11
+    font_pt=agenda_pt if kind=='agenda' else 11
     if kind=='agenda':
         resize_table(shape.table,1+len(rows),1)
         for i,values in enumerate(rows,1):
@@ -59,11 +63,13 @@ def populate(shape, rows, title=None, kind=None, styles=None, bullets=None):
             import monday_status_styles as status_styles
             cell = shape.table.cell(i, 4)
             status = status_styles.canonical(cell.text)
-            allowed = status_styles.TASK_STATUSES if kind == 'task' else status_styles.PROJECT_STATUSES
-            if status not in allowed or status not in styles:
-                raise ValueError('Missing or unsupported approved status: ' + status)
+            style = status_styles.style_status(status, kind, styles)
+            if style != status:
+                # Unknown status: keep its own text, take the neutral approved fill, and say so.
+                where = f' في «{title}»' if title else ''
+                notices.warn(f'حالة غير معروفة «{status}»{where}؛ أبقيت نصها كما ورد بتعبئة رمادية محايدة، ولم تدخل في ألوان الحالات المعتمدة.', 'status')
             text = cell.text
-            status_styles.apply(cell, styles[status])
+            status_styles.apply(cell, styles[style])
             set_cell_text(cell, text)
     format_table_updates(shape.table, bullets, paragraph_items=True)
     for row in shape.table.rows:
@@ -160,7 +166,7 @@ def libreoffice_heights(probe, estimates, positions, engine):
         return estimates
 
 
-def measure(specs, template, styles, bullets, engine='auto'):
+def measure(specs, template, styles, bullets, engine='auto', agenda_pt=AGENDA_PT):
     """Measure fresh disposable tables; no reusable/stale measurement cache."""
     native = engine == 'native' or (engine == 'auto' and os.name == 'nt')
     probe = Presentation(template)
@@ -182,9 +188,9 @@ def measure(specs, template, styles, bullets, engine='auto'):
         slide.shapes._spTree.insert_element_before(element, 'p:extLst')
         sh = slide.shapes[-1]
         sh.name = key
-        populate(sh, rows, title, kind, styles, bullets)
+        populate(sh, rows, title, kind, styles, bullets, agenda_pt)
         fixed=1 if kind=='agenda' else 2
-        font_pt=AGENDA_PT if kind=='agenda' else 11
+        font_pt=agenda_pt if kind=='agenda' else 11
         heights=[estimate_row(sh.table, row, font_pt) for row in list(sh.table.rows)[fixed:]]
         for row,height in zip(list(sh.table.rows)[fixed:],heights):
             row.height = Pt(1) if native else height
@@ -240,7 +246,9 @@ def pack(sections, start, bottom, gap=int(Pt(9)), continuation=None):
         fixed = sum(header)
         for row, height in zip(rows, heights):
             if fixed + height > bottom - continuation:
-                raise ValueError('A single record is too tall for an approved page: ' + key)
+                # Never stop for one oversized record: it takes a whole page and is flagged.
+                notices.warn(f'سجل في «{key}» أطول من مساحة شريحة كاملة؛ وضعته في شريحة بمفرده وقد يتجاوز النص حدها. اختصر نصه أو قسّمه.', 'space')
+                height = bottom - continuation - fixed
             needed = height if chunk else fixed + height + (gap if pages[-1] else 0)
             if used + needed > bottom:
                 if chunk:

@@ -17,6 +17,15 @@ from report_common.table_typography import all_tables, reverse_table_columns
 from report_common.status_styles import publish
 
 
+def abar_installed():
+    """True when LibreOffice can find the template font; without it widths and row heights are wrong."""
+    try:
+        fonts = subprocess.run(['fc-list', ':family'], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return 'abar mid' in fonts.lower()
+
+
 def export_pdf(report, output, soffice=None):
     report, output = Path(report).resolve(), Path(output).resolve()
     if output == report or (output.exists() and output.samefile(report)):
@@ -39,7 +48,7 @@ def export_pdf(report, output, soffice=None):
         result = subprocess.run([executable, '-env:UserInstallation=' + (root / 'profile').as_uri(),
                                  '--headless', '--convert-to', 'pdf:impress_pdf_Export',
                                  '--outdir', str(root), str(candidate)],
-                                capture_output=True, text=True, timeout=90)
+                                capture_output=True, text=True, timeout=300)
         rendered = root / 'report.pdf'
         if result.returncode or not rendered.exists():
             raise RuntimeError('PDF export failed: ' + result.stdout + result.stderr)
@@ -52,11 +61,7 @@ if __name__ == '__main__':
     parser.add_argument('--report', required=True)
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    try:
-        fonts = subprocess.run(['fc-list', ':family'], capture_output=True, text=True, timeout=30).stdout
-    except (OSError, subprocess.SubprocessError):
-        fonts = ''
-    if 'abar mid' not in fonts.lower():
+    if not abar_installed():
         print('WARNING: the Abar Mid font is not installed for LibreOffice. The PDF uses substitute '
               'fonts with different widths, so table rows can look clipped or overlapping although '
               'they fit in PowerPoint with Abar. Install Abar before judging row heights or fonts.',

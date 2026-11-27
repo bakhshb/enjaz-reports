@@ -1,4 +1,12 @@
-"""User-approved PowerPoint table direction, font size and column alignment."""
+"""User-approved PowerPoint table direction, font size and column alignment.
+
+The same pass keeps a table sound when the user edits it by hand in
+PowerPoint: every paragraph ends with complete end-of-paragraph properties
+(size and Abar), so text typed into an emptied cell or an inserted row keeps
+the table's typography instead of the theme default, and every row carries
+its own row ID (rows copied from one pattern row shared one).
+"""
+from copy import deepcopy
 from pptx.util import Pt
 from pptx.enum.text import PP_ALIGN
 from pptx.oxml.ns import qn
@@ -58,14 +66,37 @@ def set_font(props, name=TABLE_FONT):
             anchor.addprevious(node)
 
 
+def end_paragraph_properties(paragraph):
+    """Give `paragraph` (an ``a:p``) end-of-paragraph properties copied from its last run.
+
+    PowerPoint formats text typed into an empty cell, and the cells of a row
+    the user inserts, from these properties; without them it falls back to
+    the theme font at 18 pt.
+    """
+    end = paragraph.find(qn('a:endParaRPr'))
+    if end is None:
+        runs = [run.find(qn('a:rPr')) for run in paragraph.findall(qn('a:r'))]
+        runs = [props for props in runs if props is not None]
+        end = deepcopy(runs[-1]) if runs else paragraph.makeelement(qn('a:endParaRPr'), {'lang': 'ar-SA'})
+        end.tag = qn('a:endParaRPr')
+        for link in end.findall(qn('a:hlinkClick')) + end.findall(qn('a:hlinkMouseOver')):
+            end.remove(link)
+        paragraph.append(end)
+    return end
+
+
 def set_cell_size(cell, font_pt=TABLE_PT):
     for run in cell._tc.iter(qn('a:r')):
         if run.find(qn('a:rPr')) is None:
             run.insert(0, run.makeelement(qn('a:rPr'), {}))
-    for node in cell._tc.iter():
-        if node.tag in {qn('a:rPr'), qn('a:defRPr'), qn('a:endParaRPr')}:
-            node.set('sz', str(round(font_pt * 100)))
-            set_font(node)
+    for paragraph in cell._tc.iter(qn('a:p')):
+        end_paragraph_properties(paragraph)
+    # A list first: set_font rebuilds each node's children, and changing the tree
+    # while walking it made lxml skip the nodes that follow (the end-of-paragraph
+    # properties kept the master's 10 pt, which is what typed text then used).
+    for node in list(cell._tc.iter(qn('a:rPr'), qn('a:defRPr'), qn('a:endParaRPr'))):
+        node.set('sz', str(round(font_pt * 100)))
+        set_font(node)
     for paragraph in cell.text_frame.paragraphs:
         paragraph.font.size = Pt(font_pt)
         for run in paragraph.runs:
@@ -105,8 +136,36 @@ def set_table_sizes(prs, agenda_pt=TABLE_PT):
     """Apply the approved size and per-column alignment, preserving merged titles."""
     for table in all_tables(prs): apply_table(table,table_font_size(table,agenda_pt))
 
+ROW_ID = '{http://schemas.microsoft.com/office/drawing/2014/main}rowId'
+
+
+def unique_row_ids(table):
+    """Give every row of `table` its own Office row ID.
+
+    Rows are built by copying one pattern row, ID included. PowerPoint tracks
+    rows by this ID when the user inserts, deletes or moves one, so the
+    copies get fresh values; the first row that holds a value keeps it.
+    """
+    nodes = [node for row in table._tbl.tr_lst for node in row.iter(ROW_ID)]
+    used = {node.get('val') for node in nodes}
+    seen = set()
+    fresh = 10000
+    for node in nodes:
+        value = node.get('val')
+        if value in seen or not value:
+            while str(fresh) in used:
+                fresh += 1
+            value = str(fresh)
+            used.add(value)
+            node.set('val', value)
+        seen.add(value)
+
+
 def set_table_directions(prs):
-    for table in all_tables(prs): rtl_table(table)
+    """Final table pass of every builder: RTL direction and unique row IDs."""
+    for table in all_tables(prs):
+        rtl_table(table)
+        unique_row_ids(table)
 
 def expected_size(table, reduced, default=TABLE_PT):
     """The size `table` must use: `default`, or the one reduced size it uses throughout when `reduced` grants it."""

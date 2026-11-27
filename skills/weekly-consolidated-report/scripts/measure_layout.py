@@ -14,7 +14,6 @@ Install the template fonts (Abar Mid) first; LibreOffice substitutes wider fonts
 otherwise.
 """
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import sys
@@ -24,6 +23,7 @@ from pptx import Presentation
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_common.measure import measure_rows
+from report_common.validation import sha
 from weekly_artwork import is_digital_detail
 from weekly_data import MASTER, SUMMARY_SIZES, PT
 from report_common.pptx_helpers import TASK_SUMMARY_TITLES, SUHAIL_SUMMARY_TITLES
@@ -43,7 +43,7 @@ def points(found, si, shape_id, row, fallback):
 
 
 def sha256(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest().upper()
+    return sha(path).upper()
 
 
 def measure(report, tasks, suhail, transactions, template=None, digital_pdf=None, digital_data=None):

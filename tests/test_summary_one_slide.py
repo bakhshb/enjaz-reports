@@ -5,7 +5,8 @@
 """Each summary stays on one slide (user request, 26-11-2026).
 
 With measurements, summary tables that do not fit at 11 pt shrink on their own
-slide (never a continuation slide), down to 8 pt; beyond that the build stops.
+slide, down to 8 pt. Beyond that the build does not stop: the rows that do not
+fit move to an appendix slide and a notice says so (user request, 26-11-2026).
 """
 import sys
 import unittest
@@ -18,6 +19,7 @@ sys.path.insert(0, str(ROOT / 'skills'))
 sys.path.insert(0, str(ROOT / 'skills/weekly-consolidated-report/scripts'))
 import build_report as weekly
 from weekly_data import scaled_height, SUMMARY_SIZES
+from report_common import notices
 from report_common.table_typography import apply_table, check_table_typography, set_table_sizes, set_table_directions, TABLE_FONT
 from pptx.oxml.ns import qn
 
@@ -69,10 +71,87 @@ class SummaryOneSlideTests(unittest.TestCase):
                     measurements(self.prs, self.slide, 1, 30), sizes=sizes)
         self.assertEqual(sizes, [])
 
-    def test_too_long_even_at_8_pt_stops(self):
-        with self.assertRaisesRegex(ValueError, 'do not fit on one slide even at 8 pt'):
-            weekly.flow(self.prs, self.slide, sections(self.slide, 4), True,
-                        measurements(self.prs, self.slide, 4, 400, {str(s): 300 for s in SUMMARY_SIZES[1:]}), sizes=[])
+    def test_too_long_even_at_8_pt_moves_the_overflow_to_an_appendix(self):
+        notices.reset()
+        data = sections(self.slide, 4)
+        sizes = []
+        targets = weekly.flow(self.prs, self.slide, data, True,
+                              measurements(self.prs, self.slide, 4, 400, {str(s): 300 for s in SUMMARY_SIZES[1:]}), sizes=sizes)
+        self.assertGreater(len(targets), 1)
+        self.assertTrue(any(n['kind'] == 'space' and 'ملحق' in n['message'] for n in notices.collected()))
+        placed = [row.cells[0].text for sl in targets for sh in sorted(weekly.builder.tables(sl), key=lambda s: s.top)
+                  for row in list(sh.table.rows)[2:]]
+        self.assertEqual(placed, [r[0] for _, records, _ in data for r in records])
+        for sl in targets:
+            bottom = weekly.content_bottom(self.prs, sl)
+            tables = sorted(weekly.builder.tables(sl), key=lambda sh: sh.top)
+            self.assertTrue(all(sh.top + sh.height <= bottom for sh in tables))
+            self.assertTrue(all(a.top + a.height < b.top for a, b in zip(tables, tables[1:])))
+        # Only the summary slide itself holds shrunk tables; the appendix is at 11 pt.
+        shrunk = {sh.shape_id for sh, _ in sizes}
+        self.assertTrue(shrunk)
+        self.assertEqual(shrunk, {sh.shape_id for sh in weekly.builder.tables(self.slide)})
+        self.assertEqual({size for _, size in sizes}, {SUMMARY_SIZES[-1]})
+
+    def test_appendix_moves_whole_tables_never_a_cut_one(self):
+        # Each table alone fits a slide, but not all of them on the summary slide.
+        notices.reset()
+        data = sections(self.slide, 5)
+        sizes = []
+        targets = weekly.flow(self.prs, self.slide, data, True,
+                              measurements(self.prs, self.slide, 5, 50, {str(s): 45 for s in SUMMARY_SIZES[1:]}), sizes=sizes)
+        self.assertGreater(len(targets), 1)
+        seen = {}
+        for sl in targets:
+            for sh in weekly.builder.tables(sl):
+                seen.setdefault(weekly.builder.table_title(sh), []).append(len(sh.table.rows) - 2)
+        for title, records, _ in data:
+            self.assertEqual(seen[title], [len(records)], f'«{title}» was cut across slides: {seen[title]}')
+        for sl in targets:
+            bottom = weekly.content_bottom(self.prs, sl)
+            tables = sorted(weekly.builder.tables(sl), key=lambda sh: sh.top)
+            self.assertTrue(all(sh.top + sh.height <= bottom for sh in tables))
+            self.assertTrue(all(a.top + a.height < b.top for a, b in zip(tables, tables[1:])))
+
+    def test_a_table_taller_than_a_slide_is_split_with_its_header_repeated(self):
+        notices.reset()
+        data = sections(self.slide, 4)
+        targets = weekly.flow(self.prs, self.slide, data, True,
+                              measurements(self.prs, self.slide, 4, 400, {str(s): 300 for s in SUMMARY_SIZES[1:]}), sizes=[])
+        for sl in targets[1:]:
+            for sh in weekly.builder.tables(sl):
+                self.assertIn('#', [c.text.strip() for c in sh.table.rows[1].cells])
+                self.assertTrue(weekly.builder.table_title(sh))
+
+    def test_appendix_choice_keeps_11_pt(self):
+        notices.reset()
+        sizes = []
+        targets = weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
+                              measurements(self.prs, self.slide, 3, 90, {'9': 25, '8': 20}), sizes=sizes, overflow='appendix')
+        self.assertGreater(len(targets), 1)
+        self.assertEqual(sizes, [])
+        self.assertTrue(any('ملحق' in n['message'] for n in notices.collected()))
+
+    def test_minimum_size_is_respected(self):
+        notices.reset()
+        sizes = []
+        weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
+                    measurements(self.prs, self.slide, 3, 90, {'9': 25, '8': 20}), sizes=sizes, min_pt=10)
+        self.assertTrue(all(size >= 10 for _, size in sizes))
+
+    def test_shrinking_is_reported(self):
+        notices.reset()
+        weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
+                    measurements(self.prs, self.slide, 3, 90, {'9': 25, '8': 20}), sizes=[])
+        self.assertTrue(any(n['kind'] == 'space' and 'صغرت' in n['message'] for n in notices.collected()))
+
+    def test_stale_table_measurement_falls_back_to_the_estimate(self):
+        notices.reset()
+        found = measurements(self.prs, self.slide, 1, 30)
+        first = next(iter(found))
+        found[first]['body'] = [30, 30, 30]
+        weekly.flow(self.prs, self.slide, sections(self.slide, 1), True, found, sizes=[])
+        self.assertTrue(any(first in n['message'] for n in notices.collected()))
 
     def test_provisional_pass_still_continues_for_measurement(self):
         targets = weekly.flow(self.prs, self.slide, sections(self.slide, 12), True)

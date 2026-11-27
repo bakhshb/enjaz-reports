@@ -1,4 +1,7 @@
-"""Header row heights (EMU) shared by the weekly consolidated and sector decks."""
+"""Table spacing and header row heights (EMU) shared by the weekly consolidated and sector decks."""
+
+# Clearance between stacked tables and above the footer (user request, 24-11-2026).
+TABLE_GAP = 200000
 
 # Title and header row height of the summary task tables in the approved
 # masters (frame 1203960 minus the 324198 body row, split over the two rows).
@@ -11,3 +14,7 @@ TASK_HEADER = 439881
 # rows (0.52 in projects, 0.557 in transactions, 0.46 in on the digital master)
 # clip the second line in the LibreOffice render. Checked by rendering.
 TWO_LINE_HEADER = 621792
+
+# Smallest body row height (14 pt, one 11 pt line). A row height of 0 or less is
+# invalid in PowerPoint, so a layout that runs out of room clamps to this.
+MIN_ROW_HEIGHT = 177800

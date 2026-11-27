@@ -22,7 +22,7 @@ A Claude Code plugin (also used by Codex and ChatGPT) with skills that build the
 - `skills/<name>/scripts/`: Python build and validation scripts.
 - `skills/<name>/assets/`: approved PowerPoint masters and reference PDFs. Do not edit them. Scripts check their SHA-256.
 - `skills/<name>/references/`: business rules and acceptance checks.
-- `skills/report_common/`: shared helpers imported by the PowerPoint skills. Keep it next to the skills.
+- `skills/report_common/`: shared helpers imported by every skill. Keep it next to the skills. Look here before writing a helper: dates (`dates.py`), warn-and-continue notices (`notices.py`), wording checks for Arabic text the agent writes (`wording.py`), table typography and edit-hardening (`table_typography.py`), row measurement (`measure.py`), the manual-edit repair tool (`reflow.py`), shared spacing and status fills.
 - `tests/`: tests using synthetic data.
 - `tools/package_skills.py`: builds standalone skill zips in `dist/`.
 - `.claude-plugin/`: plugin and marketplace config.
@@ -47,3 +47,5 @@ Needs Python 3.12+, `uv`, LibreOffice (`soffice`) for PDF previews, and the Abar
 - Visual review of the final file is required; passing tests alone is not acceptance.
 - Use only synthetic data in tests. Do not commit real ministry files.
 - Keep changes small. Update the skill's `SKILL.md` and tests when behavior changes.
+- A skill stops only when it cannot produce its report at all (a missing file, sheet or required column, a damaged master, a built file that would state something the inputs do not). Anything else, such as one unreadable date, an unknown status or title, tight space, is a best assumption recorded with `report_common.notices.warn()`; the script continues and writes `<output>.notices.json`, and the agent repeats every notice in its final reply. Do not add a new `raise` or `sys.exit` for a condition the report can survive.
+- Text the agent writes into a report or a message (digital updates and challenges, the Minister messages) is formal government Arabic written the way a person writes it. `report_common/wording.py` holds the banned machine-sounding patterns; extend that list rather than adding a second one.

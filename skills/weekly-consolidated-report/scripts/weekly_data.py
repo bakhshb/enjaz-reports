@@ -9,16 +9,17 @@ from pptx.table import _Cell
 from pptx.dml.color import RGBColor
 from pptx import Presentation
 from report_common import pptx_helpers as helpers
-from report_common import status_styles, validation
+from report_common import notices, status_styles, validation
 from report_common.table_typography import DEFAULT_INSET
+from report_common.header_heights import TABLE_GAP
+from report_common.validation import field_key
 
 MASTER=Path(__file__).resolve().parents[1]/'assets/weekly-report-master.pptx'
 MASTER_HASH='173d48ace27661a4900cc1d6428826e41515d6d4a764a26385171701ead5d96a'
-TABLE_GAP=200000  # clearance between stacked tables and above the footer
 # Each summary (tasks, Suhail, transactions, digital experience) stays on its one
 # slide. When its measured 11 pt tables do not fit, the table text is reduced in
-# half-point steps down to this size; below it the build stops instead of
-# continuing the summary on another slide.
+# half-point steps down to the last size here; when even that does not fit, the
+# rows that do not fit move to an appendix slide and the build records a notice.
 SUMMARY_SIZES=(11,10.5,10,9.5,9,8.5,8)
 CELL_INSETS=2*DEFAULT_INSET  # top+bottom cell margins; they do not scale with the font
 PT=12700  # EMU per point; layout files store row heights in points
@@ -36,19 +37,11 @@ def task_source(title):
 TRANS_FIELDS=('رقم المعاملة','موضوع المعاملة','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط')
 # User confirmed on 2026-09-29 that Monday status colors apply to weekly too.
 # Weekly typography, margins, alignment and borders still come from weekly cells.
-STATUS_FILLS={'مكتملة':'DCE6F2','على المخطط':'EBF1DE','متأخر':'F2DCDB','معلق':'F2F2F2','لم تبدأ':'F2F2F2'}
-
-def field_key(name):
-    return validation.norm(name).replace('إنشاء','انشاء').replace('الانجاز','الإنجاز').replace('المخطط له','المخطط')
-
-def content_bottom(prs,slide):
-    # Locate actual footer artwork in this template's inherited layout.
-    # Final rendered inspection remains authoritative for visual clearance.
-    layers=(slide,slide.slide_layout,slide.slide_layout.slide_master)
-    footer=[shape.top for layer in layers for shape in layer.shapes
-            if shape.top>prs.slide_height*.85 and shape.height<prs.slide_height*.1]
-    if not footer:raise ValueError('Cannot identify approved footer artwork')
-    return min(footer)-TABLE_GAP
+STATUS_FILLS=status_styles.FILLS
+# A status the template has no style for keeps its own text and takes this gray style.
+NEUTRAL_STATUS={'task':'معلق','project':'لم تبدأ'}
+# How the notices name each summary slide: tasks, Suhail, transactions, digital experience.
+SUMMARY_LABELS=('ملخص المهام','ملخص مشاريع سهيل','ملخص المعاملات','ملخص التجربة الرقمية')
 
 def approved_styles(template=MASTER,kind='task'):
     result={}
@@ -109,11 +102,15 @@ def transaction_data(path):
             values=[ws.cell(r,columns[field_key(s)]).value for s in expected]
             if values[0] in (None,'','لا يوجد'):continue
             records.append([helpers.val(v) for v in values])
-        if len(records)!=kpis[3]:raise ValueError('Delayed transaction total differs from detail records')
+        # A workbook that disagrees with itself is the user's to settle: both
+        # parts are transferred as written and the difference is reported.
+        if len(records)!=kpis[3]:
+            notices.warn(f'ملف المعاملات: مؤشر المتأخرة ({kpis[3]}) يختلف عن عدد صفوف جدول المعاملات المتأخرة ({len(records)}). نقلت الاثنين كما وردا.','source')
         actual=Counter(row[2] for row in records)
         counts={str(row[0]):int(row[3] or 0) for row in chart}
-        if any(actual[s]!=counts.get(s,0) for s in actual.keys()|counts.keys()):
-            raise ValueError('Delayed transactions differ from sector counts')
+        differing=sorted(s for s in actual.keys()|counts.keys() if actual[s]!=counts.get(s,0))
+        if differing:
+            notices.warn('ملف المعاملات: عدد المعاملات المتأخرة في جدول القطاعات يختلف عن صفوف الجدول التفصيلي للقطاعات: '+'، '.join(differing)+'. نقلت الاثنين كما وردا.','source')
         return kpis,chart,records
     finally:wb.close()
 
@@ -135,15 +132,16 @@ def measured_rows(body,smaller):
         return [emu(h) for h in found] if found and len(found)==len(body) else [scaled_height(h,size) for h in body]
     return at
 
-def fit_summary(tables,available,gap=TABLE_GAP):
-    """Largest summary size at which every table fits `available` (EMU) with `gap` between them.
+def fit_summary(tables,available,gap=TABLE_GAP,sizes=SUMMARY_SIZES):
+    """Largest of `sizes` at which every table fits `available` (EMU) with `gap` between them.
 
     `tables` is a list of ``(fixed, at)``: title/header heights at 11 pt and a
     function giving the body heights at a size (see `measured_rows`). Returns
-    ``(size, heights)`` with one list of row heights per table, or raises.
+    ``(size, heights)`` with one list of row heights per table, or None when
+    no size fits; the caller then moves the overflow to an appendix slide.
     """
     room=available-gap*max(0,len(tables)-1)
-    for size in SUMMARY_SIZES:
+    for size in sizes:
         heights=[[scaled_height(h,size) for h in fixed]+at(size) for fixed,at in tables]
         if sum(map(sum,heights))<=room:return size,heights
-    raise ValueError(f'Summary tables do not fit on one slide even at {SUMMARY_SIZES[-1]} pt; shorten their text')
+    return None

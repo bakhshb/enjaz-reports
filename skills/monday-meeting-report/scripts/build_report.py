@@ -8,7 +8,7 @@
 #   "python-pptx>=1.0",
 # ]
 # ///
-import argparse, copy, datetime as dt, hashlib, re, shutil, tempfile, zipfile, os, subprocess, sys
+import argparse, copy, datetime as dt, hashlib, json, re, shutil, tempfile, zipfile, os, subprocess, sys
 from pathlib import Path
 from lxml import etree
 import openpyxl
@@ -16,17 +16,17 @@ from pptx import Presentation
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import monday_status_styles as status_styles
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
-from report_common.pptx_helpers import (val, set_text, shape_by_id, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, find_slide_with_text, task_data, suhail_data)
+from report_common import notices
+from report_common.pptx_helpers import (val, set_text, shape_by_id, clone_slide, remove_slide, tables, table_title, detail_tables, detail_pattern_slides, find_slide_with_text, task_data, suhail_data,
+                                         MONTHS, TASK_SUMMARY_TITLES, SUHAIL_SUMMARY_TITLES)
 
 import monday_layout as layout
 from report_common.table_typography import set_table_sizes, set_table_directions
 
 
 NS_C = {'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
-MONTHS = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
+NOTICES_PREFIX='GATE_NOTICES_JSON '
 MASTER_SHA256='1b7c72de3a5034ee0352a8b6a67f3f519a2e4bad5d95ad93424acdb5353ef255'
-TASK_SUMMARY_TITLES=('المهام المكتملة','المهام المتأخرة','المهام المعلقة','طلبات الدعم')
-SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المتأخرة','التحديات')
 
 
 def fill_summary_tables(prs,source_slide,sections,titles,section_title,measurements,bullets=None):
@@ -207,15 +207,34 @@ def build_candidate(a):
             specs.append((f'{kind}:{i}',shape,[row[:6] for row in rows],title,kind))
     measurements=layout.measure(specs,template,approved,bullets,getattr(a,'layout_engine','auto'))
 
-    # All topics stay on one slide at 14 pt, using measured content heights.
+    # The agenda starts at 14 pt on one slide. When it does not fit, the font shrinks in
+    # AGENDA_STEP_PT steps down to AGENDA_FLOOR_PT, re-measured each time (PowerPoint grows
+    # a row to its text, so squeezing row heights does not work). At the floor the remaining
+    # rows continue on a second agenda slide with the header repeated. Neither stops the build.
     date=getattr(a,'meeting_date',None) or meeting_date()
     set_text(shape_by_id(prs.slides[0],4),f'{date.day} {MONTHS[date.month-1]} {date.year}')
     header,heights=measurements['agenda']
-    if agenda_shape.top+sum(header)+sum(heights)>prs.slide_height-int(55*12700):
-        raise ValueError('Topics cannot fit on one page at 14 pt; shorten the topics or use an approved wider layout. '
-                         'No topics were split, clipped or omitted.')
-    layout.populate(agenda_shape,agenda,kind='agenda')
-    layout.size_shape(agenda_shape,header,heights,agenda_shape.top)
+    bottom=prs.slide_height-int(55*12700)
+    agenda_pt=layout.AGENDA_PT
+    while sum(heights)>bottom-agenda_shape.top-sum(header) and agenda_pt>layout.AGENDA_FLOOR_PT:
+        agenda_pt=max(layout.AGENDA_FLOOR_PT,agenda_pt-layout.AGENDA_STEP_PT)
+        header,heights=layout.measure([('agenda',agenda_shape,agenda,None,'agenda')],template,approved,bullets,
+                                      getattr(a,'layout_engine','auto'),agenda_pt=agenda_pt)['agenda']
+    pages=layout.pack([('جدول الأعمال',agenda,header,heights)],agenda_shape.top,bottom)
+    size=f'{agenda_pt:g}'
+    if len(pages)>1:
+        second=len(pages[0][0][1])+1
+        notices.warn(f'جدول الأعمال لا يتسع في شريحة واحدة؛ صغّرت خطه من {layout.AGENDA_PT} إلى {size} (الحد الأدنى {layout.AGENDA_FLOOR_PT}) ولم يتسع، فنقلت باقي المواضيع من الموضوع {second} إلى شريحة جدول أعمال ثانية بترويسة مكررة. البديل: اختصار نص المواضيع ليبقى الجدول في شريحة واحدة بخط {layout.AGENDA_PT}.','space')
+    elif agenda_pt<layout.AGENDA_PT:
+        notices.warn(f'جدول الأعمال لا يتسع في شريحة واحدة بخط {layout.AGENDA_PT}؛ صغّرت خطه إلى {size} ليبقى في شريحة واحدة. البديل: اختصار نص المواضيع ليبقى بخط {layout.AGENDA_PT}.','space')
+    agenda_slides=[agenda_slide];last=agenda_slide
+    for _ in pages[1:]:
+        last=clone_slide(prs,agenda_slide,after=last);agenda_slides.append(last)
+    for sl,items in zip(agenda_slides,pages):
+        for _,chunk,page_header,sizes,top in items:
+            shape=next(sh for sh in tables(sl,4) if sh.table.cell(0,0).text.strip()=='م')
+            layout.populate(shape,chunk,kind='agenda',agenda_pt=agenda_pt)
+            layout.size_shape(shape,page_header,sizes,top)
 
     # Task summary can expand down the left side; when that area fills, create a
     # clean continuation page containing only the approved heading/table pattern.
@@ -240,7 +259,7 @@ def build_candidate(a):
     for sl in task_unused+suhail_unused:
         remove_slide(prs,sl)
 
-    set_table_sizes(prs,agenda_pt=layout.AGENDA_PT)
+    set_table_sizes(prs,agenda_pt=agenda_pt)
     set_table_directions(prs)
     prs.save(out); patch_charts(out,tchart,schart)
 
@@ -252,6 +271,12 @@ def validate_candidate(a):
     if a.template:command.extend(['--template',str(a.template)])
     result=subprocess.run(command,capture_output=True,text=True,encoding='utf-8',
                           env={**os.environ,'PYTHONIOENCODING':'utf-8'})
+    # The gate runs in its own process: it prints its notices as one JSON line, re-recorded here
+    # so they reach <output>.notices.json.
+    for line in result.stdout.splitlines():
+        if line.startswith(NOTICES_PREFIX):
+            for entry in json.loads(line[len(NOTICES_PREFIX):]):
+                notices.warn(entry['message'],entry.get('kind','assumption'))
     if result.returncode:
         raise ValueError('Candidate validation failed:\n'+result.stdout+result.stderr)
 
@@ -264,12 +289,15 @@ def main(argv=None):
     if any(output==p.resolve() or (output.exists() and p.exists() and output.samefile(p)) for p in protected):
         raise ValueError('Output must not overwrite the template or an input workbook')
     output.parent.mkdir(parents=True,exist_ok=True)
+    notices.clear_stale(output)
+    notices.reset()
     with tempfile.TemporaryDirectory(prefix='.monday-build-',dir=output.parent) as temporary:
         candidate=copy.copy(args)
         candidate.output=str(Path(temporary)/'report.pptx')
         build_candidate(candidate)
         validate_candidate(candidate)
         status_styles.publish(candidate.output,output)
+    notices.save(output)
     print(output)
     return 0
 

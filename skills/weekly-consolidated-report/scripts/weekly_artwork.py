@@ -13,6 +13,24 @@ NAVIGATION = {'ملخص المهام': 'إجمالي المهام',
               'المعاملات': 'إجمالي المعاملات', 'التفاصيل': None}
 DIGITAL_NAME = 'التجربة الرقمية'
 DIGITAL_DETAIL_LABEL = 'تفاصيل مؤشر نضج التجربة الرقمية'
+DIVIDER_LABELS = {'تفاصيل المهام', 'تفاصيل مشاريع سهيل'}
+JUMP = 'ppaction://hlinksldjump'
+
+
+def is_divider(slide):
+    """The detail divider: the slide whose buttons open the task and Suhail details."""
+    return DIVIDER_LABELS.issubset(helpers.slide_texts(slide))
+
+
+def set_jump(shape, rid):
+    """Make `shape` jump to the slide behind relationship `rid`, replacing any link it has."""
+    props = shape.element.find('.//' + qn('p:cNvPr'))
+    for old in list(props.findall(qn('a:hlinkClick'))):
+        props.remove(old)
+    link = OxmlElement('a:hlinkClick')
+    link.set(qn('r:id'), rid)
+    link.set('action', JUMP)
+    props.insert(0, link)
 
 def label(text):
     return ' '.join(text.split())
@@ -35,10 +53,6 @@ def all_shapes(shapes):
         if hasattr(shape, 'shapes'):
             yield from all_shapes(shape.shapes)
 
-def next_shape_id(slide):
-    # Include group descendants, not just the top-level group IDs.
-    return max((int(node.get('id')) for node in slide._element.iter(qn('p:cNvPr'))), default=0) + 1
-
 def place_table_copy(slide, element):
     """Add a copy of an approved table graphic frame to the slide and return the new shape.
 
@@ -46,7 +60,7 @@ def place_table_copy(slide, element):
     the original object's identity and must not be shared between copies.
     """
     element = deepcopy(element)
-    element.find('.//' + qn('p:cNvPr')).set('id', str(next_shape_id(slide)))
+    element.find('.//' + qn('p:cNvPr')).set('id', str(helpers.next_shape_id(slide._element)))
     for node in list(element.iter()):
         if etree.QName(node).localname in ('creationId', 'custDataLst'):
             node.getparent().remove(node)
@@ -56,8 +70,7 @@ def place_table_copy(slide, element):
 def targets(prs):
     result = {}
     for name, marker in NAVIGATION.items():
-        matches = [sl for sl in prs.slides if (marker in helpers.slide_texts(sl) if marker else
-                   {'تفاصيل المهام', 'تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))]
+        matches = [sl for sl in prs.slides if (marker in helpers.slide_texts(sl) if marker else is_divider(sl))]
         if len(matches) != 1:
             raise ValueError('Cannot identify navigation destination: ' + name)
         result[name] = matches[0].part
@@ -109,28 +122,15 @@ def prepare_navigation(prs):
         for name, shapes in buttons(layout, destinations):
             rid = layout.part.relate_to(destinations[name], RT.SLIDE)
             for shape in shapes:
-                props = shape.element.find('.//' + qn('p:cNvPr'))
-                for old in list(props.findall(qn('a:hlinkClick'))):
-                    props.remove(old)
-                link = OxmlElement('a:hlinkClick')
-                link.set(qn('r:id'), rid)
-                link.set('action', 'ppaction://hlinksldjump')
-                props.insert(0, link)
+                set_jump(shape, rid)
     details = [sl for sl in prs.slides if is_digital_detail(sl)]
     if details:
-        divider = next(sl for sl in prs.slides if {'تفاصيل المهام', 'تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))
+        divider = next(sl for sl in prs.slides if is_divider(sl))
         labels = [sh for sh in all_shapes(divider.shapes)
                   if getattr(sh, 'has_text_frame', False) and label(sh.text) == DIGITAL_DETAIL_LABEL]
         if len(labels) != 1:
             raise ValueError('Missing/duplicate digital detail divider button')
-        rid = divider.part.relate_to(details[0].part, RT.SLIDE)
-        props = labels[0].element.find('.//' + qn('p:cNvPr'))
-        for old in list(props.findall(qn('a:hlinkClick'))):
-            props.remove(old)
-        link = OxmlElement('a:hlinkClick')
-        link.set(qn('r:id'), rid)
-        link.set('action', 'ppaction://hlinksldjump')
-        props.insert(0, link)
+        set_jump(labels[0], divider.part.relate_to(details[0].part, RT.SLIDE))
 
 def layer_signature(layer):
     """Compare artwork, geometry and image bytes; links are validated separately."""
@@ -161,7 +161,7 @@ def check_navigation_links(prs, errors):
                     links = list(shape.element.iter(qn('a:hlinkClick')))
                     rel = layout.part.rels.get(links[0].get(qn('r:id'))) if len(links) == 1 else None
                     if (rel is None or rel.is_external or rel.target_part != destinations[name]
-                            or links[0].get('action') != 'ppaction://hlinksldjump'):
+                            or links[0].get('action') != JUMP):
                         errors.append(f'Layout {layout.name}: {name} tab does not jump to its section')
                         break
         except ValueError as exc:
@@ -213,7 +213,7 @@ def check_detail_artwork(prs, master, errors):
                         continue
                     link = links[0]
                     rel = layout.part.rels[link.get(qn('r:id'))]
-                    if rel.is_external or rel.target_part != destinations[name] or link.get('action') != 'ppaction://hlinksldjump':
+                    if rel.is_external or rel.target_part != destinations[name] or link.get('action') != JUMP:
                         errors.append(prefix + 'navigation destination differs: ' + name)
         except (KeyError, ValueError) as exc:
             errors.append(prefix + 'invalid inherited artwork/navigation: ' + str(exc))

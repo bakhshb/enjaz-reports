@@ -13,9 +13,14 @@ PDF inputs, so the messages match what the Minister will see. The output is:
 - ``<stem>.long-message.draft.txt``: the long message with every fixed and
   counted part written; the parts marked ``[…]`` are rewritten by the agent in
   formal Arabic from the facts file (see references/minister-summary.md).
+
+``--check <message.txt>`` reads a finished message back and lists what still
+needs the agent's hand: a bracket left in, a number that is not in the facts
+file, a colloquial word or a machine-sounding phrase.
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -23,7 +28,7 @@ from pptx import Presentation
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from report_common import pptx_helpers as helpers
+from report_common import pptx_helpers as helpers, wording
 from validate_report import SPECS
 from weekly_data import COVER_DATE_ID, task_source
 from update_format import update_parts
@@ -49,14 +54,14 @@ LABELS = {'task': 'المهام', 'project': 'مشاريع سهيل', 'transacti
 # Statuses that close the counts sentence with «ولا توجد …» when they are zero.
 NEGATIVE = {'task': ('متأخرة', 'معلقة'), 'project': ('متأخرة', 'لم تبدأ'), 'transaction': ('متأخرة',)}
 NEGATIVE_TAIL = {'task': ' ضمن جدول متابعة المهام', 'project': '', 'transaction': ''}
-DISCLAIMER = ('وتعكس النسب أدناه تقدم استكمال المتطلبات والأدلة، بما يشمل الجاهزية وتحديد تواريخ التنفيذ '
-              'والأعمال المنجزة، ولا تمثل نتيجة التقييم النهائي.')
+DISCLAIMER = ('تقيس هذه النسب التقدم في استكمال المتطلبات والأدلة، وتشمل الجاهزية وتحديد تواريخ التنفيذ '
+              'والأعمال المنجزة، وليست نتيجة التقييم النهائي.')
 EMPTY = {
     'completed_tasks': 'لا توجد مهام مكتملة ضمن التقرير.',
     'suhail_updates': 'لم يتضمن التقرير مستجدات لمشاريع سهيل.',
     'suhail_delayed': 'لا توجد مشاريع متأخرة.',
     'suhail_challenges': 'لم يتضمن التقرير تحديات لمشاريع سهيل.',
-    'support': 'لم يتضمن التقرير طلبات دعم مستقلة مرفوعة لمعاليكم.',
+    'support': 'لم يتضمن التقرير طلبات دعم مرفوعة لمعاليكم.',
     'perspective_sectors': 'لم يتضمن التقرير نسب إنجاز للجهات في هذا المنظور.',
     'perspective_challenges': 'لم يتضمن التقرير تحديات لهذا المنظور.',
 }
@@ -224,26 +229,26 @@ def short_message(data):
     t, p, x = data['tasks'], data['suhail'], data['transactions']
     sources = ' و'.join(data['task_sources']) or 'الجهات المسندة'
     if not (t['delayed'] or t['suspended']):
-        tasks = f'كل المهام المسندة من {sources} تسير على المخطط'
+        tasks = f'جميع المهام المسندة من {sources} على المخطط.'
     else:
         late = [counted(v, 'task', s) for s, v in (('متأخرة', t['delayed']), ('معلقة', t['suspended'])) if v]
-        tasks = f'المهام المسندة من {sources} على المخطط عدا ' + ' و'.join(late)
-    transactions = ('لا يوجد اي تأخير في المعاملات' if not x['delayed']
-                    else f'يوجد {counted(x["delayed"], "transaction", "متأخرة")}')
+        tasks = f'المهام المسندة من {sources} على المخطط، عدا ' + ' و'.join(late) + '.'
+    transactions = ('لا توجد معاملات متأخرة.' if not x['delayed']
+                    else f'توجد {counted(x["delayed"], "transaction", "متأخرة")}.')
     if not (p['delayed'] or p['not_started']):
-        suhail = 'مبادرات سهيل على المخطط'
+        suhail = 'مشاريع سهيل على المخطط.'
     else:
         late = [counted(v, 'project', s) for s, v in (('متأخرة', p['delayed']), ('لم تبدأ', p['not_started'])) if v]
-        suhail = 'مبادرات سهيل على المخطط عدا ' + ' و'.join(late)
-    lines = ['معاليك', f'- {tasks}', f'- {transactions}', f'- {suhail}']
+        suhail = 'مشاريع سهيل على المخطط، عدا ' + ' و'.join(late) + '.'
+    lines = ['معالي الوزير حفظه الله', f'- {tasks}', f'- {transactions}', f'- {suhail}']
     if data['digital']:
         digital = 'مؤشر نضج التجربة الرقمية على المخطط'
         late = delayed_sectors(data)
         if late:
-            digital += '، فيه تأخير من ' + ' و'.join(late)
-            digital += '، ولكن لا يستدعي التصعيد الآن، شغالين مع … على تجاوز التأخير.'
-        lines.append(f'- {digital}')
-    lines.append('تحياتي')
+            # Only the fact from the facts file; any judgement about it is the user's to add.
+            digital += '، مع تأخر لدى ' + ' و'.join(late)
+        lines.append(f'- {digital}.')
+    lines.append('مع التحية والتقدير')
     return '\n'.join(lines) + '\n'
 
 
@@ -260,11 +265,9 @@ def _percent_sentence(entries):
 
 def long_draft(data):
     t, p, x, digital = data['tasks'], data['suhail'], data['transactions'], data['digital']
-    parts = 'المهام ومشاريع سهيل والمعاملات'
-    intro = (f'تجدون أدناه ملخص حالة {parts}، بالإضافة إلى مستجدات مؤشر نضج التجربة الرقمية، '
-             if digital else f'تجدون أدناه ملخص حالة {parts}، ')
+    parts = 'المهام ومشاريع سهيل والمعاملات' + (' ومؤشر نضج التجربة الرقمية' if digital else '')
     out = ['معالي الوزير حفظه الله', '', 'السلام عليكم ورحمة الله وبركاته،', '',
-           intro + f'وفق تقرير الإنجاز الأسبوعي المحدث بتاريخ {data["date"]}م.', '']
+           f'أرفع لمعاليكم ملخص تقرير الإنجاز الأسبوعي المحدث بتاريخ {data["date"]}م، ويشمل {parts}.', '']
     sections = iter(ORDINALS)
     out += [f'{next(sections)}: المهام', '',
             counts_sentence('task', t['total'], [('مكتملة', t['completed']), ('على المخطط', t['on_plan']),
@@ -299,41 +302,81 @@ def long_draft(data):
         labels, metrics = digital['labels'], digital['metrics']
         listing = '، '.join(f'{"و" if i else ""}{labels[a]} {metrics[a]}' for i, a in enumerate(labels))
         out += [f'{next(sections)}: مؤشر نضج التجربة الرقمية', '',
-                'تتواصل أعمال رفع مؤشر نضج التجربة الرقمية عبر أربعة مناظير رئيسية، حيث بلغت نسبة الإنجاز في '
-                + listing + '.', '', DISCLAIMER, '']
+                'بلغت نسب الإنجاز في مناظير المؤشر الأربعة: ' + listing + '.', '', DISCLAIMER, '']
         noted = [s for s in digital['sectors'] if s['note']]
         for number, (axis, label) in enumerate(labels.items(), 1):
             entries = [(s['name'], s['metrics'][axis]) for s in digital['sectors'] if s['metrics'][axis] is not None]
             line = _percent_sentence(entries)
             if number == 1 and noted:
-                line += '، فيما [' + '؛ '.join(f'{s["name"]}: {s["note"]}' for s in noted) + ']'
-            out += [f'{number}. منظور {label} – نسبة الإنجاز {metrics[axis]}', '', f'- {line}.',
+                line += '، أما [' + '؛ '.join(f'{s["name"]}: {s["note"]}' for s in noted) + ']'
+            out += [f'{number}. منظور {label} (نسبة الإنجاز {metrics[axis]})', '', f'- {line}.',
                     '- [المستجدات]', '- أبرز التحديات: [التحديات]', '']
     out += [f'{next(sections)}: طلبات الدعم المرفوعة لمعاليكم', '']
     support = t['tables']['طلبات الدعم']
     if support:
         out += [f'- {r["المهمة"]} ({r["القطاع"]}): {r["طلب الدعم"]}' for r in support] + ['']
     else:
-        out += [EMPTY['support'][:-1] + '[، فيما تبرز الحاجة إلى …]' + '.', '']
+        out += [EMPTY['support'] + '[ والمطلوب لاستكمال العمل: …]', '']
     out.append('وتفضلوا بقبول خالص التحية والتقدير.')
     return '\n'.join(out) + '\n'
+
+
+NUMBER = re.compile(r'\d+(?:[.,]\d+)?')
+ARABIC_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
+LIST_NUMBER = re.compile(r'^\s*\d+[.)]\s')
+
+
+def check_message(text, data):
+    """What a finished message still needs, as a list of Arabic findings (empty when it is ready).
+
+    A bracket or «…» left from the draft, a number that is not in the facts
+    file, a colloquial word, a machine-sounding phrase, or markup. Latin
+    words are listed as a reminder to write well-known names in Arabic letters.
+    """
+    findings = []
+    known = set(NUMBER.findall(json.dumps(data, ensure_ascii=False).translate(ARABIC_DIGITS)))
+    for number, line in enumerate(text.splitlines(), 1):
+        where = f'السطر {number}'
+        if '[' in line or ']' in line or '…' in line:
+            findings.append(f'{where}: بقي فيه جزء من المسودة بين قوسين أو «…»؛ اكتبه من ملف الحقائق أو احذفه.')
+        body = LIST_NUMBER.sub('', line.translate(ARABIC_DIGITS))
+        for value in NUMBER.findall(body):
+            if value not in known and value.replace(',', '.') not in known:
+                findings.append(f'{where}: الرقم {value} غير موجود في ملف الحقائق؛ لا تضف رقما ليس في التقرير.')
+        findings += wording.review(line, where)
+        latin = wording.latin_words(line)
+        if latin:
+            findings.append(f'{where}: كلمات بحروف لاتينية ({"، ".join(latin)})؛ اكتب الاسم المعروف بحروف عربية إن وجد.')
+    return findings
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', required=True, help='The delivered weekly report (PPTX)')
     parser.add_argument('--output-dir', help='Defaults to the report folder')
+    parser.add_argument('--check', action='append', default=[], metavar='MESSAGE.txt',
+                        help='Check a finished message against the report instead of writing the drafts')
     args = parser.parse_args(argv)
     report = Path(args.report)
+    data = facts(report)
+    if args.check:
+        total = 0
+        for path in args.check:
+            findings = check_message(Path(path).read_text(encoding='utf-8-sig'), data)
+            total += len(findings)
+            print(f'{path}: ' + ('جاهزة' if not findings else f'{len(findings)} ملاحظة'))
+            for finding in findings:
+                print('  ' + finding)
+        return 1 if total else 0
     folder = Path(args.output_dir) if args.output_dir else report.parent
     folder.mkdir(parents=True, exist_ok=True)
-    data = facts(report)
     stem = report.stem
     (folder / f'{stem}.message-facts.json').write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding='utf-8')
     (folder / f'{stem}.short-message.txt').write_text(short_message(data), encoding='utf-8')
     (folder / f'{stem}.long-message.draft.txt').write_text(long_draft(data), encoding='utf-8')
     print(folder / f'{stem}.long-message.draft.txt')
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())
