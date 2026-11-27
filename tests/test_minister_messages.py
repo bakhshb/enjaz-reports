@@ -54,7 +54,7 @@ class ReportMessageTests(unittest.TestCase):
         deck = self.build('normal')
         data = messages.facts(deck)
         short = messages.short_message(data).splitlines()
-        self.assertEqual((short[0], short[-1]), ('معاليك', 'تحياتي'))
+        self.assertEqual((short[0], short[-1]), ('معالي الوزير حفظه الله', 'مع التحية والتقدير'))
         self.assertEqual(len(short), 5, 'standard model: no digital line')
         self.assertIn('عدا', short[1])  # the scenario has a delayed and a suspended task
         long = messages.long_draft(data)
@@ -73,7 +73,7 @@ class ReportMessageTests(unittest.TestCase):
         long = messages.long_draft(messages.facts(self.build('empty')))
         for key in ('completed_tasks', 'suhail_updates', 'suhail_challenges'):
             self.assertIn(messages.EMPTY[key], long)
-        self.assertIn(messages.EMPTY['support'][:-1], long)
+        self.assertIn(messages.EMPTY['support'], long)
         self.assertIn('لم يتضمن التقرير مهام.', long)
 
 
@@ -108,16 +108,32 @@ class DigitalMessageTests(unittest.TestCase):
         body = [r for r in sectors[0]['rows'] if not digital.is_heading(r)]
         self.assertEqual(sum(len(v) for v in first['rows'].values()), len(body))
         short = messages.short_message(data)
-        self.assertIn(f'فيه تأخير من {sectors[0]["title"]}', short)
+        self.assertIn(f'مع تأخر لدى {sectors[0]["title"]}', short)
+        # Only the fact: no invented judgement and no placeholder, and the generated message passes --check.
+        self.assertNotIn('التصعيد', short)
+        self.assertNotIn('…', short)
+        self.assertEqual(messages.check_message(short, data), [])
         self.assertEqual(sum('مؤشر نضج التجربة الرقمية' in line for line in short.splitlines()), 1)
         long = messages.long_draft(data)
         self.assertIn(messages.DISCLAIMER, long)
         self.assertIn('خامسا: طلبات الدعم المرفوعة لمعاليكم', long)
         for number, label in enumerate(digital.LABELS, 1):
-            self.assertIn(f'{number}. منظور {label} – نسبة الإنجاز', long)
+            self.assertIn(f'{number}. منظور {label} (نسبة الإنجاز', long)
         self.assertIn('بلغت نسبة الإنجاز لدى القطاع الأول 83%', long)
         self.assertIn('القطاع الثاني: قيد الدراسة', long)
         self.assertIn(messages.EMPTY['perspective_sectors'], long)  # no sector has a complaints value
+        # Every fixed phrase the script writes is free of machine-sounding patterns, colloquial words and dashes.
+        from report_common import wording
+        for text in (short, long):
+            self.assertEqual([], [f for line in text.splitlines() for f in wording.review(line, 'x')])
+        # The draft is not a finished message: its brackets are reported, and so is an invented number.
+        findings = messages.check_message(long, data)
+        self.assertTrue(any('المسودة' in f for f in findings))
+        ready = 'بلغت نسبة الإنجاز لدى القطاع الأول 83%.\n1. منظور تجربة المستخدم (نسبة الإنجاز 66%)'
+        self.assertEqual(messages.check_message(ready, data), [])
+        self.assertTrue(any('91' in f for f in messages.check_message('بلغت النسبة 91%.', data)))
+        self.assertTrue(any('عامية' in f for f in messages.check_message('شغالين على الملف.', data)))
+        self.assertTrue(any('آلية' in f for f in messages.check_message('وتعكس النسب تقدم العمل.', data)))
 
 
 if __name__ == '__main__':

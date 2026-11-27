@@ -136,9 +136,18 @@ class WeeklyChainTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(qa.validate(out) and qa.check(out,p/'weekly.pptx',p/'transactions.xlsx'))
 
-    def test_missing_transaction_mapping_rejected(self):
-        result=run(SECTOR/'split_report.py',self.master,'--outdir',self.path/'missing','--no-refine')
-        self.assertNotEqual(result.returncode,0);self.assertIn('--transactions',result.stderr)
+    def test_missing_transaction_mapping_is_reported_and_the_split_goes_on(self):
+        """Without the transactions workbook the sector decks are still built; the transactions are left out with a notice."""
+        out=self.path/'missing'
+        result=run(SECTOR/'split_report.py',self.master,'--outdir',out,'--no-refine')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('--transactions',result.stderr)
+        found=json.loads((out/'manifest.json.notices.json').read_text(encoding='utf-8'))
+        self.assertTrue(any(n['kind']=='source' and '--transactions' in n['message'] for n in found))
+        manifest=json.loads((out/'manifest.json').read_text(encoding='utf-8'))
+        self.assertTrue(manifest)
+        self.assertTrue(all(item['n'][2]==0 for item in manifest),'no transaction is placed without its sector')
+        workflow.require(run(SECTOR/'qa_report.py',out,'--master',self.master))
 
     def test_alias_and_only_selection(self):
         aliases=self.path/'aliases.json';aliases.write_text(json.dumps({'وكالة شؤون الحج':'قطاع موحد'},ensure_ascii=False),encoding='utf-8')

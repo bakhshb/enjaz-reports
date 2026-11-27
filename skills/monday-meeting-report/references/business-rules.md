@@ -6,7 +6,7 @@
 
 Read agenda rows in source order and stop after including `ملخص الاجتماع`. Ignore rows below it.
 
-Keep every topic, including `ملخص الاجتماع`, together on exactly one agenda slide. Measure the current text at 14 pt, use content-sized rows and 2 pt top/bottom cell padding, and preserve the approved column widths, RTL, header and footer clearance. Do not use the sample row heights or sample row count as capacity. Never split topics across slides, shrink the font, clip or omit records. If the complete topics table still cannot fit at 14 pt, report the space constraint clearly and preserve the previous output; request shorter source topics or an approved layout adjustment. Normal input contains 9 or 10 topics. This single-page requirement applies only to the agenda; summaries and details still use continuation pages.
+Keep every topic, including `ملخص الاجتماع`, on one agenda slide whenever it fits. Measure the current text at 14 pt, use content-sized rows and 2 pt top/bottom cell padding, and preserve the approved column widths, RTL, header and footer clearance. Do not use the sample row heights or sample row count as capacity. Never clip or omit records. If the table does not fit at 14 pt, the build does not stop: the font shrinks in 0.5 pt steps, measuring again after each step, down to a floor of 8 pt (`AGENDA_FLOOR_PT`). If it still does not fit at 8 pt, the remaining rows continue on a second agenda slide with the header repeated, at the same size, in source order. Each case writes a notice that states what was done and the alternative (shorter topic text), and the final reply repeats it. Normal input contains 9 or 10 topics and stays at 14 pt on one slide.
 
 ### Task summary
 
@@ -30,11 +30,11 @@ Use the approved six-column task-detail page as the reusable pattern. For each s
 The Excel task detail sheet has a seventh field, `الجهات ذات العلاقة`. The user intentionally removed this column from the PowerPoint template; do not transfer it to the deck or append it to `ملاحظات`.
 
 Size rows from their actual text at the approved font and column widths, not multiples of the master example height or its sample row count. Pack successive tables on the same page with a 9 pt gap when they fit. Count each table title/header once per chunk. Preserve source order, repeat headers on continuation pages, and reserve 55 pt above the slide bottom for the footer. Never shrink fonts or clip content to reduce page count.
-If a single record is taller than an otherwise empty approved page, stop with a clear error; never silently cap its estimated height.
+A single record taller than an otherwise empty approved page does not stop the build: it takes a slide of its own and a notice says its text may run past the page. Ask for shorter text there.
 
 ### Suhail summary
 
-Update the Suhail KPIs and native chart from the current summary sheet. Read its three independent sections: `أبرز التحديثات`, `المشاريع المتأخرة`, and `التحديات`. Populate a matching four-column template table only when that Excel section contains records; otherwise remove the table with its title and headers. Preserve each section's exact Excel content, including notes and challenge text. Flow overflow onto continuation summary pages, repeating the applicable title and headers. Keep KPIs and the chart on the first summary page.
+Update the Suhail KPIs and native chart from the current summary sheet. When a KPI disagrees with the sector counts, transfer both as written and record a notice. Read its three independent sections: `أبرز التحديثات`, `المشاريع المتأخرة`, and `التحديات`. Populate a matching four-column template table only when that Excel section contains records; otherwise remove the table with its title and headers. Preserve each section's exact Excel content, including notes and challenge text. Flow overflow onto continuation summary pages, repeating the applicable title and headers. Keep KPIs and the chart on the first summary page.
 
 ### Suhail project details
 
@@ -58,6 +58,7 @@ For example, 20 projects may naturally produce three or more Suhail-detail pages
 - Agenda tables use `Abar Mid` 14 pt, including headers and body cells.
 - Other dynamic tables use `Abar Mid` 11 pt; preserve `Abar Mid SemiBold` where the approved pattern uses it.
 - Do not summarize, rewrite, proofread, infer, or recalculate source content.
+- A task or project status the master has no style for keeps its own text and takes the neutral approved fill (`معلق` gray for tasks, `لم تبدأ` gray for projects). A notice names the status. The build does not stop.
 - Blank source cells clear old template content; never carry previous-week text forward.
 - Remove inherited bullets from ordinary dynamic cells. Apply the Suhail update exception below in summaries and details.
 - In `ما تم حتى تاريخه`, put the existing `تاريخ التحديث` and its day/month/year date on the first content line in bold. Body text is not bold. Ignore leading/trailing empty paragraphs. Two or more nonempty source paragraphs after this line are separate update points: render native bullets using the approved master bullet paragraph. A single sentence/paragraph stays unbulleted. Do not split prose by punctuation or visual wrapping, invent a date, or rewrite source wording.
@@ -69,7 +70,7 @@ For example, 20 projects may naturally produce three or more Suhail-detail pages
 
 The Suhail date/bullet rule above also applies to `التحديث` in `أبرز التحديثات` and `ملاحظات` in `المشاريع المتأخرة`. Format these cells before measuring row heights, using each summary's own source text. Do not copy detail notes into summaries or apply this rule to task notes/challenges. Validation must reject lost date emphasis or incorrect bullets in both summary and detail cells. Install this skill together with the current sibling `report_common` scripts; updating repository instructions alone does not update an older installed generator.
 
-Apply content-based row sizing and continuous packing to both summary sections too. A nonempty table does not automatically require a new slide. Preserve the first-page KPI/chart area and approved table width; only the summary tables continue. Short rows must not inherit the height of a tall master example.
+Apply content-based row sizing and continuous packing to both summary sections too. A nonempty table does not automatically require a new slide. Preserve the first-page KPI/chart area and approved table width; only the summary tables continue. This differs from the consolidated deck, where each summary is one slide: Monday slides are record lists whose approved pattern is pagination with the header repeated, and only the agenda is a single-slide item (it shrinks to 8 pt, then continues on a second slide with a notice). Short rows must not inherit the height of a tall master example.
 
 ## Table column alignment
 

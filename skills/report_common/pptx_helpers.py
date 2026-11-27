@@ -5,6 +5,7 @@ from lxml import etree
 from pptx.oxml.ns import qn
 from pptx.oxml.xmlchemy import OxmlElement
 from .dates import report_date
+from .header_heights import TABLE_GAP
 TASK_SUMMARY_TITLES=('المهام المكتملة','المهام المتأخرة','المهام المعلقة','طلبات الدعم')
 SUHAIL_SUMMARY_TITLES=('أبرز التحديثات','المشاريع المتأخرة','التحديات')
 MONTHS=['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر']
@@ -48,6 +49,11 @@ def clear_cell_bullets(cell):
 
 def set_cell_text(cell,value):
     set_text(cell,value); clear_cell_bullets(cell)
+
+
+def next_shape_id(tree):
+    """A shape ID above every ID under `tree` (a slide or shape-tree element), group descendants included."""
+    return max((int(node.get('id')) for node in tree.iter(qn('p:cNvPr'))), default=1) + 1
 
 
 def shape_by_id(slide, sid):
@@ -190,6 +196,17 @@ def clone_slide(prs,source,after=None,shape_predicate=None):
 def remove_slide(prs,slide):
     idx=slide_index(prs,slide); sldId=prs.slides._sldIdLst[idx]; rid=sldId.rId
     prs.slides._sldIdLst.remove(sldId); prs.part.drop_rel(rid)
+
+
+def content_bottom(prs,slide):
+    """The lowest y a table may reach on `slide`: the footer artwork less the table gap."""
+    # Locate actual footer artwork in this template's inherited layout.
+    # Final rendered inspection remains authoritative for visual clearance.
+    layers=(slide,slide.slide_layout,slide.slide_layout.slide_master)
+    footer=[shape.top for layer in layers for shape in layer.shapes
+            if shape.top is not None and shape.top>prs.slide_height*.85 and shape.height<prs.slide_height*.1]
+    if not footer:raise ValueError('Cannot identify approved footer artwork')
+    return min(footer)-TABLE_GAP
 
 
 def tables(slide,cols=None):

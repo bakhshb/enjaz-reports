@@ -70,11 +70,14 @@ class WeeklyProductionTests(unittest.TestCase):
             prs.save(self.deck)
             with self.assertRaises(ValueError):self.check()
 
-    def test_inconsistent_source_total_rejected_without_overwrite(self):
+    def test_inconsistent_source_total_is_reported_and_transferred(self):
+        """A workbook that disagrees with itself does not stop the report: both parts go in as written."""
         wb=load_workbook(self.case/'tasks.xlsx');wb['ملخص المهام']['B2']=999;wb.save(self.case/'tasks.xlsx')
-        before=self.deck.read_bytes()
-        with self.assertRaises(ValueError):weekly.main(self.args())
-        self.assertEqual(before,self.deck.read_bytes())
+        with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):weekly.main(self.args())
+        found=json.loads(weekly.notices.notices_path(self.deck).read_text(encoding='utf-8'))
+        self.assertTrue(any(n['kind']=='source' and '999' in n['message'] for n in found))
+        slide=weekly.builder.find_slide_with_text(Presentation(self.deck),'إجمالي المهام')
+        self.assertEqual(weekly.builder.shape_by_id(slide,11).text,'999')
 
     def test_blank_notes_and_repeated_names_preserved(self):
         # Keep source identities consistent in summary/details; repeated names are records.
@@ -160,13 +163,27 @@ class WeeklyProductionTests(unittest.TestCase):
             with self.assertRaises(ValueError):weekly.main(self.args(path))
             self.assertEqual(before,path.read_bytes())
 
-    def test_unknown_status_rejected(self):
+    def test_unknown_status_is_kept_with_a_neutral_style_and_reported(self):
         wb=load_workbook(self.case/'projects.xlsx');ws=wb['تفاصيل مشاريع سهيل']
         row=next(row for row in ws if isinstance(row[0].value,int))
         row[4].value='حالة غير معتمدة';wb.save(self.case/'projects.xlsx')
-        before=self.deck.read_bytes()
-        with self.assertRaisesRegex(ValueError,'Unsupported'):weekly.main(self.args())
-        self.assertEqual(before,self.deck.read_bytes())
+        with contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):weekly.main(self.args())
+        found=json.loads(weekly.notices.notices_path(self.deck).read_text(encoding='utf-8'))
+        self.assertTrue(any(n['kind']=='status' and 'حالة غير معتمدة' in n['message'] for n in found))
+        cells=[row.cells[4] for sl in Presentation(self.deck).slides for sh in weekly.builder.detail_tables(sl,'project')
+               for row in list(sh.table.rows)[2:] if row.cells[4].text=='حالة غير معتمدة']
+        self.assertEqual(len(cells),1)
+        self.assertEqual(str(cells[0].fill.fore_color.rgb),'F2F2F2')
+        # The strict gate still names it; the lenient gate lists it as a warning.
+        with self.assertRaisesRegex(ValueError,'Unsupported'):self.check()
+        result=gate.validate(self.deck,self.case/'tasks.xlsx',self.case/'projects.xlsx',self.case/'transactions.xlsx',strict=False)
+        self.assertTrue(any('Unsupported' in w for w in result['warnings']))
+        # No notice written for the user is English.
+        for n in found:
+            self.assertFalse(any('A'<=ch<='Z' or 'a'<=ch<='z' for ch in n['message'].replace('Abar Mid','').replace('LibreOffice','').replace('--measure','')), n['message'])
+        import validate_report
+        self.assertEqual(validate_report.arabic_finding('Tables overlap on slide 4'),'الشريحة 4: جدولان متداخلان')
+        self.assertEqual(validate_report.arabic_finding('Something new on slide 7'),'ملاحظة من فحص التقرير في الشريحة 7 تحتاج مراجعة يدوية.')
 
     def test_measured_layout_preserves_records_and_rejects_stale_inputs(self):
         tables={}
@@ -176,13 +193,16 @@ class WeeklyProductionTests(unittest.TestCase):
                 table=tables.setdefault(title,{'header':[22,22],'body':[]})
                 table['body'].extend([95]*(len(sh.table.rows)-2))
         paths={'tasks':self.case/'tasks.xlsx','suhail':self.case/'projects.xlsx','transactions':self.case/'transactions.xlsx','template':weekly.MASTER}
-        evidence={'typography':'11pt-suhail-paragraph-updates-v3','hashes':{key:gate.validation.sha(path) for key,path in paths.items()},'tables':tables}
+        evidence={'typography':'11pt-line-1.2-updates-v4','hashes':{key:gate.validation.sha(path) for key,path in paths.items()},'tables':tables}
         measurements=self.case/'layout.json';measurements.write_text(json.dumps(evidence),encoding='utf-8')
         with contextlib.redirect_stdout(io.StringIO()):weekly.main(self.args()+['--measurements',str(measurements)])
         self.check()
         before=self.deck.read_bytes();evidence['hashes']['tasks']='stale'
         measurements.write_text(json.dumps(evidence),encoding='utf-8')
-        with self.assertRaisesRegex(ValueError,'stale'):weekly.main(self.args()+['--measurements',str(measurements)])
-        self.assertEqual(before,self.deck.read_bytes())
+        # A stale file no longer stops the build: its heights are dropped, a notice says so, and the build is provisional.
+        with contextlib.redirect_stdout(io.StringIO()) as printed,contextlib.redirect_stderr(io.StringIO()):weekly.main(self.args()+['--measurements',str(measurements)])
+        self.assertIn('PROVISIONAL',printed.getvalue())
+        found=json.loads(weekly.notices.notices_path(self.deck).read_text(encoding='utf-8'))
+        self.assertTrue(any(n['kind']=='layout' and 'ملف القياس قديم' in n['message'] for n in found),found)
 
 if __name__=='__main__':unittest.main()

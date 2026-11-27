@@ -31,7 +31,7 @@ from openpyxl.utils import get_column_letter
 # report_common sits two levels up in the repo and next to this script in a standalone bundle.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from report_common.dates import DateError, report_date
+from report_common import notices
 
 COL_ALIASES = {
     "task": ["المهمة"],
@@ -51,6 +51,8 @@ STATUS_MAP = {
     "معلق": "معلق", "معلقة": "معلق",
 }
 STATUSES = ["مكتملة", "على المخطط", "متأخر", "معلق"]
+# A status the map does not list is placed by its wording, else here, and reported.
+UNKNOWN_STATUS_DEFAULT = "على المخطط"
 SOURCE_ORDER = ["اجتماع القيادات", "اجتماع التجربة الرقمية", "لجنة المتابعة"]
 DETAIL_STATUS_ORDER = ["متأخر", "معلق", "مكتملة", "على المخطط"]
 
@@ -70,14 +72,14 @@ def pick_sheets(xl):
     return None
 
 
-def normalize_status(raw, unmapped):
+def normalize_status(raw, where):
     s = str(raw).strip()
     if s in STATUS_MAP:
         return STATUS_MAP[s]
-    unmapped.add(s)
-    return s
+    return notices.guess_status(s, {st: st for st in STATUSES}, UNKNOWN_STATUS_DEFAULT, where)
 
 def build(input_path, output_path):
+    notices.clear_stale(output_path)
     xl = pd.ExcelFile(input_path)
     main_name = pick_sheets(xl)
     if main_name is None:
@@ -98,30 +100,22 @@ def build(input_path, output_path):
     if missing:
         sys.exit(f"أعمدة مفقودة في شيت المهام: {', '.join(missing)}")
 
-    dates = []
-    for i, value in df[c_date].items():
-        try:
-            dates.append(report_date(value))
-        except DateError:
-            # Excel row: pandas index 0 is the row under the header.
-            sys.exit(f"تاريخ غير مقروء في عمود '{c_date}' بالصف {i + 2}: {value}")
-    df[c_date] = dates
+    # Excel row: pandas index 0 is the row under the header. One unreadable
+    # date does not stop the report: it is kept as written and reported.
+    df[c_date] = [notices.tolerant_date(value, f"عمود «{c_date}» بالصف {i + 2}")
+                  for i, value in df[c_date].items()]
 
     df[c_status] = df[c_status].astype(str).str.strip()
     df[c_sector] = df[c_sector].astype(str).str.strip()
     df[c_source] = df[c_source].astype(str).str.strip()
 
-    unmapped = set()
-    df["_status_norm"] = df[c_status].apply(lambda v: normalize_status(v, unmapped))
-    if unmapped:
-        sys.exit(
-            "توجد حالات غير معروفة يجب مراجعتها يدويا قبل المتابعة (لم يتم تخمين تصنيفها): "
-            + ", ".join(sorted(unmapped))
-        )
+    df["_status_norm"] = [normalize_status(value, f"عمود «{c_status}» بالصف {i + 2}")
+                          for i, value in df[c_status].items()]
 
     if df[c_task].duplicated().any():
         dups = df[c_task][df[c_task].duplicated()].tolist()
         print("تحذير: مهام مكررة بنفس النص:", dups, file=sys.stderr)
+        notices.warn("مهام مكررة بنفس النص (أبقيتها كلها): " + "، ".join(str(d) for d in dups), "duplicate")
 
     total = len(df)
     status_counts = {s: int((df["_status_norm"] == s).sum()) for s in STATUSES}
@@ -271,6 +265,7 @@ def build(input_path, output_path):
         r += 1
 
     wb.save(output_path)
+    notices.save(output_path)
 
     print(f"تم الحفظ: {output_path}")
     print(f"إجمالي المهام: {total}")
@@ -285,4 +280,5 @@ if __name__ == "__main__":
     ap.add_argument("--input", required=True)
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
+    notices.reset()
     build(args.input, args.output)

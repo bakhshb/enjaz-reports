@@ -2,20 +2,28 @@
 # requires-python = ">=3.12"
 # dependencies = ["openpyxl>=3.1", "python-pptx>=1.0.2", "lxml>=5.3", "pdfplumber>=0.11"]
 # ///
-"""Read-only weekly source reconciliation; visual acceptance is a separate step."""
-import argparse, collections, sys
+"""Read-only weekly source reconciliation; visual acceptance is a separate step.
+
+Findings come in two kinds. Content findings (a damaged package, or a number,
+record or chart value that differs from the source) always fail: the report
+would state something the inputs do not. Every other finding (layout, style,
+navigation, a source workbook that disagrees with itself) fails only in strict
+mode; the builder publishes the report and lists those findings as notices.
+"""
+import argparse, collections, re, sys
 from pathlib import Path
 from pptx import Presentation
 from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers, validation, status_styles
-from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, content_bottom, SUMMARY_SIZES, task_source
+from report_common.pptx_helpers import content_bottom
+from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, SUMMARY_SIZES, task_source, NEUTRAL_STATUS, compact_margin
 
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
 from report_common.table_typography import set_table_sizes, set_table_directions, TABLE_PT, TABLE_FONT, check_table_typography, expected_size
-from weekly_artwork import check_detail_artwork, check_navigation_links, all_shapes, DIGITAL_DETAIL_LABEL, is_digital_detail, is_digital_detail_table
+from weekly_artwork import check_detail_artwork, check_navigation_links, all_shapes, DIGITAL_DETAIL_LABEL, is_digital_detail, is_digital_detail_table, is_divider
 
 SPECS=[('إجمالي المهام','ملخص المهام',['مكتملة','على المخطط','متأخر','معلق'],['B2','B3','B4','B5','B6'],[11,14,16,7,6]),
        ('إجمالي مشاريع سهيل','ملخص مشاريع سهيل',['مكتملة','على المخطط','متأخر','لم تبدأ'],['A3','B3','C3','D3','E3'],[10,12,14,8,7]),
@@ -43,14 +51,22 @@ def reference_row(pattern,ri,row,structural):
     body=list(pattern.rows)[2:]
     return next((r for r in body if r.cells[0].span_width==row.cells[0].span_width),body[0])
 
-def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT):
+def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT,compact=None):
+    """Column widths, margins and fonts against the approved pattern (layout findings).
+
+    `compact` is the one margin a summary table may give all four sides of its
+    body cells instead of the pattern's; the title and header rows never may.
+    """
     if [c.width for c in table.columns]!=[c.width for c in pattern.columns]:errors.append('Table column widths changed')
     for ri,row in enumerate(table.rows):
         reference=reference_row(pattern,ri,row,structural)
         for ci,cell in enumerate(row.cells):
             base=reference.cells[ci]
             is_status=len(table.columns)==6 and ri>=2 and ci==4
-            if not is_status and (cell.margin_left,cell.margin_right,cell.margin_top,cell.margin_bottom)!=(base.margin_left,base.margin_right,base.margin_top,base.margin_bottom):errors.append('Table cell margins changed')
+            margins=(cell.margin_left,cell.margin_right,cell.margin_top,cell.margin_bottom)
+            allowed=[(base.margin_left,base.margin_right,base.margin_top,base.margin_bottom)]
+            if compact is not None and ri>=2:allowed.append((compact,)*4)
+            if not is_status and margins not in allowed:errors.append('Table cell margins changed')
             # Family and script font come from the template; the size is checked on its own.
             face=lambda run:(font_signature(run)[0],font_signature(run)[2])
             fonts={face(run) for p in base.text_frame.paragraphs for run in p.runs if run.text.strip()}
@@ -62,12 +78,47 @@ def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT):
                     if run.text.strip() and (run.font.size is None or run.font.size.pt!=size):errors.append(f'Table font size must be {size:g} pt')
                     if run.text.strip() and face(run) not in fonts:errors.append('Table font differs from weekly template: '+run.text[:25])
 
+def margin_state(table,pattern,compact):
+    """How the body cells of a summary table are set: 'template', 'compact', 'both' (the two are the same here) or 'mixed'."""
+    on_compact=on_template=True
+    for ri,row in enumerate(table.rows):
+        if ri<2:continue
+        for ci,cell in enumerate(row.cells):
+            base=reference_row(pattern,ri,row,False).cells[ci]
+            got=(cell.margin_left,cell.margin_right,cell.margin_top,cell.margin_bottom)
+            on_compact&=got==(compact,)*4
+            on_template&=got==(base.margin_left,base.margin_right,base.margin_top,base.margin_bottom)
+    return 'both' if on_compact and on_template else 'compact' if on_compact else 'template' if on_template else 'mixed'
+
+def single_size(table):
+    """The one text size `table` uses, or None when it uses several (the typography check reports that)."""
+    used={run.font.size.pt for row in table.rows for cell in row.cells for p in cell.text_frame.paragraphs
+          for run in p.runs if run.text.strip() and run.font.size is not None}
+    return used.pop() if len(used)==1 else None
+
+def check_summary_look(entries,errors):
+    """The summaries share one look. `entries` holds ``(slide number, is digital, margin state, size)`` per summary table.
+
+    All tables take the template margins or all take the compact ones; a table
+    below 11 pt has the compact ones; the three standard summaries use one size;
+    the digital summary is no larger than it.
+    """
+    states={state for _,_,state,_ in entries}-{'both'}
+    if 'mixed' in states or len(states)>1:errors.append('Summary tables differ in cell margins')
+    for number,_,state,size in entries:
+        if size is not None and size<11 and state not in ('compact','both'):
+            errors.append(f'Summary table below 11 pt keeps the template cell margins on slide {number}')
+    standard={size for _,digital,_,size in entries if not digital and size is not None}
+    if len(standard)>1:errors.append('Standard summary tables use different font sizes')
+    elif standard and any(size is not None and size>max(standard) for _,digital,_,size in entries if digital):
+        errors.append('Digital summary table is larger than the shared summary size')
+
 def check_navigation(prs,errors):
     slides=list(prs.slides)
     positions=[]
     for label,*_ in SPECS:
         positions.append(next((i for i,sl in enumerate(slides) if label in helpers.slide_texts(sl)),-1))
-    dividers=[(i,sl) for i,sl in enumerate(slides) if {'تفاصيل المهام','تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl))]
+    dividers=[(i,sl) for i,sl in enumerate(slides) if is_divider(sl)]
     if len(dividers)!=1:errors.append('Expected one detail navigation divider');return
     divider_index,divider=dividers[0]
     if positions!=sorted(positions) or positions[0]<=0 or divider_index<=positions[-1]:errors.append('Summary/divider order changed')
@@ -104,7 +155,50 @@ def check_navigation(prs,errors):
         for sh in helpers.tables(sl,5):
             if not positions[2]<=i<divider_index:errors.append('Transactions outside their section')
 
-def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',digital_pdf=None,digital_data=None):
+# Soft findings are English here (the tests read them); a notice for the user is Arabic.
+_ARABIC_FINDINGS=(
+    (r'^Unsupported detail status: (.*)$',r'حالة غير معتمدة «\1» في التفاصيل'),
+    (r'^Unsupported (?:task|project) status: (.*)$',r'حالة غير معتمدة «\1» في جدول التفاصيل'),
+    (r'^(.*): detail and sector counts disagree$',r'\1: عدد السجلات في التفاصيل لا يطابق عدد القطاعات'),
+    (r'^(.*): summary/detail identities disagree$',r'\1: سجلات الملخص لا تطابق سجلات التفاصيل'),
+    (r'^Slide dimensions changed$',r'تغير مقاس الشريحة عن القالب'),
+    (r'^Tables overlap on slide (\d+)$',r'الشريحة \1: جدولان متداخلان'),
+    (r'^Table title/header has unresolved auto height on slide (\d+)$',r'الشريحة \1: صف العنوان أو الرأس بلا ارتفاع محدد'),
+    (r'^Table frame reaches footer artwork on slide (\d+).*$',r'الشريحة \1: جدول يصل إلى منطقة التذييل'),
+    (r'^Digital summary update headers changed$',r'تغيرت رؤوس جدول التحديثات في ملخص التجربة الرقمية'),
+    (r'^Status style differs: (.*)$',r'تنسيق خلية الحالة «\1» يختلف عن المعتمد'),
+    (r'^Suhail update.*$',r'تنسيق تحديثات مشاريع سهيل (النص أو النقاط أو الاتجاه أو التمييز) يختلف عن المعتمد'),
+    (r'^Digital-maturity slide is outside its approved position$',r'شريحة النضج الرقمي ليست في موضعها المعتمد'),
+    (r'^Digital-maturity detail title suffix.*: (.*)$',r'ترقيم عنوان تفاصيل «\1» لا يطابق ترقيم الشرائح'),
+    (r'^Digital-maturity .*$',r'شرائح النضج الرقمي: ملاحظة في التنسيق أو الترتيب؛ راجعها على الشريحة'),
+    (r'^Table column widths changed$',r'تغير عرض أعمدة جدول عن القالب'),
+    (r'^Table cell margins changed$',r'تغيرت هوامش خلايا جدول عن القالب'),
+    (r'^Summary tables differ in cell margins$',r'جداول الملخص لا تتفق في هوامش الخلايا؛ المطلوب هوامش القالب في كلها أو الهوامش المقلصة في كلها'),
+    (r'^Summary table below 11 pt keeps the template cell margins on slide (\d+)$',r'الشريحة \1: جدول ملخص بخط أصغر من 11 بقيت هوامشه كما في القالب؛ المطلوب هوامش مقلصة'),
+    (r'^Standard summary tables use different font sizes$',r'جداول ملخص المهام وسهيل والمعاملات بأحجام خط مختلفة؛ المطلوب حجم واحد لها كلها'),
+    (r'^Digital summary table is larger than the shared summary size$',r'خط جدول ملخص التجربة الرقمية أكبر من الحجم المشترك لباقي الملخصات'),
+    (r'^Table font size must be (\S+) pt$',r'حجم خط جدول يخالف المعتمد (\1)'),
+    (r'^Table font differs from weekly template.*$',r'خط نص في جدول يخالف خط القالب'),
+    (r'^Table text must use .*$',r'نص في جدول لا يستخدم خط الجداول المعتمد'),
+    (r'^Table direction must be RTL$',r'اتجاه جدول ليس من اليمين إلى اليسار'),
+    (r'^Table column alignment differs: (.*)$',r'محاذاة عمود «\1» تخالف المعتمد'),
+    (r'^Slide (\d+): .*$',r'الشريحة \1: ملاحظة في عناصر التصميم أو التنقل؛ راجعها'),
+    (r'^(?:Navigation|Layout|Summary/divider|Detail section|Task/project|Digital detail|Digital slide).*$',r'ملاحظة في روابط التنقل أو ترتيب الأقسام؛ راجع أزرار التنقل'),
+)
+
+def arabic_finding(text):
+    """The Arabic form of a soft finding, for the notices file; an unknown finding keeps its slide number and says to check by hand."""
+    for pattern,replacement in _ARABIC_FINDINGS:
+        if re.match(pattern,text):return re.sub(pattern,replacement,text)
+    slide=re.search(r'[Ss]lide (\d+)',text)
+    return 'ملاحظة من فحص التقرير'+(f' في الشريحة {slide.group(1)}' if slide else '')+' تحتاج مراجعة يدوية.'
+
+def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',digital_pdf=None,digital_data=None,strict=True):
+    """Check `report` against its inputs.
+
+    Raises ValueError for a content finding, and in strict mode for any
+    finding. Returns the result with the remaining findings under ``warnings``.
+    """
     if model not in ('standard','digital'):
         raise ValueError('Unknown weekly report model')
     if model=='digital':
@@ -113,14 +207,19 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
         from digital_maturity import load_reviewed, check as check_digital
         reviewed=load_reviewed(digital_data,digital_pdf)
     else:reviewed=None
-    errors=[];validation.package(report,errors)
+    errors=[];soft=[];validation.package(report,errors)
     final=Presentation(report);master=Presentation(template);set_table_sizes(master)
     set_table_directions(master)
-    # A summary keeps its one slide by shrinking its table text (never by a continuation slide).
+    # A summary keeps its one slide by shrinking its table text and, when any summary needs it, taking the compact cell margins (never by a continuation slide).
     reduced={sh.table._tbl:SUMMARY_SIZES for sl in final.slides if any(x.has_chart for x in sl.shapes)
              for sh in sl.shapes if sh.has_table}
-    check_table_typography(final,errors,reduced=reduced)
-    if (final.slide_width,final.slide_height)!=(master.slide_width,master.slide_height):errors.append('Slide dimensions changed')
+    check_table_typography(final,soft,reduced=reduced)
+    # The cell margins a summary table may take instead of the template's: the compact ones of the detail tables.
+    compact=compact_margin(master)
+    summary_tables={sh.table._tbl for sl in final.slides if any(x.has_chart for x in sl.shapes) and not is_digital_detail(sl)
+                    for sh in sl.shapes if sh.has_table}
+    look=[]
+    if (final.slide_width,final.slide_height)!=(master.slide_width,master.slide_height):soft.append('Slide dimensions changed')
     tk,tc,ts,td=helpers.task_data(tasks);pk,pc,ps,pd=helpers.suhail_data(suhail);xk,xc,xd=transaction_data(transactions)
     styles={kind:approved_styles(master,kind) for kind in ('task','project')}
     expected_sections={'task':td,'project':pd}
@@ -132,10 +231,11 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
             for section,records in expected_sections['task' if i==0 else 'project']:
                 for row in records:
                     status=status_styles.canonical(exact(row[4]))
-                    if status not in statuses:errors.append('Unsupported detail status: '+status)
+                    # An unknown status already has its own notice; it is not a count mismatch.
+                    if status not in statuses:soft.append('Unsupported detail status: '+status);continue
                     counts[(exact(row[2]) if i==0 else section,status)]+=1
             expected={(exact(r[0]),s):int(r[j+1] or 0) for r in rows for j,s in enumerate(statuses)}
-            if any(counts[k]!=expected.get(k,0) for k in counts.keys()|expected.keys()):errors.append(sheet+': detail and sector counts disagree')
+            if any(counts[k]!=expected.get(k,0) for k in counts.keys()|expected.keys()):soft.append(sheet+': detail and sector counts disagree')
         matches=[sl for sl in final.slides if label in helpers.slide_texts(sl)]
         if len(matches)!=1:errors.append(label+': expected one summary slide');continue
         slide=matches[0]
@@ -163,26 +263,26 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     for sl in final.slides:
         ordered_tables=sorted(helpers.tables(sl),key=lambda shape: shape.top)
         if any(first.top+first.height>second.top for first,second in zip(ordered_tables,ordered_tables[1:])):
-            errors.append('Tables overlap on slide '+str(helpers.slide_index(final,sl)+1))
+            soft.append('Tables overlap on slide '+str(helpers.slide_index(final,sl)+1))
         for sh in helpers.tables(sl):
             table=sh.table
             if len(table.rows)>=2 and (table.rows[0].height<=0 or table.rows[1].height<=0):
-                errors.append('Table title/header has unresolved auto height on slide '+str(helpers.slide_index(final,sl)+1))
-            if sh.top+sh.height>content_bottom(final,sl):errors.append('Table frame reaches footer artwork; rendered correction required')
+                soft.append('Table title/header has unresolved auto height on slide '+str(helpers.slide_index(final,sl)+1))
+            if sh.top+sh.height>content_bottom(final,sl):soft.append('Table frame reaches footer artwork on slide '+str(helpers.slide_index(final,sl)+1)+'; rendered correction required')
             if len(table.rows)<3:errors.append('Empty table retained');continue
             rows=[[c.text for c in row.cells] for row in table.rows]
             title=helpers.table_title(sh);headers=rows[1]
             if model=='digital' and len(headers)==3 and title=='أبرز التحديثات':
                 # The master's summary table is relabelled «أبرز التحديثات / التحديث» at build time.
                 pattern=next(x.table for x in helpers.tables(master.slides[4]) if len(x.table.columns)==3)
-                if headers!=[c.text for c in pattern.rows[1].cells][:2]+['التحديث']:errors.append('Digital summary update headers changed')
+                if headers!=[c.text for c in pattern.rows[1].cells][:2]+['التحديث']:soft.append('Digital summary update headers changed')
             elif digital_pattern and is_digital_detail(sl) and len(headers) in (2,4):
                 # Structure only; header text and content reconcile against the reviewed data in check_digital.
                 pattern=digital_pattern[0 if len(headers)==4 else 1]
                 if pattern is None or (len(headers)==4 and headers!=[c.text for c in pattern.rows[1].cells]) or (len(headers)==2 and headers[0]!='#'):
                     errors.append('Digital detail table headers changed')
                     continue
-                check_table_style(table,pattern,errors,structural=True);continue
+                check_table_style(table,pattern,soft,structural=True);continue
             elif len(headers)==6:
                 kind='task' if 'المهمة' in headers else 'project'
                 pattern=task_pattern if kind=='task' else project_pattern
@@ -196,15 +296,17 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 for row in list(table.rows)[2:]:
                     cell=row.cells[4];status=status_styles.canonical(cell.text)
                     allowed=status_styles.TASK_STATUSES if kind=='task' else status_styles.PROJECT_STATUSES
-                    if status not in allowed:errors.append('Unsupported '+kind+' status: '+status)
-                    if status not in styles[kind] or status_styles.signature(cell)!=status_styles.signature(styles[kind][status]):errors.append('Status style differs: '+status)
+                    if status not in allowed:soft.append('Unsupported '+kind+' status: '+status)
+                    # A status without an approved style keeps its text on the neutral style.
+                    style=status_styles.style_key(status,allowed,styles[kind],NEUTRAL_STATUS[kind])
+                    if status_styles.signature(cell)!=status_styles.signature(styles[kind][style]):soft.append('Status style differs: '+status)
                     if kind=='project':
                         # Expected emphasis is limited to the leading label/date span.
                         for pi,p in enumerate(row.cells[5].text_frame.paragraphs):
                             offset=0
                             date_end=update_parts(p.text)[0][1] if pi==0 else 0
                             for run in p.runs:
-                                if run.text and (bool(run.font.bold)!=(offset<date_end) or offset<date_end<offset+len(run.text)):errors.append('Suhail update-date emphasis differs')
+                                if run.text and (bool(run.font.bold)!=(offset<date_end) or offset<date_end<offset+len(run.text)):soft.append('Suhail update-date emphasis differs')
                                 offset+=len(run.text)
             elif 'رقم المعاملة' in headers:
                 pattern=transaction_pattern
@@ -218,7 +320,9 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 summaries[title].extend([[row[columns.index(i)] for i in range(4)] for row in rows[2:]])
                 if title in SUMMARY_UPDATE_TITLES:update_cells[title].extend(row.cells[update_column(table)] for row in list(table.rows)[2:])
             else:errors.append('Unexpected table: '+title);continue
-            check_table_style(table,pattern,errors,size=expected_size(table,reduced))
+            is_summary=table._tbl in summary_tables
+            check_table_style(table,pattern,soft,size=expected_size(table,reduced),compact=compact if is_summary else None)
+            if is_summary:look.append((helpers.slide_index(final,sl)+1,len(table.columns)==3,margin_state(table,pattern,compact),single_size(table)))
     for kind,sections in expected_sections.items():
         expected=[]
         for section,records in sections:
@@ -236,35 +340,37 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 if len(parts)!=len(paragraphs):errors.append('Suhail update paragraph count differs');continue
                 for (_,_,bullet),p in zip(parts,paragraphs):
                     actual_bullet=p._p.find('./'+qn('a:pPr')+'/'+qn('a:buChar'))
-                    if (actual_bullet is not None)!=bullet:errors.append('Suhail update list formatting differs')
+                    if (actual_bullet is not None)!=bullet:soft.append('Suhail update list formatting differs')
     for title,records in {**ts,**ps}.items():
         if title in SUMMARY_UPDATE_TITLES:
             cells=update_cells[title]
             if len(cells)!=len(records):errors.append('Suhail summary update count differs')
-            for cell,row in zip(cells,records):check_update(cell,exact(row[3]),errors,paragraph_items=True)
+            for cell,row in zip(cells,records):check_update(cell,exact(row[3]),soft,paragraph_items=True)
             records=[[*row[:3],display_text(exact(row[3]))] for row in records]
         compare(title,records,summaries[title],errors)
     compare('transactions',[[row[i] for i in (0,1,3,4,5)] for row in xd],trans,errors)
+    check_summary_look(look,soft)
     # Summary records remain independently sourced; match identities without inventing notes.
     for title,status in [('المهام المكتملة','مكتملة'),('المهام المتأخرة','متأخر'),('المهام المعلقة','معلق'),('المشاريع المتأخرة','متأخر')]:
         project=title=='المشاريع المتأخرة';sections=pd if project else td
         identities=collections.Counter((exact(row[1]),section if project else exact(row[2])) for section,rows in sections for row in rows if status_styles.canonical(exact(row[4]))==status)
         summary=ps[title] if project else ts[title]
-        if identities!=collections.Counter((exact(row[1]),exact(row[2])) for row in summary):errors.append(title+': summary/detail identities disagree')
+        if identities!=collections.Counter((exact(row[1]),exact(row[2])) for row in summary):soft.append(title+': summary/detail identities disagree')
     if helpers.slide_texts(final.slides[-1])!=helpers.slide_texts(master.slides[-1]):errors.append('Closing slide changed or not last')
     if reviewed is not None:
         from digital_maturity import digital_slide
         digital_index=list(final.slides).index(digital_slide(final))
         transaction_index=next(i for i,sl in enumerate(final.slides) if 'إجمالي المعاملات' in helpers.slide_texts(sl))
-        divider_index=next(i for i,sl in enumerate(final.slides) if {'تفاصيل المهام','تفاصيل مشاريع سهيل'}.issubset(helpers.slide_texts(sl)))
+        divider_index=next(i for i,sl in enumerate(final.slides) if is_divider(sl))
         if digital_index <= transaction_index or digital_index != divider_index-1:
-            errors.append('Digital-maturity slide is outside its approved position')
-        check_digital(final,report,reviewed,errors,master)
-    check_navigation(final,errors)
-    check_detail_artwork(final,master,errors)
-    check_navigation_links(final,errors)
-    if errors:raise ValueError('\n'.join(dict.fromkeys(errors)))
-    return {'programmatic':'passed','visual':'pending','slides':len(final.slides),'report_sha256':validation.sha(report)}
+            soft.append('Digital-maturity slide is outside its approved position')
+        check_digital(final,report,reviewed,errors,master,soft)
+    check_navigation(final,soft)
+    check_detail_artwork(final,master,soft)
+    check_navigation_links(final,soft)
+    soft=list(dict.fromkeys(soft))
+    if errors or (strict and soft):raise ValueError('\n'.join(dict.fromkeys(errors+soft)))
+    return {'programmatic':'passed','visual':'pending','slides':len(final.slides),'report_sha256':validation.sha(report),'warnings':soft}
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
@@ -273,12 +379,13 @@ def main(argv=None):
     parser.add_argument('--model',choices=('standard','digital'),default='standard')
     parser.add_argument('--digital-pdf')
     parser.add_argument('--digital-data')
+    parser.add_argument('--lenient',action='store_true',help='Fail only on content findings; print layout and source findings as warnings')
     args=parser.parse_args(argv)
     if args.model=='digital' and args.template==str(MASTER):
         from digital_maturity import MASTER as DIGITAL_MASTER
         args.template=str(DIGITAL_MASTER)
     print(validate(args.report,args.tasks,args.suhail,args.transactions,args.template,
-                   args.model,args.digital_pdf,args.digital_data))
+                   args.model,args.digital_pdf,args.digital_data,strict=not args.lenient))
     return 0
 
 if __name__=='__main__':raise SystemExit(main())

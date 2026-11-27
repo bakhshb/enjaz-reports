@@ -304,6 +304,69 @@ class DigitalMaturityTests(unittest.TestCase):
         self.review.write_text(json.dumps(self.data, ensure_ascii=False), encoding='utf-8')
         return digital.load_reviewed(self.review, self.pdf)
 
+    def wording_notices(self, word):
+        """Load without stopping; the wording notices that mention `word`."""
+        digital.notices.reset()
+        self.load()
+        return [n['message'] for n in digital.notices.collected() if n['kind'] == 'wording' and word in n['message']]
+
+    def test_unapproved_card_status_is_kept_with_a_notice(self):
+        digital.notices.reset()
+        self.data['detail_sectors'][0]['cards']['tools'] = 'قيد الدراسة'
+        data = self.load()
+        self.assertEqual(data['detail_sectors'][0]['cards']['tools'], 'قيد الدراسة')
+        self.assertTrue(any(n['kind'] == 'status' and 'قيد الدراسة' in n['message'] for n in digital.notices.collected()))
+
+    def test_empty_card_and_orphan_heading_are_notices_not_stops(self):
+        digital.notices.reset()
+        first = self.data['detail_sectors'][0]
+        first['cards']['tools'] = ''
+        body = [row for row in first['rows'] if not digital.is_heading(row)]
+        first['rows'] = body + [['عنوان بلا سجلات', '', '', '']]
+        data = self.load()
+        self.assertEqual(data['detail_sectors'][0]['cards']['tools'], '')
+        self.assertEqual(data['detail_sectors'][0]['rows'], body)
+        messages = [n['message'] for n in digital.notices.collected()]
+        self.assertTrue(any('بطاقة فارغة' in m for m in messages), messages)
+        self.assertTrue(any('عنوان قسم بلا سجلات' in m for m in messages), messages)
+        self.build()
+
+    def place_alone(self, prs, slide, shape, measured, sizes=None):
+        """The digital summary planned on its own, the way `populate` does it (the weekly build plans all four together)."""
+        margin = digital.compact_margin(prs)
+        candidate = digital.summary_candidate(prs, slide, shape, measured, margin)
+        plan = digital.plan_summaries([candidate], 'shrink', *digital.floors(None))
+        digital.announce_plan(plan, {digital.SUMMARY_LABELS[3]: digital._label(prs, slide)})
+        return digital.place_summary(prs, slide, shape, candidate, plan, sizes, margin)
+
+    def test_squeeze_notice_names_the_slide(self):
+        self.load()
+        prs = Presentation(digital.MASTER)
+        slide = digital.digital_slide(prs)
+        shape = next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+        free = digital.content_bottom(prs, slide) - shape.top
+        for row in list(shape.table.rows)[:2]:
+            row.height = free
+        digital.notices.reset()
+        self.place_alone(prs, slide, shape, {'summary': [50] * (len(shape.table.rows) - 2), 'summary_compact': {}})
+        number = list(prs.slides).index(slide) + 1
+        self.assertTrue(any(f'الشريحة {number}' in n['message'] for n in digital.notices.collected()))
+
+    def test_squeeze_never_gives_negative_row_heights(self):
+        data = self.load()
+        prs = Presentation(digital.MASTER)
+        slide = digital.digital_slide(prs)
+        shape = next(sh for sh in slide.shapes if sh.has_table and len(sh.table.columns) == 3)
+        # Fixed rows taller than the whole free space.
+        free = digital.content_bottom(prs, slide) - shape.top
+        for row in list(shape.table.rows)[:2]:
+            row.height = free
+        measured = {'summary': [50] * (len(shape.table.rows) - 2), 'summary_compact': {}}
+        digital.notices.reset()
+        self.place_alone(prs, slide, shape, measured)
+        self.assertTrue(all(row.height > 0 for row in shape.table.rows))
+        self.assertTrue(any(n['kind'] == 'space' for n in digital.notices.collected()))
+
     def build(self):
         data = self.load()
         prs = Presentation(digital.MASTER)
@@ -368,16 +431,14 @@ class DigitalMaturityTests(unittest.TestCase):
     def test_updates_have_no_title_and_notes_are_formal(self):
         """26-11-2026: an update is the statement itself; notes use formal government Arabic."""
         self.data['updates'][0]['text'] = 'تقدم ملحوظ: اكتمل متطلب توافرية المنصات.'
-        with self.assertRaisesRegex(ValueError, 'carries a title'):
-            self.load()
+        self.assertTrue(self.wording_notices('عنوان'))
         self.data['updates'][0]['text'] = 'اكتمل متطلب توافرية المنصات.'
         self.data['detail_sectors'][0]['updates'] = ['نقل المحتوى: اكتمل نقل المحتوى.']
-        with self.assertRaisesRegex(ValueError, 'carries a title'):
-            self.load()
+        self.assertTrue(self.wording_notices('عنوان'))
         self.data['detail_sectors'][0]['updates'] = ['اكتمل نقل المحتوى.']
         self.data['detail_sectors'][0]['challenges'] = ['تأخر التقدم: الحين شغالين على الملف.']
-        with self.assertRaisesRegex(ValueError, 'Colloquial wording'):
-            self.load()
+        found = self.wording_notices('عامية')
+        self.assertEqual(len(found), 2, found)  # one notice per word: checked once, not twice
         # A challenge keeps its short title.
         self.data['detail_sectors'][0]['challenges'] = ['تأخر التقدم: لم يسجل أي تقدم في الملف حتى الآن.']
         self.load()
@@ -390,19 +451,30 @@ class DigitalMaturityTests(unittest.TestCase):
         shape = next(sh for sh in digital.digital_slide(prs).shapes if sh.has_table and len(sh.table.columns) == 3)
         room = digital.content_bottom(prs, digital.digital_slide(prs)) - shape.top
         tall = room / 6 / 12700  # pt: six rows alone fill the space at 11 pt
-        measured = {'summary': [tall] * 6, 'summary_sizes': {'9': [tall * .6] * 6},
+        measured = {'summary': [tall] * 6, 'summary_compact': {'9': [tall * .6] * 6},
                     'sectors': {s['title']: {'rows': [20] * len(s['rows']), 'updates': [20] * len(s['updates']),
                                              'challenges': [20] * len(s['challenges'])} for s in data['detail_sectors']}}
         sizes = []
         digital.populate(prs, data, measured, sizes)
         shape = next(sh for sh in digital.digital_slide(prs).shapes if sh.has_table and len(sh.table.columns) == 3)
-        self.assertEqual([(s.shape_id, size) for s, size in sizes], [(shape.shape_id, 9)])
+        margin = digital.compact_margin(prs)
+        # Sizes without a measurement fall back to the bound, so the table lands at the largest size that fits: below 11, with compact margins.
+        self.assertEqual([s.shape_id for s, _, _ in sizes], [shape.shape_id])
+        (_, size, used), = sizes
+        self.assertTrue(8 <= size < 11)
+        self.assertEqual(used, margin)
         self.assertLessEqual(shape.top + shape.height, digital.content_bottom(prs, digital.digital_slide(prs)))
-        measured['summary'] = measured['summary_sizes']['9'] = [tall * 3] * 6
-        for key in [k for k in measured['summary_sizes']]:
-            measured['summary_sizes'][key] = [tall * 3] * 6
-        with self.assertRaisesRegex(ValueError, 'do not fit on one slide'):
-            digital.populate(Presentation(digital.MASTER), data, measured, [])
+        measured['summary'] = [tall * 3] * 6
+        measured['summary_compact'] = {key: [tall * 3] * 6 for key in ('11', '10.5', '10', '9.5', '9', '8.5', '8')}
+        # Even the smallest size does not fit: the build goes on and asks for shorter updates.
+        digital.notices.reset()
+        prs = Presentation(digital.MASTER)
+        sizes = []
+        digital.populate(prs, data, measured, sizes)
+        shape = digital.summary_table_shape(digital.digital_slide(prs))
+        self.assertLessEqual(shape.top + shape.height, digital.content_bottom(prs, digital.digital_slide(prs)))
+        self.assertIn((shape.shape_id, 8, margin), [(s.shape_id, size, used) for s, size, used in sizes])
+        self.assertTrue(any(n['kind'] == 'space' and 'اختصار التحديثات' in n['message'] for n in digital.notices.collected()))
 
     def test_source_pagination_artifacts_rejected(self):
         self.data['detail_sectors'][0]['title'] += ' (1/3)'
@@ -503,12 +575,10 @@ class DigitalMaturityTests(unittest.TestCase):
 
     def test_rewritten_notes_drop_task_codes_but_keep_dates(self):
         self.data['detail_sectors'][4]['challenges'] = ['تحد مرتبط بالمهمة W-03']
-        with self.assertRaisesRegex(ValueError, 'W-03'):
-            self.load()
+        self.assertTrue(self.wording_notices('W-03'))
         self.data['detail_sectors'][4]['challenges'] = ['تأخر التجاوب: آخر متابعة بتاريخ 4 نوفمبر 2026']
         self.data['updates'][0]['text'] = 'ترتفع المتطلبات INF-05..07 إلى 80%'
-        with self.assertRaisesRegex(ValueError, 'INF-05'):
-            self.load()
+        self.assertTrue(self.wording_notices('INF-05'))
         self.data['updates'][0]['text'] = 'ترتفع ثلاثة متطلبات إلى 80% بعد اعتماد الدمج\nتأخر اعتماد الشواهد'
         data, prs, report = self.build()
         summary = next(sh.table for sh in digital.digital_slide(prs).shapes if sh.has_table)

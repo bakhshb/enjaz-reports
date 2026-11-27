@@ -14,12 +14,14 @@ import argparse, collections, io, os, re, shutil, tempfile
 from pathlib import Path
 from openpyxl import load_workbook
 from pptx import Presentation
-import sys
+import json, sys
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import monday_status_styles as status_styles
+from monday_layout import AGENDA_FLOOR_PT   # defined once, with the builder
 from pptx.util import Pt
 from pptx.oxml.ns import qn
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
+from report_common import notices
 from report_common.table_typography import check_table_typography
 from report_common.validation import (norm, sha, header_row, read_tasks, read_suhail, package, source_metrics, chart_metrics)
 
@@ -41,6 +43,7 @@ SUMMARY_HEADERS={
 }
 FONT="Abar Mid"; ALLOWED={"Abar Mid","Abar Mid SemiBold"}
 AGENDA_PT=14; TABLE_PT=11.0
+NOTICES_PREFIX='GATE_NOTICES_JSON '  # the builder reads this line from the gate's output
 
 
 def read_agenda(path):
@@ -61,11 +64,26 @@ def read_agenda(path):
     return out
 
 
+def agenda_size(prs):
+    """The one agenda font size the deck uses: 14 pt, or a 0.5 pt step down to the 8 pt floor."""
+    sizes=set()
+    for sl in prs.slides:
+        for sh in sl.shapes:
+            if getattr(sh,"has_table",False) and [norm(c.text) for c in sh.table.rows[0].cells]==AGENDA_HEADERS:
+                sizes|={run.font.size.pt for row in sh.table.rows for cell in row.cells for p in cell.text_frame.paragraphs
+                        for run in p.runs if run.text.strip() and run.font.size is not None}
+    if len(sizes)==1:
+        size=sizes.pop()
+        if AGENDA_FLOOR_PT<=size<=AGENDA_PT and (size*2).is_integer():return size
+    return AGENDA_PT
+
+
 def normalize_typography(prs):
+    agenda_pt=agenda_size(prs)
     for sl in prs.slides:
         for sh in sl.shapes:
             if getattr(sh,"has_table",False):
-                tt=sh.table; rr=rows(tt); is_ag=bool(rr and rr[0]==AGENDA_HEADERS); pt=AGENDA_PT if is_ag else TABLE_PT
+                tt=sh.table; rr=rows(tt); is_ag=bool(rr and rr[0]==AGENDA_HEADERS); pt=agenda_pt if is_ag else TABLE_PT
                 detail=len(tt.columns)==6 and len(rr)>1 and rr[1][4]=='الحالة'
                 for row_index,rw in enumerate(tt.rows):
                     for column_index,cell in enumerate(rw.cells):
@@ -118,7 +136,8 @@ def read_summary(path,sheet,titles):
 
 
 def collect(prs,errors,template=status_styles.MASTER):
-    check_table_typography(prs,errors,agenda_pt=AGENDA_PT)
+    agenda_pt=agenda_size(prs)
+    check_table_typography(prs,errors,agenda_pt=agenda_pt)
     ag=[]; agenda_tables=0; task=[]; suh=[]; suh_seq=[]; summaries={title:[] for title in SUMMARY_HEADERS}
     approved=status_styles.examples(template)
     for slide in prs.slides:
@@ -127,11 +146,12 @@ def collect(prs,errors,template=status_styles.MASTER):
             if len(shape.table.rows)<2 or shape.table.cell(1,4).text.strip()!='الحالة':continue
             for row in list(shape.table.rows)[2:]:
                 cell=row.cells[4];status=status_styles.canonical(cell.text)
-                allowed=status_styles.TASK_STATUSES if shape.table.cell(1,1).text.strip()=='المهمة' else status_styles.PROJECT_STATUSES
-                if status not in allowed:errors.append('Unsupported detail status: '+status)
-                if status not in approved:
-                    errors.append('Missing approved template status style: '+status)
-                elif status_styles.signature(cell)!=status_styles.signature(approved[status]):
+                kind='task' if shape.table.cell(1,1).text.strip()=='المهمة' else 'suhail'
+                # An unknown status was already reported by the builder; here it must only carry the neutral approved fill.
+                style=status_styles.style_status(status,kind,approved)
+                if style not in approved:
+                    errors.append('Missing approved template status style: '+style)
+                elif status_styles.signature(cell)!=status_styles.signature(approved[style]):
                     errors.append('detail status fill or typography differs from approved template: '+status)
     for si,sl in enumerate(prs.slides,1):
         for sh in sl.shapes:
@@ -170,7 +190,7 @@ def collect(prs,errors,template=status_styles.MASTER):
                         if x and isnum(x[-1]):summaries[title].append(tuple(x))
                     if not any(x and isnum(x[-1]) for x in rr[2:]):
                         errors.append(f'slide {si} retains empty summary table {title}')
-            is_ag=cols==4 and rr and rr[0]==AGENDA_HEADERS; want=AGENDA_PT if is_ag else TABLE_PT
+            is_ag=cols==4 and rr and rr[0]==AGENDA_HEADERS; want=agenda_pt if is_ag else TABLE_PT
             for rw in t.rows:
                 for cell in rw.cells:
                     for p in cell.text_frame.paragraphs:
@@ -179,7 +199,8 @@ def collect(prs,errors,template=status_styles.MASTER):
                             if run.font.name not in ALLOWED:errors.append(f"slide {si} unapproved font {run.font.name!r}: {run.text[:30]!r}")
                             sz=run.font.size.pt if run.font.size else None
                             if sz is None or abs(sz-want)>.01:errors.append(f"slide {si} wrong table font size {sz!r}; expected {want:g}")
-    if agenda_tables!=1:errors.append('Topics must occupy exactly one page')
+    if agenda_tables<1:errors.append('Topics must occupy exactly one page: agenda table missing')
+    elif agenda_tables>1 and agenda_pt>AGENDA_FLOOR_PT:errors.append(f'Topics must occupy exactly one page unless the agenda is at the {AGENDA_FLOOR_PT} pt floor')
     if ag and ag[-1][1]!="ملخص الاجتماع":errors.append("agenda does not end at ملخص الاجتماع")
     if len(ag)!=len(set(ag)):errors.append("agenda contains duplicate rows")
     if len(suh_seq)!=len(set(suh_seq)):
@@ -244,7 +265,9 @@ def verify_metrics(path, prs, tasks_path, suhail_path, errors):
                 sector=row[3] if title=='ملخص المهام' else row[0]
                 status=row[5]
                 status={'مكتمل':'مكتملة','متأخرة':'متأخر','معلقة':'معلق'}.get(status,status)
-                if status not in statuses:raise ValueError(f'unknown detail status {status}')
+                if status not in statuses:
+                    # Not counted in any status column; the builder already reported it.
+                    continue
                 source_counts[(sector,status)]+=1
             chart_counts={(norm(row[0]),status):int(row[i+1] or 0) for row in records for i,status in enumerate(statuses)}
             if any(source_counts[key]!=chart_counts.get(key,0) for key in set(source_counts)|set(chart_counts)):
@@ -296,6 +319,7 @@ def main(argv=None):
             cmp(title,expected,summaries.get(title,[]),errors)
         if prs2 is not None:verify_metrics(tmp,prs2,a.tasks,a.suhail,errors)
         print("REPORT_SHA256",sha(tmp)); print("TOPICS_SHA256",sha(a.topics)); print("TASKS_SHA256",sha(a.tasks)); print("SUHAIL_SHA256",sha(a.suhail))
+        print(NOTICES_PREFIX+json.dumps(notices.collected(),ensure_ascii=False))
         if errors:
             print(f"QA FAILED: {len(errors)} blocking issue(s)")
             for e in errors:print("ERROR:",e)

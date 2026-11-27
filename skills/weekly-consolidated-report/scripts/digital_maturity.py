@@ -11,7 +11,6 @@ approved portrait master controls the design, and every sector is re-flowed
 into as many detail slides as its records need.
 """
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -30,8 +29,12 @@ from pptx.util import Pt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from report_common import pptx_helpers as helpers
-from weekly_data import content_bottom, set_cell_exact, TABLE_GAP, emu, fit_summary, measured_rows
+from report_common import notices, wording, pptx_helpers as helpers
+from report_common.validation import sha
+from report_common.pptx_helpers import content_bottom
+from report_common.header_heights import MIN_ROW_HEIGHT
+from weekly_data import (set_cell_exact, TABLE_GAP, emu, measured_rows, scaled_height, body_insets, compact_margin,
+                         Summary, plan_summaries, announce_plan, floors, SUMMARY_SIZES, SUMMARY_LABELS)
 from weekly_artwork import place_table_copy, is_digital_detail, is_digital_detail_table
 from report_common.table_typography import set_table_directions, set_font
 
@@ -496,7 +499,7 @@ def extract_pdf(path):
             raise ValueError('Digital-maturity PDF needs a summary page and at least one detail page')
         metrics, sectors, challenges, date = _extract_summary(pdf.pages[0])
         pages = [_extract_detail_page(page, number) for number, page in enumerate(pdf.pages[1:], 2)]
-    return {'source_pdf_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+    return {'source_pdf_sha256': sha(path),
             'source_date_hijri': date, 'metrics': metrics,
             'sectors': sectors, 'source_updates': challenges,
             'updates': [dict(item) for item in challenges],
@@ -505,7 +508,7 @@ def extract_pdf(path):
 
 def load_reviewed(path, pdf):
     data = json.loads(Path(path).read_text(encoding='utf-8-sig'))
-    if data.get('source_pdf_sha256') != hashlib.sha256(Path(pdf).read_bytes()).hexdigest():
+    if data.get('source_pdf_sha256') != sha(pdf):
         raise ValueError('Reviewed digital-maturity data does not match the supplied PDF')
     if data.get('reviewed') is not True:
         raise ValueError('Review the extracted digital-maturity data against the rendered PDF before building')
@@ -530,10 +533,6 @@ def load_reviewed(path, pdf):
         raise ValueError('Digital-maturity updates must hold at least one row for the summary table')
     if any(not isinstance(u, dict) or not u.get('perspective') or not _text_ok(u.get('text')) for u in updates):
         raise ValueError('Incomplete digital-maturity summary update')
-    for update in updates:
-        _no_codes(update['text'], 'summary')
-        _formal(update['text'], 'summary')
-        _no_title(update['text'], 'summary')
     details = data.get('detail_sectors')
     if not isinstance(details, list) or not details:
         raise ValueError('Reviewed digital-maturity data must contain merged detail_sectors, one per sector')
@@ -546,12 +545,15 @@ def load_reviewed(path, pdf):
         if set(detail.get('cards', {})) != set(AXES):
             raise ValueError('Digital-maturity detail cards are incomplete: ' + title)
         for value in detail['cards'].values():
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError('Digital-maturity detail card is empty: ' + title)
-            if '%' in value:
+            if not isinstance(value, str):
+                raise ValueError('Digital-maturity detail card must be text: ' + title)
+            if not value.strip():
+                notices.warn(f'بطاقة فارغة في تفاصيل قطاع «{title}» في ملف المراجعة؛ أبقيتها فارغة كما كتبت. راجعها على ملف PDF.', 'status')
+            elif '%' in value:
                 _percent(value)
             elif value not in CARD_STATUSES:
-                raise ValueError('Unapproved digital-maturity detail status: ' + value)
+                # Kept as written (the cards carry no status colour); the agent checks it against the PDF.
+                notices.warn(f'بطاقة «{value}» في قطاع «{title}» ليست من الحالات المعتمدة ({"، ".join(CARD_STATUSES)}). أبقيتها كما وردت في ملف المراجعة؛ راجعها على ملف PDF.', 'status')
         pages = detail.get('source_pages', [])
         if not pages or any(not isinstance(p, int) or isinstance(p, bool) or p < 2 for p in pages) or pages != sorted(pages):
             raise ValueError('Digital-maturity detail source pages are invalid: ' + title)
@@ -563,52 +565,60 @@ def load_reviewed(path, pdf):
                 raise ValueError('Digital-maturity detail row must be complete or a section heading: ' + title)
             if is_continuation(row):
                 raise ValueError('Reviewed rows must not carry source continuation headings: ' + title)
-        if is_heading(rows[-1]):
-            raise ValueError('Digital-maturity section heading has no records: ' + title)
+        # A heading with no record under it is dropped; the records are the content.
+        kept = [row for position, row in enumerate(rows)
+                if not is_heading(row) or (position + 1 < len(rows) and not is_heading(rows[position + 1]))]
+        if len(kept) != len(rows):
+            notices.warn(f'في تفاصيل قطاع «{title}» عنوان قسم بلا سجلات تحته في ملف المراجعة؛ حذفته من الشريحة. راجع الملف.', 'status')
+            if not any(not is_heading(row) for row in kept):
+                raise ValueError('Digital-maturity detail rows are incomplete: ' + title)
+            detail['rows'] = kept
         for key, _, _ in NOTE_TABLES:
             items = detail.get(key)
             if not isinstance(items, list) or any(not _text_ok(item) for item in items):
                 raise ValueError(f'Digital-maturity detail {key} are incomplete: ' + title)
-            for item in items:
-                _no_codes(item, title)
-                _formal(item, title)
-            if key == 'updates':
-                for item in items:
-                    _no_title(item, title)
         if detail.get('source_notes') and not (detail['updates'] or detail['challenges']):
             raise ValueError('Source notes are not classified into updates or challenges: ' + title)
+    for finding in wording_findings(data):
+        notices.warn(finding, 'wording')
     return data
+
+
+def wording_findings(data):
+    """Machine-sounding patterns in the rewritten updates and challenges, for the agent to reword."""
+    found = []
+    for update in data['updates']:
+        where = 'ملخص التجربة الرقمية، أبرز التحديثات'
+        found += wording.review(update['text'], where) + _update_findings(update['text'], where, True)
+    for detail in data['detail_sectors']:
+        for key, table, _ in NOTE_TABLES:
+            for item in detail[key]:
+                where = f'{detail["title"]}، {table}'
+                found += wording.review(item, where) + _update_findings(item, where, key == 'updates')
+    return found
 
 
 # Updates are the statement itself: no «عنوان قصير:» label in front of it.
 UPDATE_LABEL = re.compile(r'^\s*([^:\n]{1,60}?)\s*:\s*\S')
-# Saudi and Gulf colloquial words that have no place in the formal register.
-COLLOQUIAL = {'الحين', 'شغالين', 'شغالة', 'شغال', 'وش', 'ليش', 'زين', 'يبي', 'نبي', 'تبي', 'يبون',
-              'مافي', 'مافيه', 'اللي', 'هذي', 'عشان', 'علشان', 'بعدين', 'ابشر', 'أبشر'}
-ARABIC_WORD = re.compile(r'[\u0621-\u064A]+')
+COLLOQUIAL = wording.COLLOQUIAL  # one list for every text the agent writes
 
 
-def _no_title(text, where):
-    for line in text.splitlines():
-        found = UPDATE_LABEL.match(line)
-        if found and len(found.group(1).split()) <= 6:
-            raise ValueError(f'An update carries a title «{found.group(1)}:» ({where}); write the update as the statement itself')
-
-
-def _formal(text, where):
-    found = sorted({word for word in ARABIC_WORD.findall(text) if word in COLLOQUIAL})
-    if found:
-        raise ValueError(f'Colloquial wording {"، ".join(found)} in a digital note ({where}); use formal government Arabic')
+def _update_findings(text, where, is_update):
+    """A task code in a note, and a title in front of an update; colloquial words are in wording.review."""
+    found = []
+    code = CODE_IN_TEXT.search(text)
+    if code:
+        found.append(f'{where}: رمز مهمة «{code.group()}» في النص؛ احذفه وأبقِ التواريخ.')
+    if is_update:
+        for line in text.splitlines():
+            label = UPDATE_LABEL.match(line)
+            if label and len(label.group(1).split()) <= 6:
+                found.append(f'{where}: التحديث يبدأ بعنوان «{label.group(1)}:»؛ اكتبه جملة خبرية بلا عنوان.')
+    return found
 
 
 def _text_ok(value):
     return isinstance(value, str) and bool(value.strip())
-
-
-def _no_codes(text, where):
-    found = CODE_IN_TEXT.search(text)
-    if found:
-        raise ValueError(f'Remove the task code {found.group()} from the rewritten note ({where}); keep dates')
 
 
 def _chart(shape, categories, series, percent_labels=False):
@@ -818,7 +828,8 @@ class DetailPattern:
         self.line_height = (heights[1] - heights[0]) if len(heights) > 1 else round(heights[0] * .48)
         self.widths = [column.width / 914400 for column in table_shape.table.columns]
         challenge_rows = list(challenge_shape.table.rows)
-        self.challenge_fixed = challenge_rows[0].height + challenge_rows[1].height
+        self.challenge_header = [challenge_rows[0].height, challenge_rows[1].height]
+        self.challenge_fixed = sum(self.challenge_header)
         self.challenge_body = deepcopy(challenge_rows[2]._tr)
         self.challenge_height = challenge_rows[2].height
         self.challenge_width = challenge_shape.table.columns[1].width / 914400
@@ -835,13 +846,6 @@ class DetailPattern:
     def challenge_row_height(self, text):
         lines = helpers.estimate_lines(text, self.challenge_width, 11, CHARS_PER_INCH)
         return self.challenge_height + max(0, lines - 2) * self.line_height
-
-    def challenges_height(self, challenges):
-        return self.challenge_fixed + sum(self.challenge_row_height(text) for text in challenges)
-
-    def notes_height(self, notes):
-        """Gap plus table height for every note table that follows the last records."""
-        return sum(GAP + self.challenges_height(items) for _, _, items in notes)
 
 
 def row_axes(sector):
@@ -869,7 +873,8 @@ def sector_heights(pattern, sector, measured=None):
     found = measured.get('sectors', {}).get(sector['title'])
     if (found is None or len(found.get('rows', [])) != len(sector['rows'])
             or any(len(found.get(key, [])) != len(sector[key]) for key in keys)):
-        raise ValueError('Digital-maturity measurements do not match the reviewed sector; measure again: ' + sector['title'])
+        notices.warn(f'قياس تفاصيل التجربة الرقمية لا يطابق بيانات «{sector["title"]}» المراجعة؛ استخدمت الارتفاع التقديري لها. أعد القياس قبل التسليم.', 'layout')
+        return sector_heights(pattern, sector)
     rows = [max(pattern.heading_height if is_heading(row) else pattern.body_height, emu(height))
             for row, height in zip(sector['rows'], found['rows'])]
     notes = {key: [max(pattern.challenge_height, emu(height)) for height in found[key]] for key in keys}
@@ -882,15 +887,57 @@ def paginate_sector(pattern, sector, measured=None):
     Returns a list of pages; each page is ``(rows, heights, notes)`` where rows
     may begin with a synthetic continuation heading, ``heights`` holds each
     row's height and ``notes`` the update/challenge tables as
-    ``(title, header, items, item_heights)``. Headings never end a page,
+    ``(title, header, items, item_heights, size)``. Headings never end a page,
     records are never split, and the note tables follow the last records.
+
+    Lack of space never stops the build. A record taller than a slide takes a
+    slide of its own, and note tables that do not fit with the last record are
+    set in smaller text on that last slide; both are recorded as notices.
     """
     rows = sector['rows']
     row_heights, note_heights = sector_heights(pattern, sector, measured)
-    challenges = [(title, header, items, note_heights[key])
-                  for key, title, header in NOTE_TABLES if sector.get(key)
-                  for items in [list(sector[key])]]
-    notes_height = sum(GAP + pattern.challenge_fixed + sum(item_heights) for *_, item_heights in challenges)
+    room = pattern.bottom - pattern.top - pattern.title_height - pattern.header_height
+    # A record always shares its slide with a section heading (its own or a repeated one).
+    limit = room - max((height for row, height in zip(rows, row_heights) if is_heading(row)), default=0)
+    for index, row in enumerate(rows):
+        if not is_heading(row) and row_heights[index] > limit:
+            notices.warn(f'سجل في تفاصيل التجربة الرقمية «{sector["title"]}» أطول من مساحة شريحة كاملة؛ وضعته في شريحة بمفرده وقد يتجاوز النص حدها. اختصر نصه في ملف المراجعة.', 'space')
+            row_heights[index] = max(limit, MIN_ROW_HEIGHT)
+    notes = [(title, header, list(sector[key]), note_heights[key], 11)
+             for key, title, header in NOTE_TABLES if sector.get(key)]
+    pages = _paginate(pattern, sector, rows, row_heights, notes)
+    if pages is None:
+        # The notes do not fit under the last record even on a fresh slide: the
+        # last record (with its heading) takes the last slide and the notes shrink.
+        cut = len(rows) - 1
+        if cut and is_heading(rows[cut - 1]):
+            cut -= 1
+        pages = _paginate(pattern, sector, rows[:cut], row_heights[:cut], []) if cut else []
+        tail, tail_heights = list(rows[cut:]), list(row_heights[cut:])
+        heading = last_heading_index(rows[:cut])
+        if not is_heading(tail[0]) and heading is not None:
+            tail.insert(0, [f'{rows[heading][0]} {CONTINUATION}', '', '', ''])
+            tail_heights.insert(0, row_heights[heading])
+        free = room - sum(tail_heights)
+        size = next((size for size in SUMMARY_SIZES if _notes_height(pattern, notes, size) <= free), SUMMARY_SIZES[-1])
+        notices.warn(f'جدولا التحديثات والتحديات في «{sector["title"]}» لا يتسعان مع آخر سجل في شريحة واحدة بخط 11؛ صغرت خطهما إلى {size:g}'
+                     + ('' if _notes_height(pattern, notes, size) <= free else ' وما زالا يتجاوزان حد الشريحة')
+                     + '. اختصر صياغتهما في ملف المراجعة ثم أعد البناء.', 'space')
+        notes = [(title, header, items, [scaled_height(h, size) for h in heights], size)
+                 for title, header, items, heights, _ in notes]
+        pages.append((tail, tail_heights, notes))
+    return pages
+
+
+def _notes_height(pattern, notes, size=11):
+    """Gap plus table height for every note table, with its rows scaled to `size`."""
+    fixed = sum(scaled_height(h, size) for h in pattern.challenge_header)
+    return sum(GAP + fixed + sum(scaled_height(h, size) for h in heights) for _, _, _, heights, _ in notes)
+
+
+def _paginate(pattern, sector, rows, row_heights, notes):
+    """The approved flow; None when the note tables cannot follow the last record on any slide."""
+    notes_height = _notes_height(pattern, notes)
     pages, index = [], 0
     while index < len(rows):
         used = pattern.title_height + pattern.header_height
@@ -903,31 +950,28 @@ def paginate_sector(pattern, sector, measured=None):
         while index < len(rows):
             need = row_heights[index]
             if is_heading(rows[index]):
-                if index + 1 >= len(rows):
-                    raise ValueError('Digital-maturity section heading has no records: ' + sector['title'])
-                need += row_heights[index + 1]
+                if index + 1 < len(rows):
+                    need += row_heights[index + 1]
             if pattern.top + used + need > pattern.bottom:
                 break
             page_rows.append(rows[index])
             page_heights.append(row_heights[index])
             used += row_heights[index]
             index += 1
-        page_challenges = []
-        if index == len(rows) and challenges:
+        page_notes = []
+        if index == len(rows) and notes:
             if pattern.top + used + notes_height <= pattern.bottom:
-                page_challenges = list(challenges)
+                page_notes = list(notes)
             else:
-                # Only the trailing record (with its heading) moves to the next page with the challenges.
+                # Only the trailing record (with its heading) moves to the next page with the notes.
                 page_rows.pop(); page_heights.pop()
                 index -= 1
                 if page_rows and is_heading(page_rows[-1]) and not is_continuation(page_rows[-1]):
                     page_rows.pop(); page_heights.pop()
                     index -= 1
         if not any(not is_heading(row) for row in page_rows):
-            raise ValueError('A digital-maturity record cannot fit on an empty detail slide: ' + sector['title'])
-        pages.append((page_rows, page_heights, page_challenges))
-    if challenges and not pages[-1][2]:
-        raise ValueError('Digital-maturity challenges cannot fit with their last record: ' + sector['title'])
+            return None
+        pages.append((page_rows, page_heights, page_notes))
     return pages
 
 
@@ -968,12 +1012,17 @@ def _fill_detail_table(slide, pattern, title, rows, heights, axes):
     return shape
 
 
-def _fill_challenge_table(slide, pattern, top, note):
-    title, header, items, heights = note
+def _fill_challenge_table(slide, pattern, top, note, sizes=None):
+    title, header, items, heights, size = note
     shape = _place_table(slide, pattern.challenge_element, top)
     table = shape.table
     set_cell_exact(table.cell(0, 0), title)
     set_cell_exact(table.cell(1, 1), header)
+    if size != 11:
+        for row in list(table.rows)[:2]:
+            row.height = scaled_height(row.height, size)
+        if sizes is not None:
+            sizes.append((shape, size, None))
     for index, (challenge, height) in enumerate(zip(items, heights), 1):
         row = _append_row(table, pattern.challenge_body)
         set_cell_exact(row.cells[0], str(index))
@@ -992,7 +1041,7 @@ def _set_cards(slide, cards):
         paragraphs[1].runs[0].text = cards[axis]
 
 
-def populate_details(prs, data, measured=None):
+def populate_details(prs, data, measured=None, sizes=None):
     slides = detail_slides(prs)
     seed, extras = slides[0], slides[1:]
     pattern = DetailPattern(prs, seed)
@@ -1018,19 +1067,38 @@ def populate_details(prs, data, measured=None):
             done += len(rows) - shift
             shape = _fill_detail_table(slide, pattern, title, rows, heights, axes)
             for note in challenges:
-                shape = _fill_challenge_table(slide, pattern, shape.top + shape.height + GAP, note)
+                shape = _fill_challenge_table(slide, pattern, shape.top + shape.height + GAP, note, sizes)
     for slide in extras:
         helpers.remove_slide(prs, slide)
 
 
-def populate(prs, data, measured=None, sizes=None):
+def populate(prs, data, measured=None, sizes=None, min_pt=None, margin=None, deferred=False):
     """Fill the digital summary and detail slides.
 
     ``measured`` is the ``digital`` part of a LibreOffice layout file; with it
     the summary «أبرز التحديثات» table gets its measured row heights and, when
-    needed, smaller text so the summary stays on its one slide (recorded in
-    ``sizes`` as ``(shape, size)``).
+    needed, the compact margins and smaller text so the summary stays on its one
+    slide (recorded in ``sizes`` as ``(shape, size, margin)``, margin None for
+    the template's). The table is planned alone here; the weekly build, which
+    plans all four summaries together, passes ``deferred`` and calls
+    `place_summary` itself once the deck-wide decision is made.
     """
+    slide, shape = populate_summary(prs, data)
+    populate_details(prs, data, measured, sizes)
+    set_table_directions(prs)
+    if not deferred:
+        margin = compact_margin(prs) if margin is None else margin
+        candidate = summary_candidate(prs, slide, shape, measured, margin)
+        plan = None
+        if candidate.tables:
+            plan = plan_summaries([candidate], 'shrink', *floors(min_pt))
+            announce_plan(plan, {SUMMARY_LABELS[3]: _label(prs, slide)})
+        place_summary(prs, slide, shape, candidate, plan, sizes, margin)
+    return slide
+
+
+def populate_summary(prs, data):
+    """Everything on the digital summary slide except the final row heights and look of its table."""
     slide = digital_slide(prs)
     calculation_note(slide)
     for axis, (chart_id, label_id, track_id, fill_id) in CARDS.items():
@@ -1083,35 +1151,80 @@ def populate(prs, data, measured=None, sizes=None):
         _bullet_lines(table.rows[index].cells[2])
     for row in list(table.rows)[2+len(data['updates']):]:
         row._tr.getparent().remove(row._tr)
-    _fit_summary(prs, slide, shape, measured, sizes)
-    populate_details(prs, data, measured)
-    set_table_directions(prs)
-    return slide
+    return slide, shape
 
 
-def _fit_summary(prs, slide, shape, measured, sizes):
-    """Keep the «أبرز التحديثات» table above the footer of the summary slide."""
+def _label(prs, slide):
+    return f'{SUMMARY_LABELS[3]} (الشريحة {list(prs.slides).index(slide) + 1})'
+
+
+def summary_candidate(prs, slide, shape, measured, margin):
+    """The «أبرز التحديثات» table as `plan_summaries` sees it.
+
+    Its tables are empty (so it counts as fitting) when `measured` is None or
+    does not match the table's rows; a notice says so for the second case and
+    `place_summary` then shares the free space between the rows.
+    """
+    rows = list(shape.table.rows)
+    available = content_bottom(prs, slide) - shape.top
+    found = (measured or {}).get('summary', [])
+    if measured is not None and len(found) != len(rows) - 2:
+        notices.warn('قياس جدول «أبرز التحديثات» في ملخص التجربة الرقمية لا يطابق التحديثات المراجعة؛ وزعت المساحة المتاحة على صفوفه. أعد القياس قبل التسليم.', 'layout')
+        measured = None
+    if measured is None:
+        return Summary(SUMMARY_LABELS[3], [], available, True)
+    at = measured_rows([emu(height) for height in found], measured.get('summary_compact', {}),
+                       body_insets(shape.table), 2 * margin)
+    return Summary(SUMMARY_LABELS[3], [([row.height for row in rows[:2]], at)], available, True)
+
+
+# Smallest share of its measured height a squeezed summary row may keep.
+MIN_SQUEEZE = 0.1
+
+
+def place_summary(prs, slide, shape, candidate, plan, sizes=None, margin=None):
+    """Set the row heights and, with a `plan`, the size and margins of the «أبرز التحديثات» table.
+
+    The table takes the plan's margins and its size: the shared size when it
+    fits there, else a smaller one for this table alone, and past the digital
+    floor its rows are squeezed into the space left with a notice asking for
+    shorter updates. This slide has no appendix because the table is the only
+    one under the indicators; the slide, the checks and the measurement all find
+    it by its one 3-column table. Returns the slide's label with its number.
+    """
     table = shape.table
     rows = list(table.rows)
-    available = content_bottom(prs, slide) - shape.top
+    label = _label(prs, slide)
     fixed = [row.height for row in rows[:2]]
-    if measured is None:
-        # Provisional: share the free space; the measurement sets the real heights.
+    size, compact = 11, False
+    if not candidate.tables:
+        # Provisional, or no usable measurement: share the free space; the measurement sets the real heights.
         body = [row.height for row in rows[2:]]
-        if sum(fixed + body) > available:
-            body = [(available - sum(fixed)) // len(body)] * len(body)
+        if sum(fixed + body) > candidate.available:
+            body = [max((candidate.available - sum(fixed)) // len(body), int(min(body) * MIN_SQUEEZE))] * len(body)
+        if plan is not None:
+            size, compact = plan.size, plan.compact
     else:
-        found = measured.get('summary', [])
-        if len(found) != len(rows) - 2:
-            raise ValueError('Digital-maturity summary measurements do not match the reviewed updates; measure again')
-        body = [emu(height) for height in found]
-        size, (heights,) = fit_summary([(fixed, measured_rows(body, measured.get('summary_sizes', {})))], available)
-        fixed, body = heights[:2], heights[2:]
-        if size != 11 and sizes is not None:
-            sizes.append((shape, size))
+        (_, at), = candidate.tables
+        size, compact = plan.digital_size, plan.compact
+        fixed, body = [scaled_height(h, size) for h in fixed], at(size, compact)
+        if plan.squeeze:
+            scale = (candidate.available - sum(fixed)) / sum(body)
+            if scale < MIN_SQUEEZE:
+                # The title and header rows alone fill the space: keep a readable minimum height
+                # and let the table run past the footer; the validator and the notice name the slide.
+                scale = MIN_SQUEEZE
+                notices.warn(f'{label}: المساحة المتاحة لا تكفي حتى لعنوان جدول «أبرز التحديثات» ورأسه، وقد يصل الجدول إلى التذييل. المقترح: مراجعة هذه الشريحة واختصار التحديثات في ملف المراجعة.', 'space')
+            body = [int(h * scale) for h in body]
+            notices.warn(f'{label}: لم يتسع جدول «أبرز التحديثات» حتى بخط {size:g}. تم ضغط صفوفه في المساحة المتاحة، وقد لا يظهر نص الصفوف كاملا. المقترح: مراجعة هذه الشريحة واختصار التحديثات في ملف المراجعة.', 'space')
+        elif size != plan.size:
+            notices.warn(f'{label}: لم يتسع جدول «أبرز التحديثات» بخط {plan.size:g} بعد تقليص الهوامش. تم تصغير خط هذا الجدول وحده إلى {size:g}. المقترح: اختصار التحديثات في ملف المراجعة.', 'space')
+    if sizes is not None and (size != 11 or compact):
+        sizes.append((shape, size, margin if compact else None))
     for row, height in zip(rows, fixed + body):
         row.height = height
     shape.height = sum(row.height for row in table.rows)
+    return label
 
 
 def _slide_rows(table):
@@ -1136,8 +1249,11 @@ class _DetailSlide:
         return helpers.shape_by_id(self.slide, DETAIL_CARD_IDS[axis]).text_frame.paragraphs[1].text
 
 
-def check_details(prs, data, errors, master=None):
+def check_details(prs, data, errors, master=None, layout=None):
     """Reconcile the generated detail slides with the reviewed sectors.
+
+    Findings about content go to ``errors``; findings about layout and
+    pagination go to ``layout`` (the same list unless the caller separates them).
 
     The number of slides follows the data, so the checks cover: sector order,
     output-only «(k/n)» suffixes, identical cards on every slide of a sector,
@@ -1145,6 +1261,7 @@ def check_details(prs, data, errors, master=None):
     a single challenge table on the sector's last slide, and no premature page
     break while a later slide of the same sector still holds records.
     """
+    layout = errors if layout is None else layout
     try:
         slides = detail_slides(prs)
     except ValueError as exc:
@@ -1167,22 +1284,22 @@ def check_details(prs, data, errors, master=None):
         rows = []
         for position, detail in enumerate(members, 1):
             if (count == 1 and detail.index is not None) or (count > 1 and (detail.index, detail.total) != (position, count)):
-                errors.append(f'Digital-maturity detail title suffix does not match the output pagination: {base}')
+                layout.append(f'Digital-maturity detail title suffix does not match the output pagination: {base}')
             for axis in AXES:
                 if detail.card(axis) != sector['cards'][axis]:
                     errors.append(f'Digital-maturity detail card differs: {base}: {axis}')
             if position < count and detail.notes:
-                errors.append(f'Digital-maturity update/challenge tables must follow the last records of {base}')
+                layout.append(f'Digital-maturity update/challenge tables must follow the last records of {base}')
             slide_rows = detail.rows
             if position > 1:
                 if slide_rows and is_continuation(slide_rows[0]):
                     if heading_base(slide_rows[0][0]) != last_heading(rows):
-                        errors.append(f'Digital-maturity continuation heading differs: {base}')
+                        layout.append(f'Digital-maturity continuation heading differs: {base}')
                     slide_rows = slide_rows[1:]
                 elif last_heading(rows) is not None and slide_rows and not is_heading(slide_rows[0]):
-                    errors.append(f'Digital-maturity continuation slide lacks its section heading: {base}')
+                    layout.append(f'Digital-maturity continuation slide lacks its section heading: {base}')
             if any(is_continuation(row) for row in slide_rows):
-                errors.append(f'Digital-maturity continuation heading appears mid-slide: {base}')
+                layout.append(f'Digital-maturity continuation heading appears mid-slide: {base}')
             rows.extend(slide_rows)
         if rows != sector['rows']:
             errors.append(f'Digital-maturity detail rows differ from the reviewed PDF data: {base}')
@@ -1206,30 +1323,32 @@ def check_details(prs, data, errors, master=None):
             else:
                 need = sum(following_heights[:next_record + 1])
             if detail.bottom + need <= pattern.bottom:
-                errors.append(f'Digital-maturity detail slide breaks the page early; the next record still fits: {base}')
+                layout.append(f'Digital-maturity detail slide breaks the page early; the next record still fits: {base}')
 
 
-def check(prs, report_path, data, errors, master=None):
+def check(prs, report_path, data, errors, master=None, layout=None):
+    """Reconcile the digital slides with the reviewed data: content to ``errors``, layout to ``layout``."""
     from report_common import validation
+    layout = errors if layout is None else layout
     slide = digital_slide(prs)
     try:
         calculation_note(slide)
     except ValueError as exc:
-        errors.append(str(exc))
+        layout.append(str(exc))
     for axis, (chart_id, label_id, track_id, fill_id) in CARDS.items():
         value = data['metrics'][axis]
         if helpers.shape_by_id(slide, label_id).text != f'{value:g}%':
             errors.append('Digital-maturity card label differs: ' + axis)
         track, fill = (helpers.shape_by_id(slide, sid) for sid in (track_id, fill_id))
         if abs(fill.width - round(track.width*value/100)) > 2 or fill.left != track.left:
-            errors.append('Digital-maturity progress bar differs: ' + axis)
+            layout.append('Digital-maturity progress bar differs: ' + axis)
         chart = helpers.shape_by_id(slide, chart_id)
         validation.chart_metrics(report_path, str(chart.chart.part.partname).lstrip('/'),
                                  [['المنجز', _chart_number(value)], ['المتبقي', _chart_number(100-value)]],
                                  ['نسبة الإنجاز'], errors)
     sector_chart = helpers.shape_by_id(slide, SECTOR_CHART_ID)
     if any(series.data_labels.number_format != '0%' for series in sector_chart.chart.series):
-        errors.append('Digital-maturity sector labels must display percentages')
+        layout.append('Digital-maturity sector labels must display percentages')
     rows = [[s['name'], *[_chart_number(s['metrics'][axis]/100) if s['metrics'][axis] is not None else None
                          for axis in AXES]] for s in data['sectors']]
     validation.chart_metrics(report_path, str(sector_chart.chart.part.partname).lstrip('/'), rows, LABELS, errors)
@@ -1239,12 +1358,12 @@ def check(prs, report_path, data, errors, master=None):
     if actual != expected:
         errors.append('Digital-maturity summary updates differ from the reviewed data')
     if (table.cell(0, 0).text, table.cell(1, 2).text) != SUMMARY_TABLE:
-        errors.append('Digital-maturity summary table must be titled «أبرز التحديثات»')
+        layout.append('Digital-maturity summary table must be titled «أبرز التحديثات»')
     notes = note_boxes(slide)
     expected_notes = {NOTE_BOX.format(i): s['note'] for i, s in enumerate(data['sectors'], 1) if s.get('note')}
     if notes != expected_notes:
         errors.append('Digital-maturity sector notes differ from reviewed PDF data')
-    check_details(prs, data, errors, master)
+    check_details(prs, data, errors, master, layout)
 
 
 def main(argv=None):

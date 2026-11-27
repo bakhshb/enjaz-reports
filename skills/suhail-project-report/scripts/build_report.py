@@ -22,11 +22,12 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 # report_common sits two levels up in the repo and next to this script in a standalone bundle.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from report_common.dates import DateError, report_date
+from report_common import notices
 
 SRC = sys.argv[1]
 # claude.ai uses /mnt/user-data/outputs; other agents (Codex, Claude Code) write to the working directory.
 OUT = sys.argv[2] if len(sys.argv) > 2 else ('/mnt/user-data/outputs/' if Path('/mnt/user-data/outputs').is_dir() else '') + 'ملخص_مشاريع_سهيل.xlsx'
+notices.clear_stale(OUT)
 BLANK_STATUS_DEFAULT = 'على المخطط'
 STATUSES = ['مكتملة', 'على المخطط', 'متأخر', 'لم تبدأ']
 
@@ -77,11 +78,8 @@ def norm(v):
     return re.sub(r'\s+', ' ', str(v)).strip() if v is not None else ''
 
 def date_text(r, label, v):
-    """Project dates as dd-mm-yyyy text whatever form the export used."""
-    try:
-        return report_date(v)
-    except DateError:
-        sys.exit(f'Unreadable {label} in row {r}: {v}')
+    """Project dates as dd-mm-yyyy text whatever form the export used; an unreadable one is kept and reported."""
+    return notices.tolerant_date(v, f'«{label}» بالصف {r}')
 
 src = openpyxl.load_workbook(SRC, data_only=True)
 proj_sheet = next((s for s in src.sheetnames if 'سهيل' in s and 'ملخص' not in s), src.sheetnames[0])
@@ -120,6 +118,7 @@ if missing:
     sys.exit('Missing required project columns: ' + ', '.join(missing))
 if c_notes is None:
     print('warning: no project notes column found; delayed-project notes will be blank', file=sys.stderr)
+    notices.warn('لا يوجد عمود ملاحظات للمشاريع في الملف المصدر؛ تركت ملاحظات المشاريع المتأخرة فارغة.', 'column')
 
 rows = []
 blank_status_count = 0
@@ -135,7 +134,9 @@ for r in range(2, ws.max_row + 1):
     else:
         status = STAT.get(raw_status)
         if status is None:
-            sys.exit(f'Unknown latest-week status in row {r}: {raw_status}')
+            # One unknown status does not stop the report: it is placed by its wording and reported.
+            status = notices.guess_status(raw_status, {st: st for st in STATUSES}, BLANK_STATUS_DEFAULT,
+                                          f'حالة الأسبوع W{w_stat} بالصف {r}')
     rows.append({
         'sector': SECT.get(sec, sec),
         'name': name,
@@ -145,6 +146,9 @@ for r in range(2, ws.max_row + 1):
         'done': ws.cell(r, i_done + 1).value or '',
         'notes': ws.cell(r, c_notes).value if c_notes else None,
     })
+
+if blank_status_count:
+    notices.warn(f'{blank_status_count} مشروع بلا حالة في أحدث أسبوع (W{w_stat}); اعتبرتها «{BLANK_STATUS_DEFAULT}» افتراضا.', 'status')
 
 for x in rows:
     if x['sector'] not in SUMMARY_SECTORS:
@@ -326,6 +330,7 @@ for c_, w in zip('ABCDEF', [5, 40, 15, 15, 15, 75]):
     s2.column_dimensions[c_].width = w
 
 out.save(OUT)
+notices.save(OUT)
 
 counts = {st: sum(1 for x in rows if x['status'] == st) for st in STATUSES}
 print(f'week used: W{w_stat} (status) / W{w_done} (progress)')

@@ -12,6 +12,14 @@ ALIASES={'مكتمل':'مكتملة','متأخرة':'متأخر','معلقة':'�
 TASK_STATUSES={'مكتملة','على المخطط','متأخر','معلق'}
 PROJECT_STATUSES={'مكتملة','على المخطط','متأخر','لم تبدأ'}
 SUPPORTED=TASK_STATUSES | PROJECT_STATUSES
+# Approved status-cell fills (user confirmation, 29-09-2026), keyed by canonical status.
+FILLS={'مكتملة':'DCE6F2','على المخطط':'EBF1DE','متأخر':'F2DCDB','معلق':'F2F2F2','لم تبدأ':'F2F2F2'}
+# Gray fill for a status the template has no style for (the same gray as «معلق» and «لم تبدأ»).
+NEUTRAL_FILL=FILLS['لم تبدأ']
+
+def style_key(status,allowed,styles,fallback):
+    """`status` when it is allowed and has an approved style, else `fallback`."""
+    return status if status in allowed and status in styles else fallback
 
 def canonical(text):
     text=' '.join(text.split())

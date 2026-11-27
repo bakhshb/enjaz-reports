@@ -4,6 +4,7 @@ from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree as ET
 from openpyxl import load_workbook
 from openpyxl.utils.cell import range_boundaries
+from . import notices
 CHART_NS={'c':'http://schemas.openxmlformats.org/drawingml/2006/chart'}
 RID='{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
 
@@ -12,6 +13,11 @@ def norm(v):
     if v is None:return ""
     if isinstance(v,float) and v.is_integer():v=int(v)
     return re.sub(r"\s+"," ",str(v).replace("\u00a0"," ")).strip()
+
+
+def field_key(name):
+    """One key for a transaction column header, whatever spelling the workbook or deck uses."""
+    return norm(name).replace('إنشاء','انشاء').replace('الانجاز','الإنجاز').replace('المخطط له','المخطط')
 
 
 def sha(path):
@@ -114,7 +120,9 @@ def source_metrics(path, sheet, statuses, kpi_cells):
             records.append([sector,*[v if v else None for v in vals]])
         kpis=[ws[cell].value for cell in kpi_cells]
         totals=[sum(r[i+1] or 0 for r in records) for i in range(len(statuses))]
-        if kpis!=[sum(totals),*totals]:raise ValueError(f'{sheet}: KPI and sector counts disagree')
+        if kpis!=[sum(totals),*totals]:
+            # The workbook disagrees with itself; both parts are transferred as written.
+            notices.warn(f'{sheet}: المؤشرات العليا {kpis} لا تطابق مجموع جدول القطاعات {[sum(totals),*totals]}. نقلت الاثنين كما وردا في الملف.','source')
         wb.close()
         return records,kpis
 

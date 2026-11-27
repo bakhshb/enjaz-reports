@@ -9,16 +9,16 @@ The final gate checks that:
 - the PPTX package and XML are valid and every internal relationship resolves (opening in PowerPoint is a separate visual acceptance step);
 - there are no external workbook relationships;
 - agenda records match the current topics workbook and end at `ملخص الاجتماع`;
-- the complete agenda occupies exactly one slide at 14 pt; its compact row heights/padding fit above the footer without clipping, and it is never split or truncated;
+- the agenda occupies one slide at 14 pt when it fits; when it does not, it uses one smaller size (0.5 pt steps, floor 8 pt) on one slide, or at the 8 pt floor continues on a second slide with the header repeated. Its compact row heights/padding fit above the footer without clipping, no row is omitted, and a notice states which case applied. A split agenda above the floor is rejected;
 - all task-detail records match the current task workbook;
 - all Suhail-detail records match the current Suhail workbook;
 - record order matches the source, including when totals are unchanged;
-- task and project KPIs reconcile with detail records and sector counts;
+- task and project KPIs reconcile with detail records and sector counts; a KPI that disagrees with the sector counts is transferred as written with a notice, not a stop;
 - chart categories, series names, and values match both the source summaries and the chart's embedded workbook;
 - every populated task and Suhail summary table matches its own Excel section, and every empty section has no table in the deck;
 - task and Suhail tables retain their title/header structure;
 - dynamic tables use approved fonts and sizes.
-- every detail status cell copies its approved master example: completed (blue), on-plan (green), delayed (light red), suspended tasks (light gray), and not-started Suhail projects (light gray). `لم يبدأ` and `لم تبدأ` denote the same project status; it is not a task status. Reject unknown statuses or missing/conflicting master examples. Validate status fill, Abar font, size, weight, and alignment without silently repairing a mismatched status style.
+- every detail status cell copies its approved master example: completed (blue), on-plan (green), delayed (light red), suspended tasks (light gray), and not-started Suhail projects (light gray). `لم يبدأ` and `لم تبدأ` denote the same project status; it is not a task status. An unknown status is not rejected: it must keep its own text on the neutral approved fill and appear in the notices. Reject missing or conflicting master examples and any known status whose style differs from its approved example. Validate status fill, Abar font, size, weight, and alignment without silently repairing a mismatched status style.
 - generation validates a temporary candidate before replacing the requested output. A failed build or gate preserves any existing output and all source files; temporary candidates are cleaned up. Output paths may not alias the master or an input workbook.
 
 Do **not** reject a deck because it has more than 18 slides, a new task source, a new Suhail sector, or more projects/rows than the master examples.
@@ -46,7 +46,7 @@ Do not deliver if the render shows clipped text, overlaps, broken Arabic glyphs,
 - Task-source and Suhail-sector detail tables share a page when space permits, retaining separate titles and headers and source record order. Repeated headers count once per continued table. Do not require a fixed slide count for other weeks.
 - For the supplied 4 October regression content: preserve all 9 task records and 20 project records from the generated report; task details fit two pages and the four Suhail highlight rows fit one summary page. The manually edited deck is a layout reference, not permission to drop its missing project or alter totals.
 - The first Suhail update content line has bold `تاريخ التحديث` plus its date; body text is regular. Multiple source update paragraphs use native RTL bullets; a single paragraph has none. Leading/trailing blank paragraphs do not create excess height. Data comparison allows only this specified whitespace/list-marker normalization.
-- Regressions cover consecutive tables, overflow with repeated headers, an oversized record that stops safely, RTL merged-cell/schema preservation, a single paragraph, multiple points, and deliberate removal of bold/bullets. Run the existing data, status, output-protection and weekly report checks after shared formatter changes.
+- Regressions cover consecutive tables, overflow with repeated headers, an oversized record that takes a slide of its own with a notice, RTL merged-cell/schema preservation, a single paragraph, multiple points, and deliberate removal of bold/bullets. Run the existing data, status, output-protection and weekly report checks after shared formatter changes.
 - Final acceptance includes native rendering of the exact gated bytes, readable Abar at approved sizes, no blank tables, clipping or overlap, and actual font inspection in the QA PDF. Record input provenance: when only PPTX inputs were supplied, reconstructed regression workbooks are not independently verified original Excel exports.
 
 ## Table font size acceptance
@@ -57,7 +57,7 @@ Every visible topics/agenda table run and blank-cell default must be 14 pt, incl
 
 - A Sunday 25 October 2026 build displays 26 October 2026; a Monday build keeps that Monday. Verify the Riyadh midnight and year boundaries and an explicit `--meeting-date` in the cover and exported PDF.
 - Native measurement must cover every table and row with positive finite numeric heights. In auto mode, process errors, timeouts, missing/malformed/incomplete results visibly warn and fall back to fresh conservative estimates; explicit native mode fails clearly. Programmatic and visual acceptance remain mandatory, including after fallback.
-- Normal acceptance uses 9 and 10 topics, including long Arabic entries: all records stay on one agenda slide at 14 pt, and other tables stay at 11 pt. Task/project details can still span multiple slides. Reject a split agenda even when its data matches. Excess content that cannot fit must fail without shrinking, clipping, omitting rows or replacing the previous report. The previous 18-topic/11 pt stress case is superseded by the requested 14 pt policy.
+- Normal acceptance uses 9 and 10 topics, including long Arabic entries: all records stay on one agenda slide at 14 pt, and other tables stay at 11 pt (a stress case with many topics follows the shrink-then-continue rule above). Task/project details can still span multiple slides. Reject a split agenda above the 8 pt floor even when its data matches. Excess content that does not fit at 14 pt shrinks in 0.5 pt steps to the 8 pt floor and then continues on a second agenda slide with the header repeated, with a notice, without clipping or omitting rows. The previous 18-topic/11 pt stress case is superseded by the requested 14 pt policy.
 - Run `tests/test_monday_date.py`, `tests/test_monday_measurement.py`, `tests/test_report_typography.py`, and `tests/test_deck_integrity.py` through the existing acceptance runner. Render native and estimate/fallback candidates and verify Arabic, actual Abar use, 14 pt topic spans, 11 pt other table spans, footer clearance and no overlaps in their exact final bytes.
 
 ## Table column alignment

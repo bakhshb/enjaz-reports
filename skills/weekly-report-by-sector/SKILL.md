@@ -51,11 +51,17 @@ UnknownIssuer`; add `--system-certs` to each `uv run` command.
 
 before rebuilding all ten.
 
-When LibreOffice is unavailable, run the splitter with `--no-refine` and run
-`qa_report.py` without `--render`. Row heights then come from a character-count
-estimate only (no measurement pass); the build still keeps each table's rows
-consistent with its frame and creates continuation pages. Open the resulting deck
-in PowerPoint for a visual check before delivery.
+When LibreOffice is unavailable the splitter does not stop: it reports that the
+
+measurement could not run and builds with a character-count estimate of the row
+
+heights (the same as `--no-refine`); run `qa_report.py` without `--render`. The
+
+build still keeps each table's rows consistent with its frame and creates
+
+continuation pages. Open the resulting deck in PowerPoint for a visual check
+
+before delivery, and say in the final reply that the heights are estimated.
 
 `--transactions` is required when delayed transactions use the approved five-column
 
@@ -63,7 +69,15 @@ table (which omits sector). Use the **final** `المعاملات` Excel summary
 
 same reporting week. The splitter matches all five visible transaction fields to
 
-the Excel row; it stops if a row is missing or matches multiple sectors. The two
+the Excel row. A transaction that matches no Excel row is left out of the sector
+
+decks and reported; one that matches several sectors goes under the first and is
+
+reported. Without `--transactions` the delayed transactions are left out of every
+
+sector deck, with one notice, and the tasks and projects are still delivered; ask
+
+for the file in the final reply instead of stopping. A `--transactions` workbook whose header row cannot be read does the same: the sector decks come out without the transactions section and a notice says why. The two
 
 date fields are compared through `report_common/dates.py` (`report_date`, Hijri
 
@@ -136,9 +150,45 @@ The master changes shape from week to week, so treat these as optional:
     summary pages and appear only when that sector has rows.
     
 
-If detection fails the script stops with a clear message — fix the keys rather
+If the tasks or Suhail summary slide cannot be found at all, the file is not the
 
-than falling back to hard-coded indices.
+weekly deck and the script stops with a clear message. Fix the keys rather than
+
+falling back to hard-coded indices.
+
+## When to stop
+
+Stop only when the sector decks cannot be produced: the weekly deck is missing or
+
+is not the weekly deck, or it has no table pattern to clone. Anything else is a
+
+best assumption that the script reports as «تنبيه: …» and saves in
+
+`out/manifest.json.notices.json`: a transaction it could not place, a record taller
+
+than a slide (it takes a slide of its own), estimated row heights. Read that file
+
+after every run and repeat every notice in the final reply; do not wait for an
+
+answer before delivering.
+
+After the user edits a sector deck by hand in PowerPoint (a new row, longer text),
+
+run `uv run ../report_common/reflow.py --report "<edited.pptx>" --output "<fixed.pptx>"`
+
+(`scripts/report_common/reflow.py` in a standalone bundle). It restores row heights,
+
+«#» numbering and table stacking in a new file and names any slide whose tables
+
+now pass the footer.
+
+## When space is tight
+
+Space never stops the run. The sector detail tables paginate at their normal 11 pt size: when a table does not fit under the one above it, its rows continue on the next slide, in the same design, with the title and header row repeated and the «#» numbering carried on. A single row taller than a slide takes a slide of its own and is named in the notices.
+
+The summaries in the consolidated deck may arrive with compact cell margins, at a shared reduced size (down to 10 pt by default, the digital summary down to 8 pt) or with a table moved to an appendix slide (see «When space is tight» in the consolidated skill). The splitter is not affected. It reads the support requests, the Suhail updates and the challenges by their table title and the «القطاع» column from every slide that carries them, appendix slides included, and it takes tasks and projects from the detail slides. The appendix slides themselves are not carried into the sector decks; each sector deck paginates its own tables. It copies the text and ignores the font size, so every sector table is rebuilt at 11 pt, measured again and paginated on its own.
+
+The skill does not wait for an answer. It builds with the default above, and in the same reply that delivers the decks it reads `manifest.json.notices.json` and repeats every notice: what did not fit, what default was applied. It then asks whether the user wants one of the alternatives, so he can ask for a rebuild: shorter wording of the long cells in the Excel source, then a new consolidated deck and a new split, or a new consolidated deck built with `--summary-min-pt` (a larger minimum size) or `--summary-overflow appendix` (11 pt with the overflow on an appendix slide). If the user had already stated a preference, it is used.
 
 ## Deck structure per sector
 
@@ -166,6 +216,8 @@ Table order — this sequence matters, it's how the report is read:
 
 - Tasks: المتأخرة → المعلقة → المكتملة → على المخطط → طلبات الدعم
 - Projects: أبرز التحديثات → التحديات → المتأخرة → على المخطط → لم تبدأ → المكتملة
+
+A task or project whose status is not one of those above (the consolidated deck keeps such a status as written on a gray fill) is never dropped. It gets its own table after the listed ones, titled with the status text as written, for example «المهام (قيد المراجعة)» or «المشاريع (حالة جديدة)». Task tables of this kind use the dated layout (task, planned date, notes), project tables keep the status column on the neutral gray fill. The «إجمالي» card counts these records, and a notice names the status. `qa_report.py` checks these tables like the others.
 
 ### Formatting أبرز التحديثات
 
@@ -203,7 +255,9 @@ agency gets two half-empty reports. When a legacy name has no clear counterpart
 
 (e.g. `وكالة الوزارة للخدمات المشتركة`), keep it as its own sector, and when the
 
-mapping is genuinely ambiguous, ask rather than guess. Add whatever you settle on
+mapping is genuinely ambiguous, do not stop: keep the name as its own sector, say
+
+so in the final reply and ask which agency it belongs to. Add whatever is settled
 
 to the aliases file so next week runs clean.
 
@@ -310,7 +364,7 @@ Acceptance: no output table contains a sector column; delayed and on-plan task t
 
 Every generated PowerPoint table must have native RTL table direction, including support, project status, transactions and continuation tables. Right-aligned Arabic text alone is insufficient. Keep numbering at the right and preserve field content, column widths and merged titles when converting an LTR source pattern. QA must reject any table without RTL enabled.
 
-Apply to every summary/detail/status table, including patterns cloned from the bundled master or a supplied 10 pt report. All table text must be **11 pt**: titles, column headers, body, status, notes and empty-cell defaults. This is the explicit exception to preserving the source's font size/alignment.
+Apply to every summary/detail/status table, including patterns cloned from the bundled master or a supplied 10 pt report. All table text must be **11 pt**: titles, column headers, body, status, notes and empty-cell defaults. This is the explicit exception to preserving the source's font size/alignment. The same pass writes a fixed line spacing of 1.2 times the font size (13.2 pt at 11 pt) into every table paragraph, and row heights are measured at that spacing.
 
 Apply horizontal alignment to the column headers and body paragraphs:
 

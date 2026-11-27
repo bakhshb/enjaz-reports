@@ -56,13 +56,9 @@ fifth:
 | متأخر، متاخر، المتأخر، متأخرة | متأخر |
 | معلق، معلقة | معلق |
 
-If a status shows up that isn't covered here, stop and surface it to the
+If a status shows up that isn't covered here, the script does not stop. It places the task by the wording of the status (a status that contains «متأخر» is delayed, «مكتمل/منجز» completed, «معلق/متوقف» suspended), falls back to `على المخطط` when no wording matches, and reports the value, the Excel row and the category it chose. Tell the user in the final reply so they can correct the source; never drop the task.
 
-user instead of forcing it into one of the four buckets — this mirrors the
-
-original spec's "لا تخمّن التصنيف" rule. `build_report.py` already does this:
-
-it exits with the unmapped value(s) named rather than producing a file.
+The script stops only when it cannot build the workbook at all (a missing file, sheet or required column). Everything else is a best assumption that it reports: each one is printed as «تنبيه: …» and saved in `<output>.notices.json` next to the workbook. Read that file after every run and repeat every notice to the user in the final reply; do not stop and wait for an answer.
 
 A status category with zero matching tasks still gets its line in the general
 
@@ -196,11 +192,11 @@ them separate and let the user confirm.
     
     Arabic-Indic digits). The shared `report_common/dates.py` does this. A date
     
-    it cannot read, a Hijri date for example, stops the script with the Excel
-    
-    row number and the value; ask the user for the right date. An empty date
-    
-    stays empty.
+    it cannot read, a Hijri date for example, does not stop the script: the cell
+
+    keeps the text as written and a notice names the Excel row and the value, so
+
+    the user can correct it. An empty date stays empty.
     
 - **No formulas.** The numbers are computed once in Python directly from the
     
@@ -255,9 +251,11 @@ source list, and two cross-check confirmations (sector counts sum to the
 
 totals; source-group counts sum to the total). Read that output before
 
-replying — if it exits with a missing-column or unmapped-status message,
+replying. If it exits with a missing-column message, relay that to the user
 
-relay that to the user rather than trying to patch around it silently.
+rather than trying to patch around it silently. An unmapped status does not
+
+exit: the script places the task and writes a notice, which you repeat.
 
 ## Final verification before delivering
 
@@ -278,6 +276,8 @@ relay that to the user rather than trying to patch around it silently.
     
     distinct tasks can coincidentally share wording).
     
+
+Read `<output>.notices.json` and repeat every notice in the final reply.
 
 Then hand the user only the file plus, if relevant, one short note on data
 

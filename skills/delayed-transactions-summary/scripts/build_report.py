@@ -37,7 +37,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, HERE)
-from report_common.dates import DateError, date_parts, report_date
+from report_common import notices
 
 CTRL = dict.fromkeys(
     map(ord, "\u202a\u202b\u202c\u202d\u202e\u200e\u200f\u061c"), None
@@ -49,6 +49,9 @@ STATUS_MAP = {
     "متأخر": "متأخرة", "متاخر": "متأخرة", "متأخرة": "متأخرة", "المتأخر": "متأخرة",
 }
 CATEGORIES = ["مكتملة", "على المخطط", "متأخرة"]
+# Canonical category -> this report's label, for a status the map does not list.
+KNOWN_STATUS = {"مكتملة": "مكتملة", "على المخطط": "على المخطط", "متأخر": "متأخرة"}
+UNKNOWN_STATUS_DEFAULT = "على المخطط"
 SECTOR_HEADERS = ["مكتملة", "على المخطط", "متأخر"]
 
 COL = {"status": 19, "planned": 23, "source": 26, "created": 27,
@@ -64,14 +67,10 @@ def clean(value):
     return re.sub(r"\s+", " ", str(value).translate(CTRL).strip())
 
 def norm_date(value, where):
-    """dd-mm-yyyy text plus a (year, month, day) sort key; Hijri dates are normal here."""
-    try:
-        parts = date_parts(value, hijri=True)
-    except DateError:
-        sys.exit(f"Unreadable date in {where}: {clean(value)}")
-    if parts is None:
-        return "", (9999, 99, 99)
-    return report_date(value, hijri=True), parts
+    """dd-mm-yyyy text plus a (year, month, day) sort key; Hijri dates are normal here.
+
+    An unreadable date is kept as written, sorted last and reported."""
+    return notices.tolerant_date_parts(None if pd.isna(value) else value, where, hijri=True)
 
 def read_files(input_dir):
     paths = sorted(
@@ -81,7 +80,7 @@ def read_files(input_dir):
     if not paths:
         sys.exit(f"No .xls/.xlsx files found in {input_dir}")
 
-    rows, unmapped, sectors = [], set(), []
+    rows, sectors = [], []
     for path in paths:
         sheet = pd.read_excel(path, header=None, dtype=object)
         header = None
@@ -105,10 +104,11 @@ def read_files(input_dir):
             if not number:
                 continue
             raw_status = clean(row[COL["status"]])
+            where = f"{os.path.basename(path)} الصف {index + 1}"
             status = STATUS_MAP.get(raw_status)
             if status is None:
-                unmapped.add(raw_status)
-            where = f"{os.path.basename(path)} row {index + 1}"
+                # One unknown status does not stop the report: it is placed by its wording and reported.
+                status = notices.guess_status(raw_status, KNOWN_STATUS, UNKNOWN_STATUS_DEFAULT, where)
             created, _ = norm_date(row[COL["created"]], where)
             planned, planned_key = norm_date(row[COL["planned"]], where)
             rows.append({
@@ -128,7 +128,7 @@ def read_files(input_dir):
     # Keep the schema when every valid sector export contains zero records.
     columns = ["num", "subject", "sector", "source", "created", "planned",
                "plan_key", "status", "raw_status"]
-    return pd.DataFrame(rows, columns=columns), unmapped, len(paths), sorted(sectors)
+    return pd.DataFrame(rows, columns=columns), len(paths), sorted(sectors)
 
 def style_cell(cell, *, bold=False, color="000000", fill=None,
                align="right", wrap=False, border=None):
@@ -311,19 +311,20 @@ def main():
                         help="count each transaction number once")
     args = parser.parse_args()
 
-    df, unmapped, n_files, sectors = read_files(args.input_dir)
+    notices.reset()
+    notices.clear_stale(args.output)
+    df, n_files, sectors = read_files(args.input_dir)
     duplicate_records = len(df) - df.num.nunique()
     print(f"\nraw records: {len(df)} | unique numbers: {df.num.nunique()}"
           f" | duplicate records: {duplicate_records}")
-    if unmapped:
-        sys.exit(f"Unmapped status values, stop and ask the user: {sorted(unmapped)}")
     if args.dedupe:
         conflicts = df.groupby("num").agg(statuses=("status", "nunique"),
                                            sectors=("sector", "nunique"))
         ambiguous = conflicts[(conflicts.statuses > 1) | (conflicts.sectors > 1)]
         if not ambiguous.empty:
-            sys.exit("Conflicting duplicate transaction numbers need a dedupe decision: "
-                     + ", ".join(ambiguous.index.astype(str)))
+            # The first record of each number is kept, as for every duplicate; the conflict is reported.
+            notices.warn("أرقام معاملات مكررة بحالة أو قطاع مختلف، أبقيت أول سجل لكل رقم: "
+                         + "، ".join(ambiguous.index.astype(str)), "source")
         df = df.drop_duplicates(subset="num", keep="first")
 
     output_dir = os.path.dirname(os.path.abspath(args.output))
@@ -342,6 +343,7 @@ def main():
         if not verify(candidate, len(delayed), len(sectors)):
             sys.exit("Workbook verification failed; output was not published")
         os.replace(candidate, args.output)
+        notices.save(args.output)
         print("saved: " + args.output)
     finally:
         if os.path.exists(candidate):

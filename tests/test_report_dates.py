@@ -5,6 +5,7 @@
 """Every report date comes out as dd-mm-yyyy whatever form the export used."""
 
 import datetime as dt
+import json
 import re
 import sys
 import tempfile
@@ -87,16 +88,22 @@ class BuilderDateTests(unittest.TestCase):
             self.assert_all_report_dates([r[2] for r in rows], len(MIXED))
             self.assert_all_report_dates([r[3] for r in rows], len(MIXED))
 
-    def test_suhail_stops_on_unreadable_date(self):
+    def assert_notice(self, output, *fragments):
+        """One unreadable date does not stop a skill: the value is kept and a notice names it."""
+        found = json.loads(Path(str(output) + '.notices.json').read_text(encoding='utf-8'))
+        self.assertTrue(any(n['kind'] == 'date' and all(f in n['message'] for f in fragments) for n in found), found)
+
+    def test_suhail_keeps_and_reports_an_unreadable_date(self):
         with tempfile.TemporaryDirectory() as td:
             source, output = Path(td) / 'source.xlsx', Path(td) / 'out.xlsx'
             suhail_source(source, 'على المخطط')
             wb = load_workbook(source); wb.active.cell(2, 4).value = '15/03/1448'; wb.save(source)
             result = run(SUHAIL, source, output)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('row 2', result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn('15/03/1448', result.stderr)
-            self.assertFalse(output.exists())
+            self.assert_notice(output, 'الصف 2', '15/03/1448')
+            detail = load_workbook(output)['تفاصيل مشاريع سهيل']
+            self.assertIn('15/03/1448', [c.value for row in detail for c in row])
 
     def test_task_planned_dates(self):
         with tempfile.TemporaryDirectory() as td:
@@ -113,7 +120,7 @@ class BuilderDateTests(unittest.TestCase):
             dates = [r[3] for r in detail.iter_rows(values_only=True) if r[1] and str(r[1]).startswith('مهمة ')]
             self.assert_all_report_dates(dates, len(MIXED))
 
-    def test_task_stops_on_unreadable_date(self):
+    def test_task_keeps_and_reports_an_unreadable_date(self):
         with tempfile.TemporaryDirectory() as td:
             source, output = Path(td) / 'source.xlsx', Path(td) / 'out.xlsx'
             task_source(source, support=False)
@@ -121,10 +128,11 @@ class BuilderDateTests(unittest.TestCase):
             ws.append(['مهمة ثانية', 'وكالة شؤون الحج', 'اجتماع القيادات', 'قريبا', 'مكتمل', ''])
             wb.save(source)
             result = run(TASKS, '--input', source, '--output', output)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('3', result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn('قريبا', result.stderr)
-            self.assertFalse(output.exists())
+            self.assert_notice(output, 'الصف 3', 'قريبا')
+            detail = load_workbook(output)['تفاصيل المهام']
+            self.assertIn('قريبا', [c.value for row in detail for c in row])
 
     def test_transaction_dates(self):
         hijri = [('15/3/1448', '15-03-1448'), ('1448-03-16', '16-03-1448')]
@@ -151,17 +159,17 @@ class BuilderDateTests(unittest.TestCase):
                     self.assertRegex(value, DD_MM_YYYY)
                 self.assertEqual(sorted(values), expected)
 
-    def test_transaction_stops_on_unreadable_date(self):
+    def test_transaction_keeps_and_reports_an_unreadable_date(self):
         with tempfile.TemporaryDirectory() as td:
             input_dir, output = Path(td) / 'input', Path(td) / 'out.xlsx'
             input_dir.mkdir()
             transaction_source(input_dir / 'one.xlsx')
             wb = load_workbook(input_dir / 'one.xlsx'); wb.active.cell(5, 24).value = 'قريبا'; wb.save(input_dir / 'one.xlsx')
             result = run(TRANSACTIONS, '--input-dir', input_dir, '--output', output)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('one.xlsx row 5', result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
             self.assertIn('قريبا', result.stderr)
-            self.assertFalse(output.exists())
+            self.assert_notice(output, 'one.xlsx الصف 5', 'قريبا')
+            self.assertIn('قريبا', [c.value for row in load_workbook(output).active for c in row])
 
 
 class SectorTransactionMatchTests(unittest.TestCase):
@@ -189,9 +197,17 @@ class SectorTransactionMatchTests(unittest.TestCase):
             splitter.attach_transaction_sectors(trans, str(final))
             self.assertEqual([t['sector'] for t in trans], ['وكالة شؤون الحج', 'وكالة شؤون العمرة'])
 
-            trans = [{'head': head, 'row': ['1', '4471', 'طلب تصريح', 'إمارة منطقة مكة', '06-03-2026', '11-12-2026']}]
-            with self.assertRaisesRegex(ValueError, 'does not match'):
-                splitter.attach_transaction_sectors(trans, str(final))
+            # A transaction that matches no Excel row is left out and reported; the split goes on.
+            splitter.notices.reset()
+            trans = [{'head': head, 'row': ['1', '4471', 'طلب تصريح', 'إمارة منطقة مكة', '06-03-2026', '11-12-2026']},
+                     {'head': head, 'row': ['2', '4472', 'طلب آخر', 'جهة أخرى', '15-03-1448', '16-03-1448']}]
+            placed = splitter.attach_transaction_sectors(trans, str(final))
+            self.assertEqual([t['sector'] for t in placed], ['وكالة شؤون العمرة'])
+            self.assertTrue(any(n['kind'] == 'source' and '4471' in n['message'] for n in splitter.notices.collected()))
+            # Without the workbook the transactions are left out of the sector decks, with one notice.
+            splitter.notices.reset()
+            self.assertEqual(splitter.attach_transaction_sectors(trans, None), [])
+            self.assertEqual(len(splitter.notices.collected()), 1)
 
 
 if __name__ == '__main__':
