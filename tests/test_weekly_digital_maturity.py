@@ -331,6 +331,14 @@ class DigitalMaturityTests(unittest.TestCase):
         self.assertTrue(any('عنوان قسم بلا سجلات' in m for m in messages), messages)
         self.build()
 
+    def place_alone(self, prs, slide, shape, measured, sizes=None):
+        """The digital summary planned on its own, the way `populate` does it (the weekly build plans all four together)."""
+        margin = digital.compact_margin(prs)
+        candidate = digital.summary_candidate(prs, slide, shape, measured, margin)
+        plan = digital.plan_summaries([candidate], 'shrink', *digital.floors(None))
+        digital.announce_plan(plan, {digital.SUMMARY_LABELS[3]: digital._label(prs, slide)})
+        return digital.place_summary(prs, slide, shape, candidate, plan, sizes, margin)
+
     def test_squeeze_notice_names_the_slide(self):
         self.load()
         prs = Presentation(digital.MASTER)
@@ -340,7 +348,7 @@ class DigitalMaturityTests(unittest.TestCase):
         for row in list(shape.table.rows)[:2]:
             row.height = free
         digital.notices.reset()
-        digital._fit_summary(prs, slide, shape, {'summary': [50] * (len(shape.table.rows) - 2), 'summary_sizes': {}}, [])
+        self.place_alone(prs, slide, shape, {'summary': [50] * (len(shape.table.rows) - 2), 'summary_compact': {}})
         number = list(prs.slides).index(slide) + 1
         self.assertTrue(any(f'الشريحة {number}' in n['message'] for n in digital.notices.collected()))
 
@@ -353,9 +361,9 @@ class DigitalMaturityTests(unittest.TestCase):
         free = digital.content_bottom(prs, slide) - shape.top
         for row in list(shape.table.rows)[:2]:
             row.height = free
-        measured = {'summary': [50] * (len(shape.table.rows) - 2), 'summary_sizes': {}}
+        measured = {'summary': [50] * (len(shape.table.rows) - 2), 'summary_compact': {}}
         digital.notices.reset()
-        digital._fit_summary(prs, slide, shape, measured, [])
+        self.place_alone(prs, slide, shape, measured)
         self.assertTrue(all(row.height > 0 for row in shape.table.rows))
         self.assertTrue(any(n['kind'] == 'space' for n in digital.notices.collected()))
 
@@ -443,17 +451,21 @@ class DigitalMaturityTests(unittest.TestCase):
         shape = next(sh for sh in digital.digital_slide(prs).shapes if sh.has_table and len(sh.table.columns) == 3)
         room = digital.content_bottom(prs, digital.digital_slide(prs)) - shape.top
         tall = room / 6 / 12700  # pt: six rows alone fill the space at 11 pt
-        measured = {'summary': [tall] * 6, 'summary_sizes': {'9': [tall * .6] * 6},
+        measured = {'summary': [tall] * 6, 'summary_compact': {'9': [tall * .6] * 6},
                     'sectors': {s['title']: {'rows': [20] * len(s['rows']), 'updates': [20] * len(s['updates']),
                                              'challenges': [20] * len(s['challenges'])} for s in data['detail_sectors']}}
         sizes = []
         digital.populate(prs, data, measured, sizes)
         shape = next(sh for sh in digital.digital_slide(prs).shapes if sh.has_table and len(sh.table.columns) == 3)
-        self.assertEqual([(s.shape_id, size) for s, size in sizes], [(shape.shape_id, 9)])
+        margin = digital.compact_margin(prs)
+        # Sizes without a measurement fall back to the bound, so the table lands at the largest size that fits: below 11, with compact margins.
+        self.assertEqual([s.shape_id for s, _, _ in sizes], [shape.shape_id])
+        (_, size, used), = sizes
+        self.assertTrue(8 <= size < 11)
+        self.assertEqual(used, margin)
         self.assertLessEqual(shape.top + shape.height, digital.content_bottom(prs, digital.digital_slide(prs)))
-        measured['summary'] = measured['summary_sizes']['9'] = [tall * 3] * 6
-        for key in [k for k in measured['summary_sizes']]:
-            measured['summary_sizes'][key] = [tall * 3] * 6
+        measured['summary'] = [tall * 3] * 6
+        measured['summary_compact'] = {key: [tall * 3] * 6 for key in ('11', '10.5', '10', '9.5', '9', '8.5', '8')}
         # Even the smallest size does not fit: the build goes on and asks for shorter updates.
         digital.notices.reset()
         prs = Presentation(digital.MASTER)
@@ -461,8 +473,8 @@ class DigitalMaturityTests(unittest.TestCase):
         digital.populate(prs, data, measured, sizes)
         shape = digital.summary_table_shape(digital.digital_slide(prs))
         self.assertLessEqual(shape.top + shape.height, digital.content_bottom(prs, digital.digital_slide(prs)))
-        self.assertIn((shape.shape_id, 8), [(s.shape_id, size) for s, size in sizes])
-        self.assertTrue(any(n['kind'] == 'space' and 'اختصر' in n['message'] for n in digital.notices.collected()))
+        self.assertIn((shape.shape_id, 8, margin), [(s.shape_id, size, used) for s, size, used in sizes])
+        self.assertTrue(any(n['kind'] == 'space' and 'اختصار التحديثات' in n['message'] for n in digital.notices.collected()))
 
     def test_source_pagination_artifacts_rejected(self):
         self.data['detail_sectors'][0]['title'] += ' (1/3)'

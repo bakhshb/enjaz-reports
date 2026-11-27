@@ -157,6 +157,12 @@ class ConsolidatedMeasurementTests(unittest.TestCase):
             data=json.loads(layout.read_text(encoding='utf-8'))
             self.assertEqual(data['typography'],'11pt-suhail-paragraph-updates-v3')
             self.assertTrue(data['tables'])
+            # Summary tables carry rows measured with the compact margins at every summary size, 11 included.
+            summaries=[entry for entry in data['tables'].values() if 'compact' in entry]
+            self.assertTrue(summaries)
+            for entry in summaries:
+                self.assertEqual(set(entry['compact']),{'11','10.5','10','9.5','9','8.5','8'})
+                for rows in entry['compact'].values():self.assertEqual(len(rows),len(entry['body']))
             result=run(WEEKLY/'build_report.py',*inputs,'--measurements',layout,'--output',root/'measured.pptx')
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             self.assertLessEqual(len(Presentation(root/'measured.pptx').slides),len(Presentation(root/'weekly.pptx').slides))
@@ -186,7 +192,7 @@ class DigitalMeasurementTests(unittest.TestCase):
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
             data=json.loads((root/'d0.layout.json').read_text(encoding='utf-8'))
             self.assertEqual(len(data['digital']['summary']),6)
-            self.assertEqual(set(data['digital']['summary_sizes']),{'10.5','10','9.5','9','8.5','8'})
+            self.assertEqual(set(data['digital']['summary_compact']),{'11','10.5','10','9.5','9','8.5','8'})
             sectors=master_sectors()
             self.assertEqual(sorted(data['digital']['sectors']),sorted(s['title'] for s in sectors))
             for sector in sectors:

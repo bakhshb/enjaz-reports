@@ -37,7 +37,7 @@
 
 ## Table font size acceptance
 
-Every visible table run must be 11 pt, including title/header rows, blank-cell defaults, statuses, notes and the Monday agenda. Verify generated PPTX content, not only the template or instructions. The weekly read-only gate rejects a 10 pt run; the Monday gate normalizes ordinary cells and validates status cells against 11 pt approved styles. Preserve other formatting and recheck rendered row heights, clipping and pagination at 11 pt. Previous 10 pt layout measurements must be regenerated.
+Every visible table run must be 11 pt, including title/header rows, blank-cell defaults, statuses, notes and the Monday agenda. Verify generated PPTX content, not only the template or instructions. The weekly read-only gate rejects a 10 pt run; the Monday gate normalizes ordinary cells and validates status cells against 11 pt approved styles. Preserve other formatting and recheck rendered row heights, clipping and pagination at 11 pt. Previous 10 pt layout measurements must be regenerated. The one exception is the summary tables, which look the same on all summary slides. Their body cells may carry the compact margins (and no other margin change is accepted). All summary tables must agree on margins, and a summary table below 11 pt must have the compact margins. The three non-digital summary slides (tasks, Suhail, transactions) use one size, down to 10 pt by default, and the digital summary table is at most that size (down to 8 pt). Detail tables and appendix slides stay at 11 pt with the template margins.
 
 ## Table column alignment
 

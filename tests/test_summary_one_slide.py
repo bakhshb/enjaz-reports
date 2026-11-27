@@ -4,9 +4,12 @@
 # ///
 """Each summary stays on one slide (user request, 26-11-2026).
 
-With measurements, summary tables that do not fit at 11 pt shrink on their own
-slide, down to 8 pt. Beyond that the build does not stop: the rows that do not
-fit move to an appendix slide and a notice says so (user request, 26-11-2026).
+With measurements, summary tables that do not fit at 11 pt with the template
+margins take the compact margins and shrink on their own slide, down to 10 pt
+(8 pt for the digital summary only; see test_summary_shared_look.py for the
+rule shared by all four summaries, 27-11-2026). Beyond the floor the build does
+not stop: the tables that do not fit move whole to an appendix slide at 11 pt
+and a notice says so (user request, 26-11-2026).
 """
 import sys
 import unittest
@@ -32,13 +35,14 @@ def sections(slide, count):
             for p in patterns]
 
 
-def measurements(prs, slide, rows, body_pt, smaller=None):
+def measurements(prs, slide, rows, body_pt, compact=None):
+    """Layout-file entries: `body_pt` is the 11 pt row height with template margins, `compact` maps a size key to the row height with compact margins."""
     bottom = weekly.content_bottom(prs, slide)
     out = {}
     for title, records, pattern in sections(slide, rows):
         entry = {'header': [h / PT for h in weekly.header_heights(pattern)], 'body': [body_pt] * len(records)}
-        if smaller:
-            entry['sizes'] = {k: [v] * len(records) for k, v in smaller.items()}
+        if compact:
+            entry['compact'] = {k: [v] * len(records) for k, v in compact.items()}
         out[title] = entry
     return out
 
@@ -49,11 +53,12 @@ class SummaryOneSlideTests(unittest.TestCase):
         self.slide = self.prs.slides[1]
 
     def test_overflow_shrinks_on_the_same_slide(self):
+        # Fits only at 10 pt with the compact margins (rows of 25 pt there).
         before = len(self.prs.slides)
         data = sections(self.slide, 3)
         sizes = []
         targets = weekly.flow(self.prs, self.slide, data, True,
-                              measurements(self.prs, self.slide, 3, 90, {'9': 25, '8': 20}), sizes=sizes)
+                              measurements(self.prs, self.slide, 3, 90, {'11': 80, '10.5': 60, '10': 25}), sizes=sizes)
         self.assertEqual(targets, [self.slide])
         self.assertEqual(len(self.prs.slides), before)
         tables = sorted(weekly.builder.tables(self.slide), key=lambda sh: sh.top)
@@ -61,8 +66,9 @@ class SummaryOneSlideTests(unittest.TestCase):
         self.assertLessEqual(tables[-1].top + tables[-1].height, weekly.content_bottom(self.prs, self.slide))
         self.assertTrue(all(a.top + a.height < b.top for a, b in zip(tables, tables[1:])))
         self.assertTrue(sizes)
-        self.assertEqual({size for _, size in sizes}, {9})
-        # Body rows use the heights measured at that size.
+        margin = weekly.compact_margin(self.prs)
+        self.assertEqual({(size, used) for _, size, used in sizes}, {(10, margin)})
+        # Body rows use the heights measured at that size with the compact margins (the caller applies the margins to the cells, `sizes` carries them).
         self.assertEqual(tables[0].table.rows[2].height, 25 * PT)
 
     def test_fitting_summary_keeps_11_pt(self):
@@ -71,12 +77,16 @@ class SummaryOneSlideTests(unittest.TestCase):
                     measurements(self.prs, self.slide, 1, 30), sizes=sizes)
         self.assertEqual(sizes, [])
 
-    def test_too_long_even_at_8_pt_moves_the_overflow_to_an_appendix(self):
+    def test_too_long_even_at_the_floor_moves_whole_tables_to_an_appendix(self):
         notices.reset()
         data = sections(self.slide, 4)
         sizes = []
-        targets = weekly.flow(self.prs, self.slide, data, True,
-                              measurements(self.prs, self.slide, 4, 400, {str(s): 300 for s in SUMMARY_SIZES[1:]}), sizes=sizes)
+        measured = measurements(self.prs, self.slide, 4, 400, {str(s): 300 for s in SUMMARY_SIZES})
+        # The first table is short and stays on the summary slide; every other one is too tall and moves.
+        first = measured[data[0][0]]
+        first['body'] = [20] * 4
+        first['compact'] = {str(s): [20] * 4 for s in SUMMARY_SIZES}
+        targets = weekly.flow(self.prs, self.slide, data, True, measured, sizes=sizes)
         self.assertGreater(len(targets), 1)
         self.assertTrue(any(n['kind'] == 'space' and 'ملحق' in n['message'] for n in notices.collected()))
         placed = [row.cells[0].text for sl in targets for sh in sorted(weekly.builder.tables(sl), key=lambda s: s.top)
@@ -87,11 +97,14 @@ class SummaryOneSlideTests(unittest.TestCase):
             tables = sorted(weekly.builder.tables(sl), key=lambda sh: sh.top)
             self.assertTrue(all(sh.top + sh.height <= bottom for sh in tables))
             self.assertTrue(all(a.top + a.height < b.top for a, b in zip(tables, tables[1:])))
-        # Only the summary slide itself holds shrunk tables; the appendix is at 11 pt.
-        shrunk = {sh.shape_id for sh, _ in sizes}
+        # Only the summary slide itself holds changed tables (compact, at the floor of 10); the appendix is at 11 pt with template margins.
+        shrunk = {sh.shape_id for sh, _, _ in sizes}
         self.assertTrue(shrunk)
         self.assertEqual(shrunk, {sh.shape_id for sh in weekly.builder.tables(self.slide)})
-        self.assertEqual({size for _, size in sizes}, {SUMMARY_SIZES[-1]})
+        self.assertEqual({size for _, size, _ in sizes}, {10})
+        for sl in targets[1:]:
+            for sh in weekly.builder.tables(sl):
+                self.assertNotIn(sh.shape_id, shrunk)
 
     def test_appendix_moves_whole_tables_never_a_cut_one(self):
         # Each table alone fits a slide, but not all of them on the summary slide.
@@ -99,7 +112,7 @@ class SummaryOneSlideTests(unittest.TestCase):
         data = sections(self.slide, 5)
         sizes = []
         targets = weekly.flow(self.prs, self.slide, data, True,
-                              measurements(self.prs, self.slide, 5, 50, {str(s): 45 for s in SUMMARY_SIZES[1:]}), sizes=sizes)
+                              measurements(self.prs, self.slide, 5, 50, {str(s): 45 for s in SUMMARY_SIZES}), sizes=sizes)
         self.assertGreater(len(targets), 1)
         seen = {}
         for sl in targets:
@@ -117,7 +130,7 @@ class SummaryOneSlideTests(unittest.TestCase):
         notices.reset()
         data = sections(self.slide, 4)
         targets = weekly.flow(self.prs, self.slide, data, True,
-                              measurements(self.prs, self.slide, 4, 400, {str(s): 300 for s in SUMMARY_SIZES[1:]}), sizes=[])
+                              measurements(self.prs, self.slide, 4, 400, {str(s): 300 for s in SUMMARY_SIZES}), sizes=[])
         for sl in targets[1:]:
             for sh in weekly.builder.tables(sl):
                 self.assertIn('#', [c.text.strip() for c in sh.table.rows[1].cells])
@@ -127,23 +140,34 @@ class SummaryOneSlideTests(unittest.TestCase):
         notices.reset()
         sizes = []
         targets = weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
-                              measurements(self.prs, self.slide, 3, 90, {'9': 25, '8': 20}), sizes=sizes, overflow='appendix')
+                              measurements(self.prs, self.slide, 3, 90, {'11': 80, '10.5': 60, '10': 25}), sizes=sizes, overflow='appendix')
         self.assertGreater(len(targets), 1)
-        self.assertEqual(sizes, [])
+        # The tables kept on the summary slide take the compact margins but stay at 11 pt.
+        self.assertEqual({size for _, size, _ in sizes}, {11})
         self.assertTrue(any('ملحق' in n['message'] for n in notices.collected()))
 
     def test_minimum_size_is_respected(self):
+        # Only 9 pt fits, but the floor is 10: nothing goes below it, the tables move to an appendix instead.
         notices.reset()
         sizes = []
-        weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
-                    measurements(self.prs, self.slide, 3, 90, {'9': 25, '8': 20}), sizes=sizes, min_pt=10)
-        self.assertTrue(all(size >= 10 for _, size in sizes))
+        targets = weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
+                              measurements(self.prs, self.slide, 3, 90, {'11': 80, '10': 60, '9': 25, '8': 20}), sizes=sizes, min_pt=10)
+        self.assertTrue(all(size >= 10 for _, size, _ in sizes))
+        self.assertGreater(len(targets), 1)
+
+    def test_an_explicit_floor_allows_smaller(self):
+        notices.reset()
+        sizes = []
+        targets = weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
+                              measurements(self.prs, self.slide, 3, 90, {'11': 80, '10': 60, '9': 25, '8': 20}), sizes=sizes, min_pt=9)
+        self.assertEqual(targets, [self.slide])
+        self.assertEqual({size for _, size, _ in sizes}, {9})
 
     def test_shrinking_is_reported(self):
         notices.reset()
         weekly.flow(self.prs, self.slide, sections(self.slide, 3), True,
-                    measurements(self.prs, self.slide, 3, 90, {'9': 25, '8': 20}), sizes=[])
-        self.assertTrue(any(n['kind'] == 'space' and 'صغرت' in n['message'] for n in notices.collected()))
+                    measurements(self.prs, self.slide, 3, 90, {'11': 80, '10.5': 60, '10': 25}), sizes=[])
+        self.assertTrue(any(n['kind'] == 'space' and 'تصغير الخط إلى 10' in n['message'] for n in notices.collected()))
 
     def test_stale_table_measurement_falls_back_to_the_estimate(self):
         notices.reset()

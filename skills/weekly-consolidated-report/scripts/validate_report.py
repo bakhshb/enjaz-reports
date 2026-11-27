@@ -18,7 +18,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from report_common import pptx_helpers as helpers, validation, status_styles
 from report_common.pptx_helpers import content_bottom
-from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, SUMMARY_SIZES, task_source, NEUTRAL_STATUS
+from weekly_data import MASTER, approved_styles, transaction_data, field_key, TRANS_FIELDS, summary_columns, SUMMARY_SIZES, task_source, NEUTRAL_STATUS, compact_margin
 
 from update_format import update_parts, display_text
 from report_common.update_format import SUMMARY_UPDATE_TITLES, update_column, check_update
@@ -51,15 +51,22 @@ def reference_row(pattern,ri,row,structural):
     body=list(pattern.rows)[2:]
     return next((r for r in body if r.cells[0].span_width==row.cells[0].span_width),body[0])
 
-def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT):
-    """Column widths, margins and fonts against the approved pattern (layout findings)."""
+def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT,compact=None):
+    """Column widths, margins and fonts against the approved pattern (layout findings).
+
+    `compact` is the one margin a summary table may give all four sides of its
+    body cells instead of the pattern's; the title and header rows never may.
+    """
     if [c.width for c in table.columns]!=[c.width for c in pattern.columns]:errors.append('Table column widths changed')
     for ri,row in enumerate(table.rows):
         reference=reference_row(pattern,ri,row,structural)
         for ci,cell in enumerate(row.cells):
             base=reference.cells[ci]
             is_status=len(table.columns)==6 and ri>=2 and ci==4
-            if not is_status and (cell.margin_left,cell.margin_right,cell.margin_top,cell.margin_bottom)!=(base.margin_left,base.margin_right,base.margin_top,base.margin_bottom):errors.append('Table cell margins changed')
+            margins=(cell.margin_left,cell.margin_right,cell.margin_top,cell.margin_bottom)
+            allowed=[(base.margin_left,base.margin_right,base.margin_top,base.margin_bottom)]
+            if compact is not None and ri>=2:allowed.append((compact,)*4)
+            if not is_status and margins not in allowed:errors.append('Table cell margins changed')
             # Family and script font come from the template; the size is checked on its own.
             face=lambda run:(font_signature(run)[0],font_signature(run)[2])
             fonts={face(run) for p in base.text_frame.paragraphs for run in p.runs if run.text.strip()}
@@ -70,6 +77,41 @@ def check_table_style(table,pattern,errors,structural=False,size=TABLE_PT):
                 for run in p.runs:
                     if run.text.strip() and (run.font.size is None or run.font.size.pt!=size):errors.append(f'Table font size must be {size:g} pt')
                     if run.text.strip() and face(run) not in fonts:errors.append('Table font differs from weekly template: '+run.text[:25])
+
+def margin_state(table,pattern,compact):
+    """How the body cells of a summary table are set: 'template', 'compact', 'both' (the two are the same here) or 'mixed'."""
+    on_compact=on_template=True
+    for ri,row in enumerate(table.rows):
+        if ri<2:continue
+        for ci,cell in enumerate(row.cells):
+            base=reference_row(pattern,ri,row,False).cells[ci]
+            got=(cell.margin_left,cell.margin_right,cell.margin_top,cell.margin_bottom)
+            on_compact&=got==(compact,)*4
+            on_template&=got==(base.margin_left,base.margin_right,base.margin_top,base.margin_bottom)
+    return 'both' if on_compact and on_template else 'compact' if on_compact else 'template' if on_template else 'mixed'
+
+def single_size(table):
+    """The one text size `table` uses, or None when it uses several (the typography check reports that)."""
+    used={run.font.size.pt for row in table.rows for cell in row.cells for p in cell.text_frame.paragraphs
+          for run in p.runs if run.text.strip() and run.font.size is not None}
+    return used.pop() if len(used)==1 else None
+
+def check_summary_look(entries,errors):
+    """The summaries share one look. `entries` holds ``(slide number, is digital, margin state, size)`` per summary table.
+
+    All tables take the template margins or all take the compact ones; a table
+    below 11 pt has the compact ones; the three standard summaries use one size;
+    the digital summary is no larger than it.
+    """
+    states={state for _,_,state,_ in entries}-{'both'}
+    if 'mixed' in states or len(states)>1:errors.append('Summary tables differ in cell margins')
+    for number,_,state,size in entries:
+        if size is not None and size<11 and state not in ('compact','both'):
+            errors.append(f'Summary table below 11 pt keeps the template cell margins on slide {number}')
+    standard={size for _,digital,_,size in entries if not digital and size is not None}
+    if len(standard)>1:errors.append('Standard summary tables use different font sizes')
+    elif standard and any(size is not None and size>max(standard) for _,digital,_,size in entries if digital):
+        errors.append('Digital summary table is larger than the shared summary size')
 
 def check_navigation(prs,errors):
     slides=list(prs.slides)
@@ -131,6 +173,10 @@ _ARABIC_FINDINGS=(
     (r'^Digital-maturity .*$',r'شرائح النضج الرقمي: ملاحظة في التنسيق أو الترتيب؛ راجعها على الشريحة'),
     (r'^Table column widths changed$',r'تغير عرض أعمدة جدول عن القالب'),
     (r'^Table cell margins changed$',r'تغيرت هوامش خلايا جدول عن القالب'),
+    (r'^Summary tables differ in cell margins$',r'جداول الملخص لا تتفق في هوامش الخلايا؛ المطلوب هوامش القالب في كلها أو الهوامش المقلصة في كلها'),
+    (r'^Summary table below 11 pt keeps the template cell margins on slide (\d+)$',r'الشريحة \1: جدول ملخص بخط أصغر من 11 بقيت هوامشه كما في القالب؛ المطلوب هوامش مقلصة'),
+    (r'^Standard summary tables use different font sizes$',r'جداول ملخص المهام وسهيل والمعاملات بأحجام خط مختلفة؛ المطلوب حجم واحد لها كلها'),
+    (r'^Digital summary table is larger than the shared summary size$',r'خط جدول ملخص التجربة الرقمية أكبر من الحجم المشترك لباقي الملخصات'),
     (r'^Table font size must be (\S+) pt$',r'حجم خط جدول يخالف المعتمد (\1)'),
     (r'^Table font differs from weekly template.*$',r'خط نص في جدول يخالف خط القالب'),
     (r'^Table text must use .*$',r'نص في جدول لا يستخدم خط الجداول المعتمد'),
@@ -164,10 +210,15 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
     errors=[];soft=[];validation.package(report,errors)
     final=Presentation(report);master=Presentation(template);set_table_sizes(master)
     set_table_directions(master)
-    # A summary keeps its one slide by shrinking its table text (never by a continuation slide).
+    # A summary keeps its one slide by shrinking its table text and, when any summary needs it, taking the compact cell margins (never by a continuation slide).
     reduced={sh.table._tbl:SUMMARY_SIZES for sl in final.slides if any(x.has_chart for x in sl.shapes)
              for sh in sl.shapes if sh.has_table}
     check_table_typography(final,soft,reduced=reduced)
+    # The cell margins a summary table may take instead of the template's: the compact ones of the detail tables.
+    compact=compact_margin(master)
+    summary_tables={sh.table._tbl for sl in final.slides if any(x.has_chart for x in sl.shapes) and not is_digital_detail(sl)
+                    for sh in sl.shapes if sh.has_table}
+    look=[]
     if (final.slide_width,final.slide_height)!=(master.slide_width,master.slide_height):soft.append('Slide dimensions changed')
     tk,tc,ts,td=helpers.task_data(tasks);pk,pc,ps,pd=helpers.suhail_data(suhail);xk,xc,xd=transaction_data(transactions)
     styles={kind:approved_styles(master,kind) for kind in ('task','project')}
@@ -269,7 +320,9 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
                 summaries[title].extend([[row[columns.index(i)] for i in range(4)] for row in rows[2:]])
                 if title in SUMMARY_UPDATE_TITLES:update_cells[title].extend(row.cells[update_column(table)] for row in list(table.rows)[2:])
             else:errors.append('Unexpected table: '+title);continue
-            check_table_style(table,pattern,soft,size=expected_size(table,reduced))
+            is_summary=table._tbl in summary_tables
+            check_table_style(table,pattern,soft,size=expected_size(table,reduced),compact=compact if is_summary else None)
+            if is_summary:look.append((helpers.slide_index(final,sl)+1,len(table.columns)==3,margin_state(table,pattern,compact),single_size(table)))
     for kind,sections in expected_sections.items():
         expected=[]
         for section,records in sections:
@@ -296,6 +349,7 @@ def validate(report,tasks,suhail,transactions,template=MASTER,model='standard',d
             records=[[*row[:3],display_text(exact(row[3]))] for row in records]
         compare(title,records,summaries[title],errors)
     compare('transactions',[[row[i] for i in (0,1,3,4,5)] for row in xd],trans,errors)
+    check_summary_look(look,soft)
     # Summary records remain independently sourced; match identities without inventing notes.
     for title,status in [('المهام المكتملة','مكتملة'),('المهام المتأخرة','متأخر'),('المهام المعلقة','معلق'),('المشاريع المتأخرة','متأخر')]:
         project=title=='المشاريع المتأخرة';sections=pd if project else td

@@ -11,6 +11,7 @@ every best assumption it makes is written to ``<output>.notices.json`` for the
 final reply. Rendered layout review remains required.
 """
 import argparse, copy, datetime as dt, json, math, subprocess, sys, tempfile, zipfile
+from collections import namedtuple
 from copy import deepcopy
 from pathlib import Path
 from pptx import Presentation
@@ -27,7 +28,7 @@ from report_common import header_heights as shared_heights
 from report_common.header_heights import MIN_ROW_HEIGHT
 from report_common.table_typography import set_table_sizes, set_table_directions, apply_table
 from report_common.package_tools import reachable_parts
-from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, TABLE_GAP, emu, fit_summary, measured_rows, scaled_height, SUMMARY_SIZES, COVER_DATE_ID, TASK_DETAIL_TITLE, NEUTRAL_STATUS, SUMMARY_LABELS
+from weekly_data import transaction_data, field_key, MASTER, MASTER_HASH, approved_styles, set_cell_exact, summary_columns, TABLE_GAP, emu, measured_rows, scaled_height, body_insets, compact_margin, set_body_margins, Summary, plan_summaries, announce_plan, floors, COVER_DATE_ID, TASK_DETAIL_TITLE, NEUTRAL_STATUS, SUMMARY_LABELS
 
 from update_format import format_update
 from report_common.update_format import format_table_updates
@@ -64,19 +65,57 @@ def usable_measurement(title,measured,records):
 
 
 
+Prepared=namedtuple('Prepared','title records pattern header body measured at')
+
+def prepare(prs,seed,sections,measurements=None,margin=None):
+    """Header and body heights of each titled table, before anything is placed.
+
+    A table whose measurement is missing or stale (a notice says so) takes the
+    estimated heights. `margin` is the compact cell margin the summaries may
+    take; it only matters for the bound used when the layout file has no
+    compact measurements.
+    """
+    items=[]
+    for title,records,pattern in sections:
+        if not records:continue
+        measured=usable_measurement(title,measurements.get(title),records) if measurements is not None else None
+        header=[emu(h) for h in measured['header']] if measured else header_heights(pattern)
+        base=builder._body_base_height(pattern.table,2)
+        body=[emu(h) for h in measured['body']] if measured else [base*builder.row_units(row,pattern.table,11) for row in records]
+        insets=body_insets(pattern.table)
+        at=measured_rows(body,(measured or {}).get('compact',{}),insets,None if margin is None else 2*margin)
+        items.append(Prepared(title,records,pattern,header,body,bool(measured),at))
+    return items
+
+def summary_candidate(items,label,room):
+    """One summary as `plan_summaries` sees it: its prepared tables and the room (EMU) under its indicators and chart."""
+    return Summary(label,[(item.header,item.at) for item in items],room)
+
+def moved_names(titles):
+    """«جدول «X»» for one table, «الجداول («X»، «Y»)» for several."""
+    names='، '.join(f'«{t}»' for t in titles)
+    return f'جدول {names}' if len(titles)==1 else f'الجداول ({names})'
+
+def moved_whole(titles):
+    """`moved_names` with «كاملا» for one table and «كاملة» for several."""
+    return f'{moved_names(titles)} '+('كاملا' if len(titles)==1 else 'كاملة')
+
 def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,sizes=None,
-         overflow='shrink',min_pt=SUMMARY_SIZES[-1],label=None):
+         overflow='shrink',min_pt=None,label=None,plan=None,prepared=None,margin=None):
     """Lay out titled tables from the top of `seed` down to the footer.
 
     Detail tables continue on copies of `seed`. A summary built with
-    measurements stays on its one slide: when its 11 pt tables do not fit, the
-    table text shrinks to the largest size, not below `min_pt`, whose measured
-    rows fit, and `sizes` records each shrunk table so the size survives the
-    final typography pass. When even `min_pt` does not fit, or when `overflow`
-    is ``appendix``, the rows that do not fit move to an appendix slide after
-    the summary at 11 pt. Every such decision is recorded as a notice; the
-    build never stops for lack of space. Without measurements the placement is
-    provisional and only feeds the measurement.
+    measurements stays on its one slide at the margins and size `plan` decided
+    for all summaries together (see `plan_summaries`; without a `plan` this
+    summary is planned alone). `sizes` records every placed summary table whose
+    look differs from the template, as ``(shape, size, margin)`` (margin None
+    for the template's), so it survives the final typography pass. A summary
+    that does not fit even then keeps the tables that fit whole and moves every
+    other table, whole, to an appendix slide after it at 11 pt with the template
+    margins; a notice says which. The build never stops for lack of space.
+    Without measurements the placement is provisional and only feeds the
+    measurement. `prepared` is the result of `prepare` when the caller already
+    has it.
     """
     seed._element.set('showMasterSp','1')
     patterns={builder.table_title(sh):sh for sh in builder.tables(seed)}
@@ -93,7 +132,18 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,siz
     # Summary continuations (provisional pass and appendix) start under the header buttons.
     start=SUMMARY_CONTINUATION_TOP if summary else top
     for sh in list(builder.tables(seed)):remove(sh)
-    def place(title,pattern,chunk,row_heights,size=11):
+    if summary and measurements is not None and margin is None:margin=compact_margin(prs)
+    items=prepared if prepared is not None else prepare(prs,seed,sections,measurements,margin)
+    fitted=summary and measurements is not None
+    compact=False;first_size=11;moved=[]
+    if fitted and items:
+        if plan is None:
+            floor,digital_floor=floors(min_pt)
+            plan=plan_summaries([summary_candidate(items,label,bottom-top)],overflow,floor,digital_floor)
+            announce_plan(plan)
+        compact=plan.compact;first_size=plan.size
+    look=margin if compact else None
+    def place(title,pattern,chunk,row_heights,size=11,shown=False):
         nonlocal y
         sh=place_table_copy(current,pattern._element);sh.top=y
         builder.fill_titled_table(sh,chunk,title=title)
@@ -104,57 +154,43 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,siz
         for row,height in zip(sh.table.rows,row_heights):row.height=height
         sh.height=sum(row.height for row in sh.table.rows)
         y+=sh.height+TABLE_GAP
-        if size!=11 and sizes is not None:sizes.append((sh,size))
+        if shown and (size!=11 or compact) and sizes is not None:sizes.append((sh,size,look))
+        if current is not seed and title not in moved:moved.append(title)
         return sh
-    prepared=[]
-    for title,records,pattern in sections:
-        if not records:continue
-        measured=usable_measurement(title,measurements.get(title),records) if measurements is not None else None
-        header=[emu(h) for h in measured['header']] if measured else header_heights(pattern)
-        base=builder._body_base_height(pattern.table,2)
-        body=[emu(h) for h in measured['body']] if measured else [base*builder.row_units(row,pattern.table,11) for row in records]
-        at=measured_rows(body,(measured or {}).get('sizes',{}))
-        prepared.append((title,records,pattern,header,body,bool(measured),at))
-    fitted=summary and measurements is not None
-    first_size=11
-    if fitted and prepared:
-        # One slide per summary: every table below the indicators and chart, at
-        # the largest size (11 pt first) whose measured rows fit.
-        allowed=tuple(s for s in SUMMARY_SIZES if s>=min_pt) or (SUMMARY_SIZES[0],)
-        names='، '.join(p[0] for p in prepared)
-        if overflow=='appendix':
-            found=fit_summary([(p[3],p[6]) for p in prepared],bottom-top,sizes=(11,))
-            if found is None:
-                notices.warn(f'{label}: الجداول ({names}) لا تتسع في شريحة الملخص بخط 11، فنقلت كل جدول لا يتسع كاملا إلى شريحة ملحق بعدها كما طُلب، دون قطع جدول.','space')
-        else:
-            found=fit_summary([(p[3],p[6]) for p in prepared],bottom-top,sizes=allowed)
-            if found is None:
-                first_size=allowed[-1]
-                notices.warn(f'{label}: الجداول ({names}) لا تتسع في شريحة واحدة حتى بخط {first_size:g}، فأبقيت في الشريحة الجداول التي تتسع كاملة بهذا الخط ونقلت كل جدول لا يتسع كاملا إلى شريحة ملحق بعدها بخط 11 دون قطعه. '
-                             'البديل: اختصار صياغة الخلايا الطويلة ثم إعادة البناء.','space')
-            elif found[0]!=11:
-                notices.warn(f'{label}: صغرت خط الجداول ({names}) إلى {found[0]:g} لتبقى في شريحة واحدة. '
-                             'البدائل: اختصار الصياغة، أو نقل الزائد إلى شريحة ملحق (--summary-overflow appendix)، أو رفع الحد الأدنى للخط (--summary-min-pt).','space')
-        if found is not None:
-            size,heights=found
-            for (title,records,pattern,*_),row_heights in zip(prepared,heights):
-                place(title,pattern,records,row_heights,size)
-            return targets
-    for title,records,pattern,header,body,measured,at in prepared:
+    if fitted and items and plan.fits.get(label,True):
+        # One slide per summary: every table below the indicators and chart.
+        for item,fixed in zip(items,[[scaled_height(h,first_size) for h in item.header] for item in items]):
+            place(item.title,item.pattern,item.records,fixed+item.at(first_size,compact),first_size,True)
+        return targets
+    if fitted and items:
+        # Keep every table that fits whole under the ones already kept on the summary slide;
+        # the others are deferred, in order, to appendix slides that start fresh.
+        deferred=[]
+        for item in items:
+            fixed=[scaled_height(h,first_size) for h in item.header]
+            heights=item.at(first_size,compact)
+            if y+sum(fixed)+sum(heights)<=bottom:place(item.title,item.pattern,item.records,fixed+heights,first_size,True)
+            else:deferred.append(item)
+        items=deferred
+        if items:
+            current=builder.clone_slide(prs,seed,after=current,shape_predicate=keep)
+            targets.append(current);y=start
+    for title,records,pattern,header,body,measured,at in items:
         chunk=[];chunk_heights=[]
-        def rows_at(size):
-            return [scaled_height(h,size) for h in header],at(size)
-        # Only the summary slide itself may hold shrunk rows; an appendix is at 11 pt.
-        page_size=first_size if current is seed else 11
-        fixed,heights=rows_at(page_size) if fitted else (header,body)
+        def rows_at(size,is_compact):
+            return [scaled_height(h,size) for h in header],at(size,is_compact)
+        # Only the summary slide itself may hold shrunk rows; an appendix is at 11 pt with the template margins.
+        on_summary=lambda:current is seed
+        page_size=first_size if on_summary() else 11
+        fixed,heights=rows_at(page_size,compact and on_summary()) if fitted else (header,body)
         index=0
         if summary:
             # A summary table is never cut: when it does not fit under the tables above it,
             # the whole table moves to a fresh slide (the appendix). Only a table taller than
             # a whole slide is split below, and then its header rows repeat on each part.
             if y+sum(fixed)+sum(heights)<=bottom:
-                place(title,pattern,records,fixed+heights,page_size);continue
-            fixed11,heights11=rows_at(11) if fitted else (header,body)
+                place(title,pattern,records,fixed+heights,page_size,on_summary());continue
+            fixed11,heights11=rows_at(11,False) if fitted else (header,body)
             if sum(fixed11)+sum(heights11)<=bottom-start:
                 current=builder.clone_slide(prs,seed,after=current,shape_predicate=keep)
                 targets.append(current);y=start
@@ -173,15 +209,22 @@ def flow(prs,seed,sections,summary=False,measurements=None,bullet_style=None,siz
                 if measured:notices.warn(f'سجل في «{title}» أطول من مساحة شريحة كاملة؛ وضعته في شريحة بمفرده وقد يتجاوز النص حدها. اختصر نصه أو قسّمه.','space')
                 height=max(room,MIN_ROW_HEIGHT)
             if y+sum(fixed)+sum(chunk_heights)+height>bottom and (chunk or y>(top if current is seed else start)):
-                if chunk:place(title,pattern,chunk,fixed+chunk_heights,page_size)
+                if chunk:place(title,pattern,chunk,fixed+chunk_heights,page_size,on_summary())
                 current=builder.clone_slide(prs,seed,after=current,shape_predicate=keep)
                 targets.append(current);y=start
                 chunk=[];chunk_heights=[]
                 page_size=11
-                fixed,heights=rows_at(11) if fitted else (header,body)
+                fixed,heights=rows_at(11,False) if fitted else (header,body)
                 continue
             chunk.append(records[index]);chunk_heights.append(height);index+=1
-        if chunk:place(title,pattern,chunk,fixed+chunk_heights,page_size)
+        if chunk:place(title,pattern,chunk,fixed+chunk_heights,page_size,on_summary())
+    if fitted and moved:
+        if overflow=='appendix':
+            notices.warn(f'{label}: لم تتسع الجداول في الشريحة بخط 11 بعد تقليص الهوامش. تم نقل {moved_whole(moved)} إلى شريحة ملحق بعدها حسب الطلب. المقترح: اختصار النص في الملف.','space')
+        elif first_size==11:
+            notices.warn(f'{label}: لم تتسع الجداول في الشريحة بخط 11 بعد تقليص الهوامش. تم نقل {moved_whole(moved)} إلى شريحة ملحق بعدها. المقترح: اختصار النص في الملف.','space')
+        else:
+            notices.warn(f'{label}: لم تتسع الجداول في الشريحة بعد تقليص الهوامش وتصغير الخط إلى {first_size:g}. تم نقل {moved_whole(moved)} إلى شريحة ملحق بعدها بخط 11. المقترح: اختصار النص في الملف.','space')
     return targets
 
 DIGIT_WIDTH=320040  # one 36 pt bold Abar digit plus its share of the box insets (0.35 in)
@@ -284,9 +327,10 @@ def build_candidate(args):
             measurements=None;digital_measurements=None;args.measurements=None  # the build is then provisional
     tk,tc,ts,td=builder.task_data(tasks);pk,pc,ps,pd=builder.suhail_data(projects);xk,xc,xd=transaction_data(transactions)
     prs=Presentation(template);set_table_sizes(prs);slides=list(prs.slides)
+    margin=compact_margin(prs)
     if digital_data is not None:
         from digital_maturity import populate
-        populate(prs,digital_data,digital_measurements,sizes,min_pt=args.summary_min_pt)
+        populate(prs,digital_data,digital_measurements,sizes,margin=margin,deferred=True)
     # Discover roles first; IDs are checked within the identified summary role.
     summary=[builder.find_slide_with_text(prs,label) for label in ('إجمالي المهام','إجمالي مشاريع سهيل','إجمالي المعاملات')]
     task_patterns=builder.detail_pattern_slides(prs,'task')
@@ -309,7 +353,11 @@ def build_candidate(args):
             box=builder.shape_by_id(sl,sid);builder.set_text(box,value);fit_number(box)
         ordered=update_chart(next(sh for sh in sl.shapes if sh.has_chart),records,statuses)
         chart_specs.append((chart_name,ordered,statuses))
+    # Margins and sizes of the four summaries are decided together, so first every
+    # summary is prepared with its measured heights, then the plan is made, then they are placed.
     space=dict(overflow=args.summary_overflow,min_pt=args.summary_min_pt)
+    floor,digital_floor=floors(args.summary_min_pt)
+    jobs=[]
     for sl,sections in [(summary[0],ts),(summary[1],ps)]:
         # Map source header order to the approved template header order.
         seq=[]
@@ -318,11 +366,28 @@ def build_candidate(args):
             headers=[c.text.strip() for c in pattern.table.rows[1].cells]
             columns=summary_columns(title,headers,sl==summary[0])
             seq.append((title,[[row[i] for i in columns] for row in records],pattern))
-        flow(prs,sl,seq,True,measurements,bullet_style,sizes,label=SUMMARY_LABELS[0 if sl==summary[0] else 1],**space)
+        jobs.append((sl,seq,bullet_style,SUMMARY_LABELS[0 if sl==summary[0] else 1]))
     tframe=next(sh for sh in builder.tables(summary[2]))
     headings=[field_key(c.text) for c in tframe.table.rows[1].cells]
     xheaders=[field_key(s) for s in ['رقم المعاملة','موضوع المعاملة','القطاع','الجهة الوارد منها المعاملة','تاريخ إنشاء المعاملة','تاريخ الإنجاز المخطط']]
-    flow(prs,summary[2],[(TRANSACTION_TITLE,[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],True,measurements,sizes=sizes,label=SUMMARY_LABELS[2],**space)
+    jobs.append((summary[2],[(TRANSACTION_TITLE,[[row[xheaders.index(h)] for h in headings] for row in xd],tframe)],None,SUMMARY_LABELS[2]))
+    prepared=[prepare(prs,sl,seq,measurements,margin) for sl,seq,_,_ in jobs]
+    candidates=[summary_candidate(items,job[3],content_bottom(prs,job[0])-min(sh.top for sh in builder.tables(job[0])))
+                  for job,items in zip(jobs,prepared)]
+    if digital_data is not None:
+        from digital_maturity import summary_candidate as digital_candidate, digital_slide, summary_table_shape, place_summary
+        digital_shape=summary_table_shape(digital_slide(prs))
+        digital_summary=digital_candidate(prs,digital_slide(prs),digital_shape,digital_measurements,margin)
+        candidates.append(digital_summary)
+    plan=plan_summaries(candidates,args.summary_overflow,floor,digital_floor) if measurements is not None else None
+    for (sl,seq,style,label),items in zip(jobs,prepared):
+        flow(prs,sl,seq,True,measurements,style,sizes,label=label,plan=plan,prepared=items,margin=margin,**space)
+    shown=None
+    if digital_data is not None:
+        # Placed last: its slide number is final once the appendix slides of the other summaries exist.
+        shown=place_summary(prs,digital_slide(prs),digital_shape,digital_summary,plan,sizes,margin)
+    if plan is not None:
+        announce_plan(plan,{SUMMARY_LABELS[3]:shown} if shown else None)
     generated={};unused=[]
     for kind,patterns,sections in [('task',task_patterns,td),('project',project_patterns,pd)]:
         seed=patterns[0];pattern=builder.detail_tables(seed,kind)[0]
@@ -363,8 +428,10 @@ def build_candidate(args):
                 for t in sh._element.findall('.//'+qn('a:t')):t.text=str(i)
     prepare_navigation(prs)
     set_table_sizes(prs)
-    # Summary tables that had to shrink to stay on their one slide keep that size.
-    for shape,size in sizes:apply_table(shape.table,size)
+    # Summary tables that had to shrink to stay on their one slide keep that size and their compact margins.
+    for shape,size,cell_margin in sizes:
+        apply_table(shape.table,size)
+        if cell_margin is not None:set_body_margins(shape.table,cell_margin)
     set_table_directions(prs)
     deck=Path(args.output);prs.save(deck)
     prune_package(deck)
@@ -415,9 +482,9 @@ def parse_args(argv=None):
     parser.add_argument('--measurements',help='Native row heights from a rendered candidate with these exact inputs')
     parser.add_argument('--measure',action='store_true',help='Delivery path: build, measure every row through LibreOffice, rebuild with the measured heights')
     parser.add_argument('--summary-overflow',choices=('shrink','appendix'),default='shrink',
-                        help='A summary that does not fit its slide: shrink its table text (default), or keep 11 pt and move the overflow to an appendix slide')
-    parser.add_argument('--summary-min-pt',type=float,default=SUMMARY_SIZES[-1],
-                        help='Smallest summary table text when shrinking (default 8); past it the overflow moves to an appendix slide')
+                        help='A summary that does not fit its slide: reduce the cell margins of all summary tables and shrink the text of the three standard summaries together (default), or keep 11 pt, reduce the margins and move the overflow to an appendix slide')
+    parser.add_argument('--summary-min-pt',type=float,default=None,
+                        help='Smallest summary table text when shrinking, for all four summaries (default 10 for the three standard summaries, shared; 8 for the digital summary alone); past it the overflow moves to an appendix slide')
     return parser.parse_args(argv)
 
 def measure_candidate(args,temporary,bundled):

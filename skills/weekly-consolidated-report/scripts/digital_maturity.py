@@ -33,7 +33,8 @@ from report_common import notices, wording, pptx_helpers as helpers
 from report_common.validation import sha
 from report_common.pptx_helpers import content_bottom
 from report_common.header_heights import MIN_ROW_HEIGHT
-from weekly_data import set_cell_exact, TABLE_GAP, emu, fit_summary, measured_rows, scaled_height, SUMMARY_SIZES, SUMMARY_LABELS
+from weekly_data import (set_cell_exact, TABLE_GAP, emu, measured_rows, scaled_height, body_insets, compact_margin,
+                         Summary, plan_summaries, announce_plan, floors, SUMMARY_SIZES, SUMMARY_LABELS)
 from weekly_artwork import place_table_copy, is_digital_detail, is_digital_detail_table
 from report_common.table_typography import set_table_directions, set_font
 
@@ -1021,7 +1022,7 @@ def _fill_challenge_table(slide, pattern, top, note, sizes=None):
         for row in list(table.rows)[:2]:
             row.height = scaled_height(row.height, size)
         if sizes is not None:
-            sizes.append((shape, size))
+            sizes.append((shape, size, None))
     for index, (challenge, height) in enumerate(zip(items, heights), 1):
         row = _append_row(table, pattern.challenge_body)
         set_cell_exact(row.cells[0], str(index))
@@ -1071,14 +1072,33 @@ def populate_details(prs, data, measured=None, sizes=None):
         helpers.remove_slide(prs, slide)
 
 
-def populate(prs, data, measured=None, sizes=None, min_pt=SUMMARY_SIZES[-1]):
+def populate(prs, data, measured=None, sizes=None, min_pt=None, margin=None, deferred=False):
     """Fill the digital summary and detail slides.
 
     ``measured`` is the ``digital`` part of a LibreOffice layout file; with it
     the summary «أبرز التحديثات» table gets its measured row heights and, when
-    needed, smaller text so the summary stays on its one slide (recorded in
-    ``sizes`` as ``(shape, size)``).
+    needed, the compact margins and smaller text so the summary stays on its one
+    slide (recorded in ``sizes`` as ``(shape, size, margin)``, margin None for
+    the template's). The table is planned alone here; the weekly build, which
+    plans all four summaries together, passes ``deferred`` and calls
+    `place_summary` itself once the deck-wide decision is made.
     """
+    slide, shape = populate_summary(prs, data)
+    populate_details(prs, data, measured, sizes)
+    set_table_directions(prs)
+    if not deferred:
+        margin = compact_margin(prs) if margin is None else margin
+        candidate = summary_candidate(prs, slide, shape, measured, margin)
+        plan = None
+        if candidate.tables:
+            plan = plan_summaries([candidate], 'shrink', *floors(min_pt))
+            announce_plan(plan, {SUMMARY_LABELS[3]: _label(prs, slide)})
+        place_summary(prs, slide, shape, candidate, plan, sizes, margin)
+    return slide
+
+
+def populate_summary(prs, data):
+    """Everything on the digital summary slide except the final row heights and look of its table."""
     slide = digital_slide(prs)
     calculation_note(slide)
     for axis, (chart_id, label_id, track_id, fill_id) in CARDS.items():
@@ -1131,66 +1151,80 @@ def populate(prs, data, measured=None, sizes=None, min_pt=SUMMARY_SIZES[-1]):
         _bullet_lines(table.rows[index].cells[2])
     for row in list(table.rows)[2+len(data['updates']):]:
         row._tr.getparent().remove(row._tr)
-    _fit_summary(prs, slide, shape, measured, sizes, min_pt)
-    populate_details(prs, data, measured, sizes)
-    set_table_directions(prs)
-    return slide
+    return slide, shape
+
+
+def _label(prs, slide):
+    return f'{SUMMARY_LABELS[3]} (الشريحة {list(prs.slides).index(slide) + 1})'
+
+
+def summary_candidate(prs, slide, shape, measured, margin):
+    """The «أبرز التحديثات» table as `plan_summaries` sees it.
+
+    Its tables are empty (so it counts as fitting) when `measured` is None or
+    does not match the table's rows; a notice says so for the second case and
+    `place_summary` then shares the free space between the rows.
+    """
+    rows = list(shape.table.rows)
+    available = content_bottom(prs, slide) - shape.top
+    found = (measured or {}).get('summary', [])
+    if measured is not None and len(found) != len(rows) - 2:
+        notices.warn('قياس جدول «أبرز التحديثات» في ملخص التجربة الرقمية لا يطابق التحديثات المراجعة؛ وزعت المساحة المتاحة على صفوفه. أعد القياس قبل التسليم.', 'layout')
+        measured = None
+    if measured is None:
+        return Summary(SUMMARY_LABELS[3], [], available, True)
+    at = measured_rows([emu(height) for height in found], measured.get('summary_compact', {}),
+                       body_insets(shape.table), 2 * margin)
+    return Summary(SUMMARY_LABELS[3], [([row.height for row in rows[:2]], at)], available, True)
 
 
 # Smallest share of its measured height a squeezed summary row may keep.
 MIN_SQUEEZE = 0.1
 
 
-def _fit_summary(prs, slide, shape, measured, sizes, min_pt=SUMMARY_SIZES[-1]):
-    """Keep the «أبرز التحديثات» table above the footer of the summary slide.
+def place_summary(prs, slide, shape, candidate, plan, sizes=None, margin=None):
+    """Set the row heights and, with a `plan`, the size and margins of the «أبرز التحديثات» table.
 
-    The table shrinks like every summary, not below `min_pt`. When even that
-    does not fit, its rows are squeezed into the space left and a notice asks
-    for shorter updates; this slide has no appendix because its one table
-    belongs under the indicators. The squeeze stays because the slide, the
-    checks and the measurement all find it by its one 3-column table, so an
-    appendix would leave the summary slide without it; the notice names the
-    slide to check.
+    The table takes the plan's margins and its size: the shared size when it
+    fits there, else a smaller one for this table alone, and past the digital
+    floor its rows are squeezed into the space left with a notice asking for
+    shorter updates. This slide has no appendix because the table is the only
+    one under the indicators; the slide, the checks and the measurement all find
+    it by its one 3-column table. Returns the slide's label with its number.
     """
     table = shape.table
     rows = list(table.rows)
-    available = content_bottom(prs, slide) - shape.top
+    label = _label(prs, slide)
     fixed = [row.height for row in rows[:2]]
-    found = (measured or {}).get('summary', [])
-    if measured is not None and len(found) != len(rows) - 2:
-        notices.warn('قياس جدول «أبرز التحديثات» في ملخص التجربة الرقمية لا يطابق التحديثات المراجعة؛ وزعت المساحة المتاحة على صفوفه. أعد القياس قبل التسليم.', 'layout')
-        measured = None
-    if measured is None:
-        # Provisional: share the free space; the measurement sets the real heights.
+    size, compact = 11, False
+    if not candidate.tables:
+        # Provisional, or no usable measurement: share the free space; the measurement sets the real heights.
         body = [row.height for row in rows[2:]]
-        if sum(fixed + body) > available:
-            body = [max((available - sum(fixed)) // len(body), int(min(body) * MIN_SQUEEZE))] * len(body)
+        if sum(fixed + body) > candidate.available:
+            body = [max((candidate.available - sum(fixed)) // len(body), int(min(body) * MIN_SQUEEZE))] * len(body)
+        if plan is not None:
+            size, compact = plan.size, plan.compact
     else:
-        at = measured_rows([emu(height) for height in found], measured.get('summary_sizes', {}))
-        allowed = tuple(s for s in SUMMARY_SIZES if s >= min_pt) or (SUMMARY_SIZES[0],)
-        fitted = fit_summary([(fixed, at)], available, sizes=allowed)
-        label = f'{SUMMARY_LABELS[3]} (الشريحة {list(prs.slides).index(slide) + 1})'
-        if fitted is None:
-            size = allowed[-1]
-            fixed, body = [scaled_height(h, size) for h in fixed], at(size)
-            scale = (available - sum(fixed)) / sum(body)
+        (_, at), = candidate.tables
+        size, compact = plan.digital_size, plan.compact
+        fixed, body = [scaled_height(h, size) for h in fixed], at(size, compact)
+        if plan.squeeze:
+            scale = (candidate.available - sum(fixed)) / sum(body)
             if scale < MIN_SQUEEZE:
                 # The title and header rows alone fill the space: keep a readable minimum height
                 # and let the table run past the footer; the validator and the notice name the slide.
                 scale = MIN_SQUEEZE
-                notices.warn(f'{label}: لا تتسع حتى صفوف عنوان جدول «أبرز التحديثات» ورأسه في المساحة المتاحة؛ أبقيت للصفوف حدا أدنى من الارتفاع وقد يصل الجدول إلى التذييل. راجع هذه الشريحة وقصّر التحديثات.', 'space')
+                notices.warn(f'{label}: المساحة المتاحة لا تكفي حتى لعنوان جدول «أبرز التحديثات» ورأسه، وقد يصل الجدول إلى التذييل. المقترح: مراجعة هذه الشريحة واختصار التحديثات في ملف المراجعة.', 'space')
             body = [int(h * scale) for h in body]
-            notices.warn(f'{label}: جدول «أبرز التحديثات» لا يتسع تحت المؤشرات حتى بخط {size:g}؛ ضغطت صفوفه في المساحة المتاحة (يبقى الجدول في شريحته لأنه الجدول الوحيد فيها ولا تقوم الشريحة والفحوص بدونه)، وقد يُقص نصها أو يكبر الصف في باوربوينت. راجع هذه الشريحة، واختصر التحديثات في ملف المراجعة ثم أعد البناء.', 'space')
-        else:
-            size, (heights,) = fitted
-            fixed, body = heights[:2], heights[2:]
-            if size != 11:
-                notices.warn(f'{label}: صغرت خط جدول «أبرز التحديثات» إلى {size:g} ليبقى في شريحة واحدة. البديل: اختصار صياغة التحديثات في ملف المراجعة.', 'space')
-        if size != 11 and sizes is not None:
-            sizes.append((shape, size))
+            notices.warn(f'{label}: لم يتسع جدول «أبرز التحديثات» حتى بخط {size:g}. تم ضغط صفوفه في المساحة المتاحة، وقد لا يظهر نص الصفوف كاملا. المقترح: مراجعة هذه الشريحة واختصار التحديثات في ملف المراجعة.', 'space')
+        elif size != plan.size:
+            notices.warn(f'{label}: لم يتسع جدول «أبرز التحديثات» بخط {plan.size:g} بعد تقليص الهوامش. تم تصغير خط هذا الجدول وحده إلى {size:g}. المقترح: اختصار التحديثات في ملف المراجعة.', 'space')
+    if sizes is not None and (size != 11 or compact):
+        sizes.append((shape, size, margin if compact else None))
     for row, height in zip(rows, fixed + body):
         row.height = height
     shape.height = sum(row.height for row in table.rows)
+    return label
 
 
 def _slide_rows(table):

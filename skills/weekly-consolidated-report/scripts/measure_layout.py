@@ -25,12 +25,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from report_common.measure import measure_rows
 from report_common.validation import sha
 from weekly_artwork import is_digital_detail
-from weekly_data import MASTER, SUMMARY_SIZES, PT
+from weekly_data import MASTER, SUMMARY_SIZES, PT, size_key, compact_margin, set_body_margins
 from report_common.pptx_helpers import TASK_SUMMARY_TITLES, SUHAIL_SUMMARY_TITLES
 from report_common.table_typography import apply_table
 
-# Summary tables stay on their one slide; when they do not fit at 11 pt the
-# builder picks a smaller size, so their rows are measured at every size.
+# Summary tables stay on their one slide; when they do not fit at 11 pt with the
+# template margins the builder gives all of them the compact margins and may pick
+# a smaller size, so their rows are measured with the compact margins at every size.
 SUMMARY_TITLES = set(TASK_SUMMARY_TITLES) | set(SUHAIL_SUMMARY_TITLES) | {'المعاملات المتأخرة'}
 
 DIGITAL_MASTER = Path(__file__).resolve().parents[1] / 'assets/weekly-report-digital-master.pptx'
@@ -82,43 +83,49 @@ def measure(report, tasks, suhail, transactions, template=None, digital_pdf=None
     digital_summary = [(si, sh) for si, _, sh in digital if len(sh.table.columns) == 3]
     summary_targets = [(si, sid, rows) for title, si, sid, rows, *_ in order if title in SUMMARY_TITLES]
     summary_targets += [(si, sh.shape_id, range(2, len(sh.table.rows))) for si, sh in digital_summary]
-    smaller = measure_sizes(report, summary_targets)
+    compact = measure_compact(report, summary_targets, compact_margin(Presentation(template)))
     tables = {}
     for title, si, shape_id, rows, header, declared in order:
         entry = tables.setdefault(title, {'header': [h / PT for h in header], 'body': []})
         for row, fallback in zip(rows, declared):
             entry['body'].append(points(measured, si, shape_id, row, fallback))
             if title in SUMMARY_TITLES:
-                for size, found in smaller.items():
-                    entry.setdefault('sizes', {}).setdefault(size, []).append(points(found, si, shape_id, row, fallback))
+                for size, found in compact.items():
+                    entry.setdefault('compact', {}).setdefault(size, []).append(points(found, si, shape_id, row, fallback))
     if sha256(report) != hashes['report']:
         raise ValueError('Measuring changed the source presentation')
     result = {'typography': TYPOGRAPHY, 'hashes': hashes, 'tables': tables,
               'visualAcceptance': 'pending'}
     if digital_pdf:
         result['digital'] = digital_tables(digital, measured)
-        result['digital']['summary_sizes'] = {
+        result['digital']['summary_compact'] = {
             size: [points(found, si, sh.shape_id, r, sh.table.rows[r].height)
                    for si, sh in digital_summary for r in range(2, len(sh.table.rows))]
-            for size, found in smaller.items()}
+            for size, found in compact.items()}
     return result
 
 
-def measure_sizes(report, targets):
-    """Measure `targets` again with their tables set to each smaller summary size."""
+def measure_compact(report, targets, margin):
+    """Measure `targets` on a copy whose body cells really have the compact `margin`, at every summary size (11 included).
+
+    The compact margins widen the text area, so lines wrap differently than at
+    the template margins, and the bottom margin the measurement adds is the
+    compact one. Returns ``{size key: measured rows}``.
+    """
     import tempfile
     result = {}
     if not targets:
         return result
-    with tempfile.TemporaryDirectory(prefix='measure-sizes-') as temporary:
-        for size in SUMMARY_SIZES[1:]:
+    with tempfile.TemporaryDirectory(prefix='measure-compact-') as temporary:
+        for size in SUMMARY_SIZES:
             prs = Presentation(report)
             for si, shape_id, _ in targets:
                 shape = next(sh for sh in prs.slides[si].shapes if sh.shape_id == shape_id)
                 apply_table(shape.table, size)
-            copy = Path(temporary) / f'size-{size}.pptx'
+                set_body_margins(shape.table, margin)
+            copy = Path(temporary) / f'size-{size_key(size)}.pptx'
             prs.save(copy)
-            result[str(size)] = measure_rows(copy, targets)
+            result[size_key(size)] = measure_rows(copy, targets)
     return result
 
 
